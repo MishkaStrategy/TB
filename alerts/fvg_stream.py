@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 import aiohttp
 import certifi
 
+from config import FVG_DELIVERY_QUEUE_SIZE, MAX_ACTIVE_SYMBOLS
+
 
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
@@ -25,13 +27,26 @@ class BitunixFvgStream:
         self.reconnect_min = reconnect_min
         self.reconnect_max = reconnect_max
         self._stopping = False
-        self._delivery_queue = asyncio.Queue()
-        self._observed_event_ids: set[str] = set()
+        self._delivery_queue = asyncio.Queue(maxsize=FVG_DELIVERY_QUEUE_SIZE)
+        self._pending_event_ids: set[str] = set()
+
+    def _active_symbols(self) -> list[str]:
+        symbols = sorted(self.service.settings.active_symbols())
+        if len(symbols) > MAX_ACTIVE_SYMBOLS:
+            logger.error(
+                "Active symbol limit exceeded: configured=%s allowed=%s",
+                len(symbols),
+                MAX_ACTIVE_SYMBOLS,
+            )
+        return symbols[:MAX_ACTIVE_SYMBOLS]
 
     async def run(self, bot) -> None:
-        delivery_worker = asyncio.create_task(self._deliver_worker(bot))
+        delivery_worker = asyncio.create_task(
+            self._deliver_worker(bot),
+            name="fvg-delivery-worker",
+        )
         try:
-            await self._run_market(bot)
+            await self._run_market()
         finally:
             delivery_worker.cancel()
             await asyncio.gather(delivery_worker, return_exceptions=True)
@@ -39,9 +54,19 @@ class BitunixFvgStream:
     async def _deliver_worker(self, bot) -> None:
         while True:
             events = await self._delivery_queue.get()
+            event_ids = {event.event_id for event in events}
             try:
                 await self.service.deliver(bot, events)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                # A malformed preference or transient persistence failure must not
+                # permanently stop the only delivery worker.
+                logger.exception("Unexpected FVG delivery worker failure")
+                self.service.event_store.update_health(last_error=str(error))
+                self.service.event_store.increment_health("delivery_worker_failures")
             finally:
+                self._pending_event_ids.difference_update(event_ids)
                 self._delivery_queue.task_done()
 
     @staticmethod
@@ -51,18 +76,52 @@ class BitunixFvgStream:
             await asyncio.sleep(3)
 
     def _enqueue(self, events) -> None:
-        new_events = []
-        for event in events:
-            if event.event_id not in self._observed_event_ids:
-                self._observed_event_ids.add(event.event_id)
-                new_events.append(event)
-        if new_events:
-            self._delivery_queue.put_nowait(new_events)
+        new_events = [
+            event
+            for event in events
+            if event.event_id not in self._pending_event_ids
+        ]
+        if not new_events:
+            return
 
-    async def _run_market(self, bot) -> None:
+        event_ids = {event.event_id for event in new_events}
+        self._pending_event_ids.update(event_ids)
+        try:
+            self._delivery_queue.put_nowait(new_events)
+        except asyncio.QueueFull:
+            self._pending_event_ids.difference_update(event_ids)
+            logger.error(
+                "FVG delivery queue is full; dropped %s event(s)",
+                len(new_events),
+            )
+            self.service.event_store.increment_health(
+                "delivery_queue_drops",
+                len(new_events),
+            )
+
+    async def _recover_symbol(self, symbol: str, now: datetime | None = None) -> None:
+        try:
+            events = await asyncio.to_thread(self.service.recover, symbol, now)
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.warning("Bitunix recovery failed for %s: %s", symbol, error)
+            self.service.event_store.update_health(last_error=str(error))
+            self.service.event_store.increment_health("recovery_failures")
+        else:
+            self._enqueue(events)
+
+    @staticmethod
+    def _track_task(tasks: set[asyncio.Task], coroutine, name: str) -> asyncio.Task:
+        task = asyncio.create_task(coroutine, name=name)
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+        return task
+
+    async def _run_market(self) -> None:
         delay = self.reconnect_min
         while not self._stopping:
-            symbols = sorted(self.service.settings.active_symbols())
+            symbols = self._active_symbols()
             if not symbols:
                 await asyncio.sleep(5)
                 continue
@@ -71,7 +130,8 @@ class BitunixFvgStream:
                 ssl_context = ssl.create_default_context(cafile=certifi.where())
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.ws_connect(
-                        self.URL, ssl=ssl_context
+                        self.URL,
+                        ssl=ssl_context,
                     ) as ws:
                         args = [
                             {"symbol": symbol, "ch": channel}
@@ -81,36 +141,65 @@ class BitunixFvgStream:
                         await ws.send_json({"op": "subscribe", "args": args})
                         now = datetime.now(UTC)
                         self.service.event_store.update_health(
-                            ws_connected=True, subscribed_symbols=symbols,
-                            last_reconnect=now.isoformat(), last_error=None,
+                            ws_connected=True,
+                            subscribed_symbols=symbols,
+                            last_reconnect=now.isoformat(),
+                            last_error=None,
                         )
-                        for symbol in symbols:
-                            events = await asyncio.to_thread(self.service.recover, symbol, now)
-                            self._enqueue(events)
                         delay = self.reconnect_min
                         subscribed = set(symbols)
-                        ping_task = asyncio.create_task(self._ping(ws))
+                        connection_tasks: set[asyncio.Task] = set()
+                        ping_task = self._track_task(
+                            connection_tasks,
+                            self._ping(ws),
+                            "bitunix-ping",
+                        )
+                        for symbol in symbols:
+                            self._track_task(
+                                connection_tasks,
+                                self._recover_symbol(symbol, now),
+                                f"bitunix-recover-{symbol}",
+                            )
                         try:
                             while not self._stopping:
-                                current = set(self.service.settings.active_symbols())
-                                removed, added = subscribed - current, current - subscribed
+                                current = set(self._active_symbols())
+                                removed = subscribed - current
+                                added = current - subscribed
                                 if removed:
-                                    await ws.send_json({"op": "unsubscribe", "args": [
-                                        {"symbol": symbol, "ch": channel}
-                                        for symbol in sorted(removed)
-                                        for channel in ("market_kline_1min", "market_kline_15min")
-                                    ]})
+                                    await ws.send_json({
+                                        "op": "unsubscribe",
+                                        "args": [
+                                            {"symbol": symbol, "ch": channel}
+                                            for symbol in sorted(removed)
+                                            for channel in (
+                                                "market_kline_1min",
+                                                "market_kline_15min",
+                                            )
+                                        ],
+                                    })
                                 if added:
-                                    await ws.send_json({"op": "subscribe", "args": [
-                                        {"symbol": symbol, "ch": channel}
-                                        for symbol in sorted(added)
-                                        for channel in ("market_kline_1min", "market_kline_15min")
-                                    ]})
+                                    await ws.send_json({
+                                        "op": "subscribe",
+                                        "args": [
+                                            {"symbol": symbol, "ch": channel}
+                                            for symbol in sorted(added)
+                                            for channel in (
+                                                "market_kline_1min",
+                                                "market_kline_15min",
+                                            )
+                                        ],
+                                    })
                                     for symbol in sorted(added):
-                                        events = await asyncio.to_thread(self.service.recover, symbol)
-                                        self._enqueue(events)
-                                subscribed = current
-                                self.service.event_store.update_health(subscribed_symbols=sorted(subscribed))
+                                        self._track_task(
+                                            connection_tasks,
+                                            self._recover_symbol(symbol),
+                                            f"bitunix-recover-{symbol}",
+                                        )
+                                if removed or added:
+                                    subscribed = current
+                                    self.service.event_store.update_health(
+                                        subscribed_symbols=sorted(subscribed)
+                                    )
                                 try:
                                     message = await ws.receive(timeout=5)
                                 except asyncio.TimeoutError:
@@ -124,23 +213,44 @@ class BitunixFvgStream:
                                     raise ConnectionError("Bitunix WebSocket closed")
                                 if message.type != aiohttp.WSMsgType.TEXT:
                                     continue
-                                payload = json.loads(message.data)
-                                if payload.get("ch", "").startswith("market_kline_") and payload.get("data"):
+                                try:
+                                    payload = json.loads(message.data)
+                                except (json.JSONDecodeError, TypeError) as error:
+                                    logger.warning("Invalid Bitunix WebSocket JSON: %s", error)
+                                    self.service.event_store.increment_health("invalid_messages")
+                                    continue
+                                if (
+                                    payload.get("ch", "").startswith("market_kline_")
+                                    and payload.get("data")
+                                ):
                                     try:
                                         events = self.service.ingest_ws(payload)
                                     except (ValueError, KeyError, TypeError) as error:
-                                        logger.warning("Invalid Bitunix FVG WebSocket candle: %s", error)
-                                        self.service.event_store.increment_health("invalid_candles")
+                                        logger.warning(
+                                            "Invalid Bitunix FVG WebSocket candle: %s",
+                                            error,
+                                        )
+                                        self.service.event_store.increment_health(
+                                            "invalid_candles"
+                                        )
                                     else:
                                         self._enqueue(events)
                         finally:
                             ping_task.cancel()
-                            await asyncio.gather(ping_task, return_exceptions=True)
+                            for task in tuple(connection_tasks):
+                                task.cancel()
+                            await asyncio.gather(
+                                *connection_tasks,
+                                return_exceptions=True,
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception as error:
                 logger.warning("Bitunix FVG WebSocket disconnected: %s", error)
-                self.service.event_store.update_health(ws_connected=False, last_error=str(error))
+                self.service.event_store.update_health(
+                    ws_connected=False,
+                    last_error=str(error),
+                )
                 self.service.event_store.increment_health("reconnects")
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.reconnect_max)
