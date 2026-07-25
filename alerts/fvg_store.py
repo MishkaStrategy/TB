@@ -1,4 +1,4 @@
-"""Atomic JSON persistence for FVG preferences, events and deliveries."""
+"""Persistence facade for FVG preferences and event history."""
 
 from __future__ import annotations
 
@@ -6,21 +6,22 @@ import json
 import os
 import threading
 from copy import deepcopy
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from alerts.fvg_detector import price_allowed, size_allowed
 from alerts.fvg_models import FvgDirection, FvgEvent, FvgEventType
+from alerts.sqlite_event_store import FvgEventStore
 from config import MAX_ACTIVE_SYMBOLS, MAX_SYMBOLS_PER_USER
 
 
-UTC = timezone.utc
 _STORE_LOCKS: dict[str, threading.RLock] = {}
 _STORE_LOCKS_GUARD = threading.Lock()
 
 
 class AtomicJsonStore:
+    """Atomic JSON storage retained for low-frequency user preferences."""
+
     def __init__(self, path: str):
         self.path = Path(path)
         resolved = str(self.path.resolve())
@@ -32,9 +33,10 @@ class AtomicJsonStore:
             if not self.path.exists():
                 return {}
             try:
-                return json.loads(self.path.read_text(encoding="utf-8"))
+                value = json.loads(self.path.read_text(encoding="utf-8"))
             except (json.JSONDecodeError, OSError):
                 return {}
+            return value if isinstance(value, dict) else {}
 
     def write(self, data: dict) -> None:
         with self._lock:
@@ -85,16 +87,28 @@ def _user_defaults() -> dict:
     }
 
 
-def _parse_boundary(value, *, label: str, allow_zero: bool = True):
+def _parse_boundary(value, *, label: str):
     if value is None:
         return None
     try:
         parsed = Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError) as error:
         raise ValueError(f"Некорректная граница {label}") from error
-    if not parsed.is_finite() or parsed < 0 or (not allow_zero and parsed == 0):
-        raise ValueError(f"Граница {label} должна быть конечным положительным числом")
+    if not parsed.is_finite() or parsed < 0:
+        raise ValueError(
+            f"Граница {label} должна быть конечным неотрицательным числом"
+        )
     return parsed
+
+
+def _decimal(value):
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError):
+        # Filter helpers fail closed for non-finite values.
+        return Decimal("NaN")
 
 
 class FvgAlertSettings:
@@ -108,6 +122,7 @@ class FvgAlertSettings:
         raw = self.store.read()
         if raw.get("schema_version") == self.SCHEMA_VERSION:
             return raw
+
         users = {}
         known_ids = set(raw.get("enabled_chat_ids", [])) | set(
             raw.get("pre_enabled_chat_ids", [])
@@ -133,11 +148,12 @@ class FvgAlertSettings:
         data["schema_version"] = self.SCHEMA_VERSION
         self.store.write(data)
 
-    def _transaction(self, mutate) -> None:
+    def _transaction(self, mutate):
         with self.store._lock:
             data = self._read()
-            mutate(data)
+            result = mutate(data)
             self._write(data)
+            return result
 
     def user(self, chat_id: int) -> dict:
         return deepcopy(
@@ -269,6 +285,7 @@ class FvgAlertSettings:
         apply_to_bullish: bool = True,
         apply_to_bearish: bool = True,
     ) -> None:
+        del maximum  # Size filters intentionally use a minimum only.
         unit = unit.upper()
         if unit not in {"USD", "PERCENT"}:
             raise ValueError("Единица размера должна быть USD или PERCENT")
@@ -327,11 +344,11 @@ class FvgAlertSettings:
             )
             if not user.get(direction_key, True):
                 continue
+
             symbol_config = user.get("symbols", {}).get(event.symbol)
             if not symbol_config or not symbol_config.get("enabled", True):
                 continue
 
-            price = symbol_config.get("price_filter", {})
             apply_key = (
                 "apply_to_pre_fvg"
                 if event.event_type is FvgEventType.PRE_FVG
@@ -342,6 +359,8 @@ class FvgAlertSettings:
                 if event.direction is FvgDirection.BULLISH
                 else "apply_to_bearish"
             )
+
+            price = symbol_config.get("price_filter", {})
             use_price_filter = (
                 price.get("enabled", False)
                 and price.get(apply_key, True)
@@ -373,7 +392,7 @@ class FvgAlertSettings:
             recipients.append(int(key))
         return recipients
 
-    # Compatibility with the old tests/API. New delivery dedup lives in FvgEventStore.
+    # Compatibility with the old tests/API.
     def is_new(self, event_key):
         return self._read().get("legacy_last_event_key") != event_key
 
@@ -391,147 +410,8 @@ class FvgAlertSettings:
         )
 
 
-def _decimal(value):
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError):
-        # Fail closed in price_allowed/size_allowed instead of crashing delivery.
-        return Decimal("NaN")
-
-
-class FvgEventStore:
-    RETENTION_DAYS = 90
-    PRUNE_INTERVAL = timedelta(days=1)
-
-    def __init__(self, path: str = "data/fvg_event_store.json"):
-        self.store = AtomicJsonStore(path)
-
-    def _read(self):
-        data = self.store.read()
-        data.setdefault("events", {})
-        data.setdefault("deliveries", {})
-        data.setdefault("health", {})
-        return data
-
-    def _transaction(self, mutate):
-        with self.store._lock:
-            data = self._read()
-            result = mutate(data)
-            self.store.write(data)
-            return result
-
-    def _prune_if_due(self, data: dict, now: datetime) -> None:
-        last_raw = data["health"].get("last_pruned_at")
-        if last_raw:
-            try:
-                last_pruned = datetime.fromisoformat(last_raw).astimezone(UTC)
-            except (TypeError, ValueError):
-                last_pruned = None
-            if last_pruned and now - last_pruned < self.PRUNE_INTERVAL:
-                return
-
-        cutoff = now - timedelta(days=self.RETENTION_DAYS)
-        expired = []
-        for event_id, event in data["events"].items():
-            try:
-                detected_at = datetime.fromisoformat(
-                    event["detected_at"]
-                ).astimezone(UTC)
-            except (KeyError, TypeError, ValueError):
-                expired.append(event_id)
-                continue
-            if detected_at < cutoff:
-                expired.append(event_id)
-
-        for event_id in expired:
-            data["events"].pop(event_id, None)
-            data["deliveries"].pop(event_id, None)
-        data["health"]["last_pruned_at"] = now.isoformat()
-        if expired:
-            data["health"]["events_pruned"] = int(
-                data["health"].get("events_pruned", 0)
-            ) + len(expired)
-
-    def record_event(self, event: FvgEvent) -> bool:
-        def mutate(data):
-            self._prune_if_due(data, datetime.now(UTC))
-            is_new = event.event_id not in data["events"]
-            data["events"].setdefault(event.event_id, event.to_json())
-            return is_new
-
-        return self._transaction(mutate)
-
-    def delivery_needed(self, chat_id: int, event_id: str) -> bool:
-        return str(chat_id) not in self._read()["deliveries"].get(event_id, {})
-
-    def mark_delivered(self, chat_id: int, event_id: str) -> None:
-        self._transaction(
-            lambda data: data["deliveries"].setdefault(event_id, {}).update(
-                {str(chat_id): datetime.now(UTC).isoformat()}
-            )
-        )
-
-    def update_health(self, **values) -> None:
-        self._transaction(lambda data: data["health"].update(values))
-
-    def increment_health(self, key: str, amount: int = 1) -> None:
-        def mutate(data):
-            data["health"][key] = int(data["health"].get(key, 0)) + amount
-
-        self._transaction(mutate)
-
-    def health(self) -> dict:
-        data = self._read()
-        return {
-            **data["health"],
-            "events": len(data["events"]),
-            "deliveries": sum(
-                len(deliveries)
-                for deliveries in data["deliveries"].values()
-            ),
-        }
-
-    def summary(self, days: int | None = 7) -> dict:
-        data = self._read()
-        cutoff = (
-            datetime.now(UTC).timestamp() - days * 86400
-            if days is not None
-            else None
-        )
-        events = []
-        for event in data["events"].values():
-            try:
-                detected = datetime.fromisoformat(
-                    event["detected_at"]
-                ).timestamp()
-            except (KeyError, TypeError, ValueError):
-                continue
-            if cutoff is None or detected >= cutoff:
-                events.append(event)
-
-        result: dict[str, object] = {}
-        for direction in ("BULLISH", "BEARISH"):
-            selected = [
-                event for event in events if event.get("direction") == direction
-            ]
-            confirmed = sum(
-                event.get("event_type") == "CONFIRMED_FVG"
-                for event in selected
-            )
-            preliminary = sum(
-                event.get("event_type") == "PRE_FVG"
-                for event in selected
-            )
-            result[direction] = {
-                "confirmed": confirmed,
-                "pre": preliminary,
-                "total": len(selected),
-            }
-        result["deliveries"] = sum(
-            len(data["deliveries"].get(event["event_id"], {}))
-            for event in events
-            if event.get("event_id")
-        )
-        return result
+__all__ = [
+    "AtomicJsonStore",
+    "FvgAlertSettings",
+    "FvgEventStore",
+]

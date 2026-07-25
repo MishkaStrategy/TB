@@ -4,8 +4,6 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-import requests
-
 from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
 
@@ -32,9 +30,12 @@ async def run_fvg_recovery(context):
         try:
             events = await asyncio.to_thread(service.recover, symbol)
             await service.deliver(context.bot, events)
-        except (requests.RequestException, ValueError) as error:
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
             logger.warning("Bitunix FVG recovery failed for %s: %s", symbol, error)
             service.event_store.update_health(last_error=str(error))
+            service.event_store.increment_health("recovery_failures")
 
 
 async def run_fvg_control_point(context):
@@ -44,14 +45,33 @@ async def run_fvg_control_point(context):
     if callable(now):
         now = now()
     if now is None:
-        from datetime import datetime, timezone
         now = datetime.now(timezone.utc)
     for symbol in sorted(service.settings.active_symbols()):
-        await service.deliver(context.bot, service.evaluate(symbol, now))
+        try:
+            await service.deliver(context.bot, service.evaluate(symbol, now))
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:
+            logger.exception("FVG control point failed for %s", symbol)
+            service.event_store.update_health(last_error=str(error))
+            service.event_store.increment_health("control_point_failures")
+
+
+async def run_fvg_delivery_retry(context):
+    """Drain the persistent Telegram outbox even after process restarts."""
+    service = context.job.data["fvg_service"]
+    try:
+        await service.retry_pending(context.bot, limit=200)
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.exception("Persistent FVG delivery retry failed")
+        service.event_store.update_health(last_error=str(error))
+        service.event_store.increment_health("delivery_retry_job_failures")
 
 
 def schedule_fvg_alerts(application):
-    """Register lightweight control points and the REST recovery safety net."""
+    """Register FVG control points, retry outbox and REST recovery."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()
@@ -60,6 +80,7 @@ def schedule_fvg_alerts(application):
     pre_delay = (725 - seconds) % 900
     if pre_delay < 1:
         pre_delay += 900
+
     application.job_queue.run_repeating(
         run_fvg_control_point,
         interval=900,
@@ -72,6 +93,13 @@ def schedule_fvg_alerts(application):
         interval=900,
         first=pre_delay,
         name="fvg-pre-control-t-minus-3",
+        data={"fvg_service": service},
+    )
+    application.job_queue.run_repeating(
+        run_fvg_delivery_retry,
+        interval=30,
+        first=5,
+        name="fvg-delivery-outbox-retry",
         data={"fvg_service": service},
     )
     application.job_queue.run_repeating(
@@ -88,7 +116,8 @@ async def start_fvg_stream(application):
     service = get_fvg_service()
     _FVG_STREAM = BitunixFvgStream(service)
     _FVG_TASK = asyncio.create_task(
-        _FVG_STREAM.run(application.bot), name="bitunix-fvg-stream"
+        _FVG_STREAM.run(application.bot),
+        name="bitunix-fvg-stream",
     )
 
 
