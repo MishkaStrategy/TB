@@ -11,8 +11,8 @@ from handlers.fvg_alert import (
     fvg_alert,
     fvg_pre_alert,
     fvg_stats,
-    fvg_symbol,
 )
+from handlers.safe_fvg_symbol import fvg_symbol
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
 from handlers.menu import menu, menu_callback
 from handlers.admin import admin, admin_callback
