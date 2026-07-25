@@ -1,10 +1,34 @@
+import threading
+import time
+
 import requests
+
+from config import BITUNIX_REQUESTS_PER_SECOND
+
+
+class _SharedRateLimiter:
+    """Process-wide spacing for Bitunix REST requests."""
+
+    def __init__(self, requests_per_second: float):
+        self.interval = 1.0 / requests_per_second
+        self._lock = threading.Lock()
+        self._next_request_at = 0.0
+
+    def acquire(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            delay = self._next_request_at - now
+            if delay > 0:
+                time.sleep(delay)
+                now = time.monotonic()
+            self._next_request_at = max(now, self._next_request_at) + self.interval
 
 
 class BitunixClient:
 
     BASE_URL = "https://fapi.bitunix.com"
     REQUEST_TIMEOUT_SECONDS = 15
+    MAX_KLINE_LIMIT = 200
     INTERVAL_MILLISECONDS = {
         "1m": 60_000,
         "3m": 180_000,
@@ -15,10 +39,33 @@ class BitunixClient:
         "4h": 14_400_000,
         "1d": 86_400_000,
     }
+    _RATE_LIMITER = _SharedRateLimiter(BITUNIX_REQUESTS_PER_SECOND)
 
     def __init__(self, session=None):
         self.session = session or requests
+        # Unit tests normally inject a fake session and should not sleep.
+        self._use_rate_limiter = session is None or isinstance(
+            self.session, requests.Session
+        )
 
+    def _get(self, url, **kwargs):
+        if self._use_rate_limiter:
+            self._RATE_LIMITER.acquire()
+        return self.session.get(
+            url,
+            timeout=self.REQUEST_TIMEOUT_SECONDS,
+            **kwargs,
+        )
+
+    @classmethod
+    def _normalize_kline_limit(cls, limit) -> int:
+        try:
+            parsed = int(limit)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Kline limit must be an integer") from error
+        if parsed <= 0:
+            raise ValueError("Kline limit must be positive")
+        return min(parsed, cls.MAX_KLINE_LIMIT)
 
     def get_candles(
         self,
@@ -28,35 +75,25 @@ class BitunixClient:
         start_time=None,
         end_time=None,
     ):
-
         url = f"{self.BASE_URL}/api/v1/futures/market/kline"
-
         params = {
             "symbol": symbol,
             "interval": interval,
-            "limit": limit
+            "limit": self._normalize_kline_limit(limit),
         }
-
         if start_time is not None:
             params["startTime"] = int(start_time)
         if end_time is not None:
             params["endTime"] = int(end_time)
 
-        response = self.session.get(
-            url,
-            params=params,
-            timeout=self.REQUEST_TIMEOUT_SECONDS,
-        )
-
+        response = self._get(url, params=params)
         response.raise_for_status()
-
         return response.json()
 
     def get_ticker(self, symbol="BTCUSDT"):
-        response = self.session.get(
+        response = self._get(
             f"{self.BASE_URL}/api/v1/futures/market/tickers",
             params={"symbols": symbol},
-            timeout=self.REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         data = response.json()
@@ -72,10 +109,9 @@ class BitunixClient:
         params = {}
         if symbols:
             params["symbols"] = ",".join(symbols) if not isinstance(symbols, str) else symbols
-        response = self.session.get(
+        response = self._get(
             f"{self.BASE_URL}/api/v1/futures/market/trading_pairs",
             params=params,
-            timeout=self.REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         return response.json().get("data", [])
@@ -88,10 +124,9 @@ class BitunixClient:
         )
 
     def get_funding_rate(self, symbol):
-        response = self.session.get(
+        response = self._get(
             f"{self.BASE_URL}/api/v1/futures/market/funding_rate",
             params={"symbol": symbol},
-            timeout=self.REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         rates = response.json().get("data")
@@ -112,13 +147,14 @@ class BitunixClient:
         interval,
         start_time,
         end_time,
-        limit=1000,
+        limit=MAX_KLINE_LIMIT,
     ):
         """Download a complete, de-duplicated candle range in chronological order."""
         if interval not in self.INTERVAL_MILLISECONDS:
             raise ValueError(f"Unsupported interval: {interval}")
         if start_time >= end_time:
             raise ValueError("start_time must be earlier than end_time")
+        limit = self._normalize_kline_limit(limit)
 
         candles_by_time = {}
         cursor = int(end_time)
