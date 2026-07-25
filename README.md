@@ -13,19 +13,27 @@ Bitunix. Он специализируется только на FVG: уведо
   каждого Telegram-пользователя;
 - статистика бычьих и медвежьих FVG, включая доставленные уведомления;
 - админ-панель со статистикой пользователей;
-- общий WebSocket Bitunix с REST-восстановлением пропущенных данных.
+- общий WebSocket Bitunix с REST-восстановлением пропущенных данных;
+- bounded delivery queue, REST rate limiting и повторные попытки доставки;
+- production-default с закрытым доступом и ограничениями ресурсов;
+- атомарное VDS-обновление, rollback и ежедневные резервные копии.
 
-## Запуск
+## Локальный запуск
 
 1. Создайте `.env` рядом с `bot.py`, используя `.env.example`:
 
    ```env
    TELEGRAM_TOKEN=токен_от_BotFather
+   ALLOWED_TELEGRAM_IDS=123456789
+   ADMIN_TELEGRAM_IDS=123456789
+   PUBLIC_ACCESS_ENABLED=false
    ```
 
-2. Установите зависимости:
+2. Создайте virtualenv и установите зависимости:
 
    ```bash
+   python3 -m venv .venv
+   .venv/bin/python -m pip install --upgrade pip
    .venv/bin/python -m pip install -r requirements.txt
    ```
 
@@ -35,12 +43,15 @@ Bitunix. Он специализируется только на FVG: уведо
    .venv/bin/python bot.py
    ```
 
-Безопасный перезапуск доступен через `./restart_bot.py`: скрипт
-останавливает только экземпляры `bot.py` из этой папки и запускает один новый
-процесс.
+`PUBLIC_ACCESS_ENABLED=false` — безопасный режим по умолчанию. Публичный доступ
+нужно включать явно. `BITUNIX_API_KEY` и `BITUNIX_SECRET` для FVG не требуются.
 
-Для установки с автозапуском на Ubuntu/Debian VDS используйте
-[инструкцию по развёртыванию](docs/VDS_DEPLOYMENT.md).
+Для локального перезапуска доступен `./restart_bot.py`: он останавливает только
+экземпляры `bot.py`, запущенные из текущей папки проекта.
+
+Для постоянной работы на Ubuntu/Debian VDS используйте
+[инструкцию по развёртыванию](docs/VDS_DEPLOYMENT.md). Установщик тестирует
+staging-релиз до остановки работающего процесса и выполняет rollback при ошибке.
 
 ## Команды
 
@@ -56,6 +67,12 @@ Bitunix. Он специализируется только на FVG: уведо
 
 ## Проверки
 
+Текущие handler-тесты используют явно включённый публичный test fixture:
+
 ```bash
-.venv/bin/python -m unittest discover -s tests -v
+PUBLIC_ACCESS_ENABLED=true \
+MPLCONFIGDIR=/tmp/trading-assistant-mpl \
+  .venv/bin/python -m unittest discover -s tests -v
 ```
+
+Также CI проверяет синтаксис VDS shell-скриптов и компиляцию Python-модулей.
