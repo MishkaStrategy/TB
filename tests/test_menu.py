@@ -19,16 +19,17 @@ class EnabledSettings:
 
 
 class MenuTests(unittest.TestCase):
-    def test_main_menu_contains_only_fvg_actions(self):
+    def test_main_menu_contains_fvg_actions_and_funding(self):
         keyboard = build_main_menu(42, settings=EnabledSettings()).inline_keyboard
         labels = [row[0].text for row in keyboard]
         callbacks = [row[0].callback_data for row in keyboard]
 
-        self.assertEqual(labels, ["🔔 Настройки FVG 15м", "📊 Статистика FVG"])
+        self.assertEqual(labels, ["🔔 Настройки FVG 15м", "📊 Статистика FVG", "💸 Фандинг"])
         self.assertIn("🔔 Настройки FVG 15м", labels)
         self.assertIn("📊 Статистика FVG", labels)
         self.assertIn("menu:fvg-settings", callbacks)
         self.assertIn("menu:fvg-stats", callbacks)
+        self.assertIn("menu:funding", callbacks)
 
     def test_fvg_filter_buttons_show_enabled_and_paused_status(self):
         class Settings:

@@ -13,6 +13,7 @@ from handlers.fvg_alert import (
 )
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
 from handlers.menu import menu, menu_callback
+from handlers.funding import funding
 from handlers.admin import admin, admin_callback
 from database.user_activity import UserActivityRegistry
 
@@ -26,6 +27,7 @@ BOT_COMMANDS = (
     BotCommand("fvg_price", "Фильтр цены FVG"),
     BotCommand("fvg_size", "Фильтр размера FVG"),
     BotCommand("fvg_stats", "Статистика FVG"),
+    BotCommand("funding", "Топ ставок фандинга"),
 )
 
 
@@ -74,6 +76,7 @@ def main():
     app.add_handler(CommandHandler("fvg_pre_alert", fvg_pre_alert))
     app.add_handler(CommandHandler("fvg_stats", fvg_stats))
     app.add_handler(CommandHandler("fvg_symbol", fvg_symbol))
+    app.add_handler(CommandHandler("funding", funding))
     for handler in build_fvg_filter_handlers():
         app.add_handler(handler)
 
