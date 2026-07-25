@@ -9,6 +9,8 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
+from telegram.error import Forbidden, RetryAfter
+
 from alerts.fvg_detector import FvgDetector, aggregate_current_15m
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType
 from alerts.fvg_store import FvgAlertSettings, FvgEventStore
@@ -23,7 +25,11 @@ INTERVALS = {"1m": timedelta(minutes=1), "15m": timedelta(minutes=15)}
 
 def floor_time(value: datetime, minutes: int) -> datetime:
     value = value.astimezone(UTC)
-    return value.replace(second=0, microsecond=0, minute=value.minute - value.minute % minutes)
+    return value.replace(
+        second=0,
+        microsecond=0,
+        minute=value.minute - value.minute % minutes,
+    )
 
 
 def parse_rest_candle(raw: dict, symbol: str, timeframe: str, now: datetime) -> Candle:
@@ -142,7 +148,12 @@ class FvgAlertService:
             self._last_ws_health_write = monotonic_now
         return self.evaluate(candle.symbol, now)
 
-    def evaluate(self, symbol: str, now: datetime, recovery: bool = False) -> list[FvgEvent]:
+    def evaluate(
+        self,
+        symbol: str,
+        now: datetime,
+        recovery: bool = False,
+    ) -> list[FvgEvent]:
         events = []
         closed = [
             candle
@@ -151,12 +162,12 @@ class FvgAlertService:
         ]
         if len(closed) >= 3:
             event = self.detector.detect_confirmed(closed[-3:], now)
-            # Confirmed recovery is allowed for one latest interval; pre recovery is forbidden.
             if event and (
                 not recovery
                 or now - event.candle_c_close_time <= timedelta(minutes=15)
             ):
                 events.append(event)
+
         interval_open = floor_time(now, 15)
         if interval_open + timedelta(minutes=12) <= now < interval_open + timedelta(minutes=13):
             current = aggregate_current_15m(
@@ -167,13 +178,23 @@ class FvgAlertService:
             )
             previous = [candle for candle in closed if candle.open_time < interval_open]
             if current is not None and len(previous) >= 2:
-                event = self.detector.detect_pre(previous[-2], previous[-1], current, now)
+                event = self.detector.detect_pre(
+                    previous[-2],
+                    previous[-1],
+                    current,
+                    now,
+                )
                 if event:
                     events.append(event)
         return events
 
     async def deliver(self, bot, events: list[FvgEvent]) -> None:
+        """Persist recipients first, then attempt every due outbox delivery."""
         async with self._delivery_lock:
+            if not hasattr(self.event_store, "enqueue_deliveries"):
+                await self._deliver_without_outbox(bot, events)
+                return
+
             for event in events:
                 is_new_event = self.event_store.record_event(event)
                 if is_new_event:
@@ -192,28 +213,121 @@ class FvgAlertService:
                     self.event_store.update_health(last_error=str(error))
                     self.event_store.increment_health("recipient_failures")
                     continue
+
                 if not recipients and is_new_event:
                     self.event_store.increment_health("events_without_recipients")
-                for chat_id in recipients:
-                    if not self.event_store.delivery_needed(chat_id, event.event_id):
-                        continue
-                    try:
-                        await bot.send_message(
-                            chat_id=chat_id,
-                            text=format_fvg_message(event),
-                        )
-                    except Exception as error:
-                        logger.warning(
-                            "FVG delivery failed chat=%s event=%s: %s",
-                            chat_id,
-                            event.event_id,
-                            error,
-                        )
-                        self.event_store.update_health(last_error=str(error))
-                        self.event_store.increment_health("delivery_failures")
-                        continue
-                    self.event_store.mark_delivered(chat_id, event.event_id)
-                    self.event_store.increment_health("notifications_sent")
+                self.event_store.enqueue_deliveries(
+                    event.event_id,
+                    recipients,
+                    format_fvg_message(event),
+                )
+
+            await self._retry_pending_locked(bot, limit=200)
+
+    async def retry_pending(self, bot, *, limit: int = 100) -> int:
+        """Retry persisted Telegram deliveries, including after a restart."""
+        if not hasattr(self.event_store, "due_deliveries"):
+            return 0
+        async with self._delivery_lock:
+            return await self._retry_pending_locked(bot, limit=limit)
+
+    async def _retry_pending_locked(self, bot, *, limit: int) -> int:
+        completed = 0
+        for item in self.event_store.due_deliveries(limit=limit):
+            chat_id = item["chat_id"]
+            event_id = item["event_id"]
+            attempts = int(item.get("attempts", 0))
+            try:
+                await bot.send_message(
+                    chat_id=int(chat_id),
+                    text=item["message_text"],
+                )
+            except Forbidden as error:
+                logger.warning(
+                    "Telegram permanently rejected chat=%s event=%s: %s",
+                    chat_id,
+                    event_id,
+                    error,
+                )
+                self.event_store.abandon_delivery(chat_id, event_id)
+                self.event_store.increment_health("delivery_permanent_failures")
+                self.event_store.update_health(last_error=str(error))
+            except RetryAfter as error:
+                retry_after = error.retry_after
+                if isinstance(retry_after, timedelta):
+                    delay = retry_after.total_seconds()
+                else:
+                    delay = float(retry_after)
+                self.event_store.mark_delivery_failed(
+                    chat_id,
+                    event_id,
+                    str(error),
+                    retry_after_seconds=max(1, delay),
+                )
+                self.event_store.increment_health("delivery_retries")
+                self.event_store.update_health(last_error=str(error))
+            except Exception as error:
+                delay = min(300, 5 * (2 ** min(attempts, 6)))
+                logger.warning(
+                    "FVG delivery failed chat=%s event=%s attempt=%s: %s",
+                    chat_id,
+                    event_id,
+                    attempts + 1,
+                    error,
+                )
+                self.event_store.mark_delivery_failed(
+                    chat_id,
+                    event_id,
+                    str(error),
+                    retry_after_seconds=delay,
+                )
+                self.event_store.increment_health("delivery_failures")
+                self.event_store.increment_health("delivery_retries")
+                self.event_store.update_health(last_error=str(error))
+            else:
+                self.event_store.mark_delivered(chat_id, event_id)
+                self.event_store.increment_health("notifications_sent")
+                completed += 1
+        return completed
+
+    async def _deliver_without_outbox(self, bot, events: list[FvgEvent]) -> None:
+        """Compatibility path for injected legacy stores in older unit tests."""
+        for event in events:
+            is_new_event = self.event_store.record_event(event)
+            if is_new_event:
+                self.event_store.increment_health(
+                    "pre_events"
+                    if event.event_type is FvgEventType.PRE_FVG
+                    else "confirmed_events"
+                )
+            try:
+                recipients = self.settings.recipients(event)
+            except Exception as error:
+                self.event_store.update_health(last_error=str(error))
+                self.event_store.increment_health("recipient_failures")
+                continue
+            if not recipients and is_new_event:
+                self.event_store.increment_health("events_without_recipients")
+            for chat_id in recipients:
+                if not self.event_store.delivery_needed(chat_id, event.event_id):
+                    continue
+                try:
+                    await bot.send_message(
+                        chat_id=chat_id,
+                        text=format_fvg_message(event),
+                    )
+                except Exception as error:
+                    logger.warning(
+                        "FVG delivery failed chat=%s event=%s: %s",
+                        chat_id,
+                        event.event_id,
+                        error,
+                    )
+                    self.event_store.update_health(last_error=str(error))
+                    self.event_store.increment_health("delivery_failures")
+                    continue
+                self.event_store.mark_delivered(chat_id, event.event_id)
+                self.event_store.increment_health("notifications_sent")
 
 
 def _price(value: Decimal) -> str:
@@ -230,7 +344,9 @@ def format_fvg_message(event: FvgEvent) -> str:
     else:
         title = f"{icon} Подтверждённый {direction.lower()} FVG"
         status = "Подтверждён закрытием свечи C"
-    time_text = event.candle_c_close_time.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    time_text = event.candle_c_close_time.astimezone(UTC).strftime(
+        "%Y-%m-%d %H:%M UTC"
+    )
     return (
         f"{title}\n"
         f"Инструмент: {event.symbol}\n"
