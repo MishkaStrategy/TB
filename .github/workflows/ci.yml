@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python tests
+    runs-on:
+      - self-hosted
+      - fast
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Create isolated Python environment
+        run: |
+          python3 --version
+          python3 -m venv .venv-ci
+          echo "$PWD/.venv-ci/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile Python sources
+        run: >-
+          python -m compileall -q
+          bot.py config.py restart_bot.py
+          alerts database exchanges handlers tests
+
+      - name: Run unit tests
+        env:
+          MPLCONFIGDIR: ${{ runner.temp }}/trading-assistant-mpl
+        run: python -m unittest discover -s tests -v
