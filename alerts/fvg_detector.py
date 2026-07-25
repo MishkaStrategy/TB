@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType, event_id
@@ -134,6 +134,10 @@ class FvgDetector:
         )
 
 
+def _finite(value: Decimal | None) -> bool:
+    return value is None or value.is_finite()
+
+
 def price_allowed(
     signal_price: Decimal,
     enabled: bool,
@@ -142,9 +146,14 @@ def price_allowed(
 ) -> bool:
     if not enabled:
         return True
-    if minimum is not None and signal_price < minimum:
+    if not signal_price.is_finite() or not _finite(minimum) or not _finite(maximum):
         return False
-    if maximum is not None and signal_price > maximum:
+    try:
+        if minimum is not None and signal_price < minimum:
+            return False
+        if maximum is not None and signal_price > maximum:
+            return False
+    except InvalidOperation:
         return False
     return True
 
@@ -154,11 +163,13 @@ def fvg_size_value(
     signal_price: Decimal,
     unit: str,
 ) -> Decimal:
+    if not zone_size.is_finite() or zone_size < 0:
+        raise ValueError("FVG size must be finite and non-negative")
+    if not signal_price.is_finite() or signal_price <= 0:
+        raise ValueError("Signal price must be finite and positive")
     if unit == "USD":
         return zone_size
     if unit == "PERCENT":
-        if signal_price <= 0:
-            raise ValueError("Signal price must be positive")
         return zone_size / signal_price * Decimal("100")
     raise ValueError("FVG size unit must be USD or PERCENT")
 
@@ -173,9 +184,14 @@ def size_allowed(
 ) -> bool:
     if not enabled:
         return True
-    value = fvg_size_value(zone_size, signal_price, unit)
-    if minimum is not None and value < minimum:
+    if not _finite(minimum) or not _finite(maximum):
         return False
-    if maximum is not None and value > maximum:
+    try:
+        value = fvg_size_value(zone_size, signal_price, unit)
+        if minimum is not None and value < minimum:
+            return False
+        if maximum is not None and value > maximum:
+            return False
+    except (InvalidOperation, ValueError):
         return False
     return True
