@@ -4,7 +4,7 @@
 set -euo pipefail
 
 INSTALL_DIR="${INSTALL_DIR:-/opt/fvg-alert-bot}"
-DATA_DIR="${INSTALL_DIR}/data"
+DATA_DIR="${DATA_DIR:-${INSTALL_DIR}/data}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/fvg-alert-bot}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
 
@@ -25,7 +25,8 @@ timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 temporary="${BACKUP_DIR}/.fvg-alert-bot-${timestamp}.tar.gz.tmp"
 archive="${BACKUP_DIR}/fvg-alert-bot-${timestamp}.tar.gz"
 
-tar -C "${INSTALL_DIR}" -czf "${temporary}" data
+# Archive the contents of the state directory, not a possible symlink itself.
+tar -C "${DATA_DIR}" -czf "${temporary}" .
 chmod 600 "${temporary}"
 mv "${temporary}" "${archive}"
 
