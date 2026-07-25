@@ -60,11 +60,25 @@ jobs:
           set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
 
-      - name: Upload test output
+      - name: Run bounded pipeline soak
+        run: |
+          python run_fvg_soak.py \
+            --database "${RUNNER_TEMP}/fvg-soak.sqlite3" \
+            --events 500 \
+            --recipients 10 \
+            --batch-size 50 \
+            --max-seconds 180 \
+            --max-peak-memory-mb 256 \
+            --reset \
+            --output soak-report.json
+
+      - name: Upload verification output
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-output
-          path: test-results.txt
+          name: verification-output
+          path: |
+            test-results.txt
+            soak-report.json
           if-no-files-found: ignore
           retention-days: 7
