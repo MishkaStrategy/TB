@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -8,8 +9,14 @@ from types import SimpleNamespace
 
 from alerts.fvg_detector import price_allowed
 from alerts.fvg_service import parse_rest_candle
+from alerts.fvg_store import FvgAlertSettings
 from alerts.fvg_stream import BitunixFvgStream
-from config import MAX_ACTIVE_SYMBOLS, parse_bool, parse_positive_int
+from config import (
+    MAX_ACTIVE_SYMBOLS,
+    MAX_SYMBOLS_PER_USER,
+    parse_bool,
+    parse_positive_int,
+)
 from database.user_activity import UserActivityRegistry
 from exchanges.bitunix import BitunixClient
 
@@ -71,6 +78,19 @@ class ProductionSafetyTests(unittest.TestCase):
                 None,
             )
         )
+        with TemporaryDirectory() as directory:
+            settings = FvgAlertSettings(str(Path(directory) / "settings.json"))
+            with self.assertRaisesRegex(ValueError, "конечным"):
+                settings.set_price_filter(42, "BTCUSDT", "NaN", None)
+
+    def test_symbol_quota_is_enforced_per_user(self):
+        with TemporaryDirectory() as directory:
+            settings = FvgAlertSettings(str(Path(directory) / "settings.json"))
+            # BTCUSDT exists in the defaults and counts towards the quota.
+            for index in range(MAX_SYMBOLS_PER_USER - 1):
+                settings.add_symbol(42, f"S{index:03d}USDT")
+            with self.assertRaisesRegex(ValueError, "не более"):
+                settings.add_symbol(42, "OVERLIMITUSDT")
 
     def test_bitunix_kline_limit_is_capped_at_official_maximum(self):
         session = FakeSession()
@@ -80,7 +100,10 @@ class ProductionSafetyTests(unittest.TestCase):
         self.assertEqual(kwargs["params"]["limit"], 200)
 
     def test_stream_caps_active_symbols(self):
-        symbols = {f"S{index:03d}USDT" for index in range(MAX_ACTIVE_SYMBOLS + 25)}
+        symbols = {
+            f"S{index:03d}USDT"
+            for index in range(MAX_ACTIVE_SYMBOLS + 25)
+        }
         service = SimpleNamespace(
             settings=SimpleNamespace(active_symbols=lambda: symbols),
             event_store=FakeEventStore(),
@@ -98,7 +121,8 @@ class ProductionSafetyTests(unittest.TestCase):
 
     def test_user_activity_is_throttled_per_user(self):
         with TemporaryDirectory() as directory:
-            registry = UserActivityRegistry(str(Path(directory) / "activity.json"))
+            path = Path(directory) / "activity.json"
+            registry = UserActivityRegistry(str(path))
             user = SimpleNamespace(
                 id=42,
                 first_name="Test",
@@ -107,7 +131,9 @@ class ProductionSafetyTests(unittest.TestCase):
             )
             self.assertTrue(registry.touch(user))
             self.assertFalse(registry.touch(user))
-            self.assertEqual(registry.users()["42"]["visits"], 1)
+            self.assertEqual(registry.users()["42"]["visits"], 2)
+            persisted = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(persisted["users"]["42"]["visits"], 1)
 
 
 class DeliveryWorkerSafetyTests(unittest.IsolatedAsyncioTestCase):
