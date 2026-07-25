@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
@@ -42,10 +44,10 @@ async def post_init(application):
 
 
 async def track_user_activity(update, context):
-    """Record every incoming user action before command handlers run."""
+    """Record incoming activity without blocking the Telegram event loop."""
     user = update.effective_user
     if user is not None:
-        UserActivityRegistry().touch(user)
+        await asyncio.to_thread(UserActivityRegistry().touch, user)
 
 
 def main():
