@@ -21,6 +21,8 @@ from exchanges.bitunix import BitunixClient
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
 INTERVALS = {"1m": timedelta(minutes=1), "15m": timedelta(minutes=15)}
+OUTBOX_BATCH_SIZE = 200
+OUTBOX_MAX_BATCHES_PER_PASS = 50
 
 
 def floor_time(value: datetime, minutes: int) -> datetime:
@@ -189,7 +191,7 @@ class FvgAlertService:
         return events
 
     async def deliver(self, bot, events: list[FvgEvent]) -> None:
-        """Persist recipients first, then attempt every due outbox delivery."""
+        """Persist recipients first, then drain due outbox pages."""
         async with self._delivery_lock:
             if not hasattr(self.event_store, "enqueue_deliveries"):
                 await self._deliver_without_outbox(bot, events)
@@ -222,18 +224,44 @@ class FvgAlertService:
                     format_fvg_message(event),
                 )
 
-            await self._retry_pending_locked(bot, limit=200)
+            await self._drain_pending_locked(
+                bot,
+                batch_size=OUTBOX_BATCH_SIZE,
+                max_batches=OUTBOX_MAX_BATCHES_PER_PASS,
+            )
 
     async def retry_pending(self, bot, *, limit: int = 100) -> int:
         """Retry persisted Telegram deliveries, including after a restart."""
         if not hasattr(self.event_store, "due_deliveries"):
             return 0
+        batch_size = max(1, min(int(limit), 1000))
         async with self._delivery_lock:
-            return await self._retry_pending_locked(bot, limit=limit)
+            return await self._drain_pending_locked(
+                bot,
+                batch_size=batch_size,
+                max_batches=OUTBOX_MAX_BATCHES_PER_PASS,
+            )
 
-    async def _retry_pending_locked(self, bot, *, limit: int) -> int:
+    async def _drain_pending_locked(
+        self,
+        bot,
+        *,
+        batch_size: int,
+        max_batches: int,
+    ) -> int:
         completed = 0
-        for item in self.event_store.due_deliveries(limit=limit):
+        for _ in range(max(1, int(max_batches))):
+            items = self.event_store.due_deliveries(limit=batch_size)
+            if not items:
+                break
+            completed += await self._process_pending_items_locked(bot, items)
+            if len(items) < batch_size:
+                break
+        return completed
+
+    async def _process_pending_items_locked(self, bot, items: list[dict]) -> int:
+        completed = 0
+        for item in items:
             chat_id = item["chat_id"]
             event_id = item["event_id"]
             attempts = int(item.get("attempts", 0))
