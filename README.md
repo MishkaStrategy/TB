@@ -16,7 +16,9 @@ Bitunix. Он специализируется только на FVG: уведо
 - общий WebSocket Bitunix с REST-восстановлением пропущенных данных;
 - bounded delivery queue, REST rate limiting и повторные попытки доставки;
 - production-default с закрытым доступом и ограничениями ресурсов;
-- атомарное VDS-обновление, rollback и ежедневные резервные копии.
+- SQLite/WAL для событий, доставок, persistent outbox и health-метрик;
+- атомарное VDS-обновление, rollback и ежедневные резервные копии;
+- event-quality backtest без выдуманных торговых правил и P&L.
 
 ## Локальный запуск
 
@@ -65,6 +67,31 @@ staging-релиз до остановки работающего процесс
 - `/fvg_stats` — показать статистику FVG;
 - `/admin` — админ-панель и статистика пользователей.
 
+## Историческая проверка FVG
+
+Загрузите публичные свечи Bitunix:
+
+```bash
+.venv/bin/python download_bitunix_history.py \
+  --symbol BTCUSDT --interval 15m \
+  --start 2025-01-01 --end 2026-01-01 \
+  --output data/historical/btcusdt_15m_2025.csv
+```
+
+Постройте event-quality отчёт:
+
+```bash
+.venv/bin/python run_fvg_quality_backtest.py \
+  --data-file data/historical/btcusdt_15m_2025.csv \
+  --symbol BTCUSDT \
+  --output data/reports/btcusdt_fvg_quality_2025.json
+```
+
+Отчёт измеряет touch/full fill, задержку заполнения, MFE/MAE и горизонты
+1/4/16/96 свечей. Он не считает доходность, потому что бот не задаёт entry,
+stop-loss и take-profit. Методология описана в
+[документе бэктеста](docs/FVG_BACKTEST.md).
+
 ## Проверки
 
 Текущие handler-тесты используют явно включённый публичный test fixture:
@@ -75,4 +102,5 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-Также CI проверяет синтаксис VDS shell-скриптов и компиляцию Python-модулей.
+CI проверяет shell-скрипты, компиляцию Python, unit-тесты, bounded soak и
+non-blocking research smoke по публичным данным Bitunix.

@@ -50,7 +50,8 @@ jobs:
         run: >-
           python -m compileall -q
           bot.py config.py restart_bot.py run_fvg_soak.py
-          alerts database exchanges handlers operations tests
+          run_fvg_quality_backtest.py download_bitunix_history.py
+          alerts database exchanges handlers operations research tests
 
       - name: Run unit tests
         env:
@@ -72,6 +73,24 @@ jobs:
             --reset \
             --output soak-report.json
 
+      - name: Run recent Bitunix research smoke
+        continue-on-error: true
+        shell: bash
+        run: |
+          START=$(python -c 'from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)-timedelta(days=30)).isoformat())')
+          END=$(python -c 'from datetime import datetime,timedelta,timezone; print((datetime.now(timezone.utc)-timedelta(minutes=15)).isoformat())')
+          python download_bitunix_history.py \
+            --symbol BTCUSDT \
+            --interval 15m \
+            --start "$START" \
+            --end "$END" \
+            --output recent-btcusdt-15m.csv
+          python run_fvg_quality_backtest.py \
+            --data-file recent-btcusdt-15m.csv \
+            --symbol BTCUSDT \
+            --horizons 1,4,16,96 \
+            --output recent-fvg-quality.json
+
       - name: Upload verification output
         if: always()
         uses: actions/upload-artifact@v4
@@ -80,5 +99,6 @@ jobs:
           path: |
             test-results.txt
             soak-report.json
+            recent-fvg-quality.json
           if-no-files-found: ignore
           retention-days: 7
