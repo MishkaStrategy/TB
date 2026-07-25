@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -11,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from alerts.fvg_detector import FvgDetector, aggregate_current_15m
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType
 from alerts.fvg_store import FvgAlertSettings, FvgEventStore
+from config import HEALTH_WRITE_INTERVAL_SECONDS
 from exchanges.bitunix import BitunixClient
 
 
@@ -25,29 +27,56 @@ def floor_time(value: datetime, minutes: int) -> datetime:
 
 
 def parse_rest_candle(raw: dict, symbol: str, timeframe: str, now: datetime) -> Candle:
-    step = INTERVALS[timeframe]
-    open_time = datetime.fromtimestamp(int(raw["time"]) / 1000, UTC)
-    close_time = open_time + step
     try:
-        prices = {key: Decimal(str(raw[key])) for key in ("open", "high", "low", "close")}
-    except (KeyError, InvalidOperation) as error:
+        step = INTERVALS[timeframe]
+        open_time = datetime.fromtimestamp(int(raw["time"]) / 1000, UTC)
+        prices = {
+            key: Decimal(str(raw[key]))
+            for key in ("open", "high", "low", "close")
+        }
+    except (KeyError, TypeError, ValueError, InvalidOperation, OSError) as error:
         raise ValueError("Malformed Bitunix candle") from error
-    complete = all(value.is_finite() and value > 0 for value in prices.values())
-    if complete:
-        prices["high"] = max(prices["high"], prices["open"], prices["close"])
-        prices["low"] = min(prices["low"], prices["open"], prices["close"])
+
+    if not all(value.is_finite() and value > 0 for value in prices.values()):
+        raise ValueError("Bitunix candle contains non-finite or non-positive prices")
+
+    close_time = open_time + step
+    prices["high"] = max(prices["high"], prices["open"], prices["close"])
+    prices["low"] = min(prices["low"], prices["open"], prices["close"])
     return Candle(
-        symbol=symbol, timeframe=timeframe, open_time=open_time, close_time=close_time,
-        is_closed=close_time <= now, is_complete=complete, **prices,
+        symbol=symbol,
+        timeframe=timeframe,
+        open_time=open_time,
+        close_time=close_time,
+        is_closed=close_time <= now,
+        is_complete=True,
+        **prices,
     )
 
 
 def parse_ws_candle(payload: dict, now: datetime) -> Candle:
-    timeframe = "1m" if payload["ch"].endswith("_1min") else "15m"
-    step_minutes = 1 if timeframe == "1m" else 15
-    open_time = floor_time(datetime.fromtimestamp(int(payload["ts"]) / 1000, UTC), step_minutes)
+    channel = payload["ch"]
+    if channel.endswith("_1min"):
+        timeframe = "1m"
+        step_minutes = 1
+    elif channel.endswith("_15min"):
+        timeframe = "15m"
+        step_minutes = 15
+    else:
+        raise ValueError(f"Unsupported Bitunix kline channel: {channel}")
+
+    open_time = floor_time(
+        datetime.fromtimestamp(int(payload["ts"]) / 1000, UTC),
+        step_minutes,
+    )
     data = payload["data"]
-    raw = {"time": int(open_time.timestamp() * 1000), "open": data["o"], "high": data["h"], "low": data["l"], "close": data["c"]}
+    raw = {
+        "time": int(open_time.timestamp() * 1000),
+        "open": data["o"],
+        "high": data["h"],
+        "low": data["l"],
+        "close": data["c"],
+    }
     return parse_rest_candle(raw, payload["symbol"], timeframe, now)
 
 
@@ -80,6 +109,7 @@ class FvgAlertService:
         self.event_store = event_store or FvgEventStore()
         self.cache = CandleCache()
         self._delivery_lock = asyncio.Lock()
+        self._last_ws_health_write = 0.0
 
     def recover(self, symbol: str, now: datetime | None = None) -> list[FvgEvent]:
         """Restore recent data and return only timely pre/current confirmed events."""
@@ -93,28 +123,49 @@ class FvgAlertService:
                     self.event_store.increment_health("invalid_candles")
                     continue
                 self.cache.put(candle)
-        self.event_store.update_health(last_rest_recovery=now.isoformat(), last_error=None)
+        self.event_store.update_health(
+            last_rest_recovery=now.isoformat(),
+            last_error=None,
+        )
         return self.evaluate(symbol, now, recovery=True)
 
     def ingest_ws(self, payload: dict, now: datetime | None = None) -> list[FvgEvent]:
         now = (now or datetime.now(UTC)).astimezone(UTC)
         candle = parse_ws_candle(payload, now)
         self.cache.put(candle)
-        self.event_store.update_health(last_ws_message=now.isoformat(), last_error=None)
+        monotonic_now = time.monotonic()
+        if monotonic_now - self._last_ws_health_write >= HEALTH_WRITE_INTERVAL_SECONDS:
+            self.event_store.update_health(
+                last_ws_message=now.isoformat(),
+                last_error=None,
+            )
+            self._last_ws_health_write = monotonic_now
         return self.evaluate(candle.symbol, now)
 
     def evaluate(self, symbol: str, now: datetime, recovery: bool = False) -> list[FvgEvent]:
         events = []
-        closed = [c for c in self.cache.series(symbol, "15m", now) if c.is_closed and c.is_complete]
+        closed = [
+            candle
+            for candle in self.cache.series(symbol, "15m", now)
+            if candle.is_closed and candle.is_complete
+        ]
         if len(closed) >= 3:
             event = self.detector.detect_confirmed(closed[-3:], now)
             # Confirmed recovery is allowed for one latest interval; pre recovery is forbidden.
-            if event and (not recovery or now - event.candle_c_close_time <= timedelta(minutes=15)):
+            if event and (
+                not recovery
+                or now - event.candle_c_close_time <= timedelta(minutes=15)
+            ):
                 events.append(event)
         interval_open = floor_time(now, 15)
         if interval_open + timedelta(minutes=12) <= now < interval_open + timedelta(minutes=13):
-            current = aggregate_current_15m(symbol, self.cache.series(symbol, "1m", now), interval_open, now)
-            previous = [c for c in closed if c.open_time < interval_open]
+            current = aggregate_current_15m(
+                symbol,
+                self.cache.series(symbol, "1m", now),
+                interval_open,
+                now,
+            )
+            previous = [candle for candle in closed if candle.open_time < interval_open]
             if current is not None and len(previous) >= 2:
                 event = self.detector.detect_pre(previous[-2], previous[-1], current, now)
                 if event:
@@ -127,18 +178,37 @@ class FvgAlertService:
                 is_new_event = self.event_store.record_event(event)
                 if is_new_event:
                     self.event_store.increment_health(
-                        "pre_events" if event.event_type is FvgEventType.PRE_FVG else "confirmed_events"
+                        "pre_events"
+                        if event.event_type is FvgEventType.PRE_FVG
+                        else "confirmed_events"
                     )
-                recipients = self.settings.recipients(event)
+                try:
+                    recipients = self.settings.recipients(event)
+                except Exception as error:
+                    logger.exception(
+                        "Failed to evaluate FVG recipients event=%s",
+                        event.event_id,
+                    )
+                    self.event_store.update_health(last_error=str(error))
+                    self.event_store.increment_health("recipient_failures")
+                    continue
                 if not recipients and is_new_event:
                     self.event_store.increment_health("events_without_recipients")
                 for chat_id in recipients:
                     if not self.event_store.delivery_needed(chat_id, event.event_id):
                         continue
                     try:
-                        await bot.send_message(chat_id=chat_id, text=format_fvg_message(event))
-                    except Exception as error:  # Telegram retries on the next evaluation.
-                        logger.warning("FVG delivery failed chat=%s event=%s: %s", chat_id, event.event_id, error)
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=format_fvg_message(event),
+                        )
+                    except Exception as error:
+                        logger.warning(
+                            "FVG delivery failed chat=%s event=%s: %s",
+                            chat_id,
+                            event.event_id,
+                            error,
+                        )
                         self.event_store.update_health(last_error=str(error))
                         self.event_store.increment_health("delivery_failures")
                         continue
