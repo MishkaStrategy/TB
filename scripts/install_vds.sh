@@ -8,6 +8,7 @@ SERVICE_USER="fvgbot"
 INSTALL_DIR="/opt/fvg-alert-bot"
 SERVICE_NAME="fvg-alert-bot"
 BACKUP_SERVICE_NAME="fvg-alert-bot-backup"
+BACKUP_DIR="/var/backups/fvg-alert-bot"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -54,34 +55,33 @@ if [[ ! -f "${INSTALL_DIR}/.env" ]]; then
   sed -i "s|^ALLOWED_TELEGRAM_IDS=.*|ALLOWED_TELEGRAM_IDS=${TELEGRAM_ID}|" "${INSTALL_DIR}/.env"
 fi
 
-mkdir -p "${INSTALL_DIR}/data" /tmp/trading-assistant-mpl
-chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}" /tmp/trading-assistant-mpl
-chmod 700 "${INSTALL_DIR}/data"
-chmod 600 "${INSTALL_DIR}/.env"
+mkdir -p "${INSTALL_DIR}/data" /tmp/trading-assistant-mpl "${BACKUP_DIR}"
+chmod 700 "${INSTALL_DIR}/data" /tmp/trading-assistant-mpl "${BACKUP_DIR}"
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/data" /tmp/trading-assistant-mpl
+
+# Install and update the virtual environment as root, then lock all executable
+# code down. The service account receives write access only to runtime data.
+echo "Создаю виртуальное окружение и устанавливаю зависимости…"
+python3 -m venv "${INSTALL_DIR}/.venv"
+"${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
+"${INSTALL_DIR}/.venv/bin/python" -m pip install -r "${INSTALL_DIR}/requirements.txt"
+
+chown -R root:root "${INSTALL_DIR}"
+chown -R "${SERVICE_USER}:${SERVICE_USER}" "${INSTALL_DIR}/data"
+chown root:"${SERVICE_USER}" "${INSTALL_DIR}/.env"
+chmod 640 "${INSTALL_DIR}/.env"
 chmod 750 "${INSTALL_DIR}/scripts/backup_data.sh"
 
-echo "Создаю виртуальное окружение и устанавливаю зависимости…"
-runuser -u "${SERVICE_USER}" -- python3 -m venv "${INSTALL_DIR}/.venv"
-runuser -u "${SERVICE_USER}" -- "${INSTALL_DIR}/.venv/bin/python" -m pip install --upgrade pip
-runuser -u "${SERVICE_USER}" -- "${INSTALL_DIR}/.venv/bin/python" -m pip install -r "${INSTALL_DIR}/requirements.txt"
-
 echo "Проверяю код перед запуском службы…"
-runuser -u "${SERVICE_USER}" -- env \
-  PUBLIC_ACCESS_ENABLED=true \
-  MPLCONFIGDIR=/tmp/trading-assistant-mpl \
-  "${INSTALL_DIR}/.venv/bin/python" -m compileall -q \
-  "${INSTALL_DIR}/bot.py" \
-  "${INSTALL_DIR}/config.py" \
-  "${INSTALL_DIR}/alerts" \
-  "${INSTALL_DIR}/database" \
-  "${INSTALL_DIR}/exchanges" \
-  "${INSTALL_DIR}/handlers" \
-  "${INSTALL_DIR}/tests"
-runuser -u "${SERVICE_USER}" -- env \
-  PUBLIC_ACCESS_ENABLED=true \
-  MPLCONFIGDIR=/tmp/trading-assistant-mpl \
-  "${INSTALL_DIR}/.venv/bin/python" -m unittest discover \
-  -s "${INSTALL_DIR}/tests" -v
+runuser -u "${SERVICE_USER}" -- bash -c "
+  set -euo pipefail
+  cd '${INSTALL_DIR}'
+  export PUBLIC_ACCESS_ENABLED=true
+  export MPLCONFIGDIR=/tmp/trading-assistant-mpl
+  .venv/bin/python -m compileall -q \
+    bot.py config.py alerts database exchanges handlers tests
+  .venv/bin/python -m unittest discover -s tests -v
+"
 
 cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
@@ -143,7 +143,7 @@ User=root
 Group=root
 UMask=0077
 Environment=INSTALL_DIR=${INSTALL_DIR}
-Environment=BACKUP_DIR=/var/backups/fvg-alert-bot
+Environment=BACKUP_DIR=${BACKUP_DIR}
 Environment=RETENTION_DAYS=14
 ExecStart=${INSTALL_DIR}/scripts/backup_data.sh
 Nice=10
@@ -152,7 +152,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=${INSTALL_DIR}/data /var/backups/fvg-alert-bot
+ReadWritePaths=${INSTALL_DIR}/data ${BACKUP_DIR}
 EOF
 
 cat > "/etc/systemd/system/${BACKUP_SERVICE_NAME}.timer" <<EOF
