@@ -49,8 +49,8 @@ jobs:
       - name: Compile Python sources
         run: >-
           python -m compileall -q
-          bot.py config.py restart_bot.py
-          alerts database exchanges handlers tests
+          bot.py config.py restart_bot.py run_fvg_soak.py
+          alerts database exchanges handlers operations tests
 
       - name: Run unit tests
         env:
