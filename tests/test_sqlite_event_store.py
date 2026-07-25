@@ -2,6 +2,7 @@ import json
 import sqlite3
 import threading
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -68,6 +69,7 @@ class SqliteEventStoreTests(unittest.TestCase):
             health = store.health()
             self.assertEqual(health["events"], 1)
             self.assertEqual(health["deliveries"], 1)
+            self.assertEqual(health["outbox"], 0)
             self.assertEqual(health["notifications_sent"], 3)
             self.assertTrue(health["ws_connected"])
 
@@ -75,9 +77,45 @@ class SqliteEventStoreTests(unittest.TestCase):
             self.assertEqual(summary["BULLISH"]["confirmed"], 1)
             self.assertEqual(summary["deliveries"], 1)
 
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 mode = connection.execute("PRAGMA journal_mode").fetchone()[0]
             self.assertEqual(mode.lower(), "wal")
+
+    def test_outbox_persists_retries_and_removes_completed_rows(self):
+        with TemporaryDirectory() as directory:
+            store = FvgEventStore(Path(directory) / "events.sqlite3")
+            event = make_event(event_type=FvgEventType.PRE_FVG)
+            store.record_event(event)
+            inserted = store.enqueue_deliveries(
+                event.event_id,
+                [42, 43, 42],
+                "persistent message",
+            )
+            self.assertEqual(inserted, 2)
+            self.assertEqual(store.health()["outbox"], 2)
+            self.assertEqual(len(store.due_deliveries()), 2)
+
+            store.mark_delivery_failed(
+                42,
+                event.event_id,
+                "temporary",
+                retry_after_seconds=60,
+            )
+            due_now = store.due_deliveries()
+            self.assertEqual([item["chat_id"] for item in due_now], ["43"])
+
+            store.mark_delivered(43, event.event_id)
+            self.assertFalse(store.delivery_needed(43, event.event_id))
+            self.assertEqual(store.health()["outbox"], 1)
+
+            due_later = store.due_deliveries(
+                now=datetime.now(UTC) + timedelta(minutes=2)
+            )
+            self.assertEqual(due_later[0]["attempts"], 1)
+            self.assertEqual(due_later[0]["last_error"], "temporary")
+
+            store.abandon_delivery(42, event.event_id)
+            self.assertEqual(store.health()["outbox"], 0)
 
     def test_imports_legacy_json_once(self):
         with TemporaryDirectory() as directory:
@@ -106,7 +144,6 @@ class SqliteEventStoreTests(unittest.TestCase):
             self.assertFalse(first.delivery_needed(42, event.event_id))
             self.assertEqual(first.health()["notifications_sent"], 1)
 
-            # Reopening does not duplicate rows or reapply changed legacy values.
             legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
             legacy["health"]["notifications_sent"] = 99
             legacy_path.write_text(json.dumps(legacy), encoding="utf-8")
@@ -140,15 +177,16 @@ class SqliteEventStoreTests(unittest.TestCase):
             store = FvgEventStore(source)
             event = make_event()
             store.record_event(event)
-            store.mark_delivered(42, event.event_id)
+            store.enqueue_deliveries(event.event_id, [42], "pending")
             store.backup_to(backup)
 
             restored = FvgEventStore(backup)
             self.assertEqual(restored.health()["events"], 1)
-            self.assertEqual(restored.health()["deliveries"], 1)
-            self.assertFalse(restored.delivery_needed(42, event.event_id))
+            self.assertEqual(restored.health()["deliveries"], 0)
+            self.assertEqual(restored.health()["outbox"], 1)
+            self.assertTrue(restored.delivery_needed(42, event.event_id))
 
-    def test_retention_removes_old_events_and_deliveries(self):
+    def test_retention_removes_old_events_deliveries_and_outbox(self):
         with TemporaryDirectory() as directory:
             store = FvgEventStore(Path(directory) / "events.sqlite3")
             old = make_event(detected_at=datetime.now(UTC) - timedelta(days=120))
@@ -157,16 +195,17 @@ class SqliteEventStoreTests(unittest.TestCase):
                 direction=FvgDirection.BEARISH,
             )
             store.record_event(old)
-            store.mark_delivered(42, old.event_id)
-            # Force the next record to run retention again.
-            with sqlite3.connect(store.path) as connection:
+            store.enqueue_deliveries(old.event_id, [42], "old")
+            with closing(sqlite3.connect(store.path)) as connection:
                 connection.execute(
                     "DELETE FROM health WHERE key = 'last_pruned_at'"
                 )
+                connection.commit()
             store.record_event(current)
 
             self.assertEqual(store.health()["events"], 1)
             self.assertEqual(store.health()["deliveries"], 0)
+            self.assertEqual(store.health()["outbox"], 0)
             self.assertEqual(store.summary(days=None)["BEARISH"]["total"], 1)
 
 
