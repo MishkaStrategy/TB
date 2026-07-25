@@ -1,4 +1,4 @@
-"""SQLite/WAL persistence for FVG events, deliveries and health metrics."""
+"""SQLite/WAL persistence for FVG events, deliveries and retry outbox."""
 
 from __future__ import annotations
 
@@ -13,9 +13,19 @@ from alerts.fvg_models import FvgEvent
 
 
 UTC = timezone.utc
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _MIGRATION_LOCKS: dict[str, threading.Lock] = {}
 _MIGRATION_LOCKS_GUARD = threading.Lock()
+
+
+class _ClosingConnection(sqlite3.Connection):
+    """Commit/rollback like sqlite3.Connection and then close explicitly."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
 
 
 def _now() -> datetime:
@@ -63,7 +73,11 @@ class FvgEventStore:
             self._prepare_database()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
+        connection = sqlite3.connect(
+            self.path,
+            timeout=30,
+            factory=_ClosingConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
@@ -145,6 +159,21 @@ class FvgEventStore:
             );
             CREATE INDEX IF NOT EXISTS idx_deliveries_delivered_at
                 ON deliveries(delivered_at);
+            CREATE TABLE IF NOT EXISTS outbox (
+                event_id TEXT NOT NULL,
+                chat_id TEXT NOT NULL,
+                message_text TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NOT NULL,
+                last_error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(event_id, chat_id),
+                FOREIGN KEY(event_id) REFERENCES events(event_id)
+                    ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_outbox_due
+                ON outbox(next_attempt_at, attempts);
             CREATE TABLE IF NOT EXISTS health (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
@@ -239,6 +268,55 @@ class FvgEventStore:
             )
             return cursor.rowcount == 1
 
+    def enqueue_deliveries(
+        self,
+        event_id: str,
+        chat_ids,
+        message_text: str,
+    ) -> int:
+        now = _now().isoformat()
+        inserted = 0
+        with self._connect() as connection:
+            for chat_id in chat_ids:
+                delivered = connection.execute(
+                    "SELECT 1 FROM deliveries WHERE event_id = ? AND chat_id = ?",
+                    (event_id, str(chat_id)),
+                ).fetchone()
+                if delivered is not None:
+                    continue
+                cursor = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO outbox(
+                        event_id, chat_id, message_text, attempts,
+                        next_attempt_at, last_error, created_at, updated_at
+                    ) VALUES (?, ?, ?, 0, ?, NULL, ?, ?)
+                    """,
+                    (event_id, str(chat_id), message_text, now, now, now),
+                )
+                inserted += max(cursor.rowcount, 0)
+        return inserted
+
+    def due_deliveries(
+        self,
+        *,
+        limit: int = 100,
+        now: datetime | None = None,
+    ) -> list[dict]:
+        now_text = (now or _now()).astimezone(UTC).isoformat()
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT event_id, chat_id, message_text, attempts,
+                       next_attempt_at, last_error, created_at
+                FROM outbox
+                WHERE next_attempt_at <= ?
+                ORDER BY next_attempt_at, created_at
+                LIMIT ?
+                """,
+                (now_text, max(1, int(limit))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def delivery_needed(self, chat_id: int, event_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -255,6 +333,45 @@ class FvgEventStore:
                 VALUES (?, ?, ?)
                 """,
                 (event_id, str(chat_id), _now().isoformat()),
+            )
+            connection.execute(
+                "DELETE FROM outbox WHERE event_id = ? AND chat_id = ?",
+                (event_id, str(chat_id)),
+            )
+
+    def mark_delivery_failed(
+        self,
+        chat_id: int,
+        event_id: str,
+        error: str,
+        *,
+        retry_after_seconds: float,
+    ) -> None:
+        retry_at = _now() + timedelta(seconds=max(1, retry_after_seconds))
+        with self._connect() as connection:
+            connection.execute(
+                """
+                UPDATE outbox
+                SET attempts = attempts + 1,
+                    next_attempt_at = ?,
+                    last_error = ?,
+                    updated_at = ?
+                WHERE event_id = ? AND chat_id = ?
+                """,
+                (
+                    retry_at.isoformat(),
+                    str(error)[:2000],
+                    _now().isoformat(),
+                    event_id,
+                    str(chat_id),
+                ),
+            )
+
+    def abandon_delivery(self, chat_id: int, event_id: str) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM outbox WHERE event_id = ? AND chat_id = ?",
+                (event_id, str(chat_id)),
             )
 
     def update_health(self, **values) -> None:
@@ -300,16 +417,21 @@ class FvgEventStore:
             delivery_count = connection.execute(
                 "SELECT COUNT(*) FROM deliveries"
             ).fetchone()[0]
+            outbox_count = connection.execute(
+                "SELECT COUNT(*) FROM outbox"
+            ).fetchone()[0]
         result = {row["key"]: _load(row["value_json"]) for row in rows}
-        result.update(events=event_count, deliveries=delivery_count)
+        result.update(
+            events=event_count,
+            deliveries=delivery_count,
+            outbox=outbox_count,
+        )
         return result
 
     def summary(self, days: int | None = 7) -> dict:
         cutoff = None if days is None else (_now() - timedelta(days=days)).isoformat()
         event_where = "" if cutoff is None else "WHERE detected_at >= ?"
-        delivery_where = (
-            "" if cutoff is None else "WHERE event.detected_at >= ?"
-        )
+        delivery_where = "" if cutoff is None else "WHERE event.detected_at >= ?"
         parameters = () if cutoff is None else (cutoff,)
         with self._connect() as connection:
             rows = connection.execute(
@@ -357,7 +479,10 @@ class FvgEventStore:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".tmp")
         temporary.unlink(missing_ok=True)
-        with self._connect() as source, sqlite3.connect(temporary) as target:
+        with self._connect() as source, sqlite3.connect(
+            temporary,
+            factory=_ClosingConnection,
+        ) as target:
             source.backup(target)
         os.chmod(temporary, 0o600)
         temporary.replace(destination)
