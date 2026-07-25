@@ -23,6 +23,10 @@ jobs:
       - self-hosted
       - fast
     timeout-minutes: 20
+    env:
+      # Existing handler tests exercise the explicitly public test fixture.
+      # Production remains closed by default in .env.example/config.py.
+      PUBLIC_ACCESS_ENABLED: "true"
 
     steps:
       - name: Check out repository
