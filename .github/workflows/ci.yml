@@ -32,6 +32,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Validate shell scripts
+        run: bash -n scripts/install_vds.sh scripts/backup_data.sh
+
       - name: Create isolated Python environment
         run: |
           python3 --version
