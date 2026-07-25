@@ -1,12 +1,7 @@
 from functools import wraps
 
-from config import is_authorized
+from config import PUBLIC_ACCESS_ENABLED, is_authorized
 from database.access_control import AccessRegistry
-
-
-# Temporary public mode. Set to False to restore the existing allow-list and
-# AccessRegistry checks without rebuilding the authorization system.
-PUBLIC_ACCESS_ENABLED = True
 
 
 def authorized(handler):

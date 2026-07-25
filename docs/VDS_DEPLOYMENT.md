@@ -1,175 +1,191 @@
 # Установка FVG Alert Bot на VDS
 
-Инструкция рассчитана на Ubuntu 22.04/24.04 или Debian 12. После настройки
-бот запускается автоматически при перезагрузке сервера и восстанавливается при
-сбое.
+Инструкция рассчитана на Ubuntu 22.04/24.04 или Debian 12. Установочный скрипт
+создаёт изолированную systemd-службу, проверяет релиз до переключения, сохраняет
+runtime-state отдельно от кода и выполняет автоматический rollback, если новый
+процесс не запустился.
 
-> Важно: один Telegram-токен может обслуживаться только одним экземпляром
-> бота. Перед запуском на VDS остановите локальный запуск на Mac.
+> Один Telegram-токен может обслуживаться только одним polling-процессом. Перед
+> включением VDS остановите локальный экземпляр бота.
 
-## Быстрый запуск установочным скриптом
+## Быстрая установка
 
-На чистом VDS подключитесь к серверу, скачайте проект и запустите скрипт:
+Подключитесь к серверу под `root` и выполните:
 
 ```bash
-ssh root@IP_ВАШЕГО_СЕРВЕРА
 apt update && apt install -y git
-git clone https://github.com/mishkacher/TB.git fvg-alert-bot
-cd fvg-alert-bot
+git clone https://github.com/mishkacher/TB.git /root/TB
+cd /root/TB
 bash scripts/install_vds.sh
 ```
 
-Скрипт запросит токен BotFather и ваш числовой Telegram ID, а затем сам:
+Скрипт запросит токен BotFather и Telegram ID администратора. После успешных
+тестов он создаст и запустит:
 
-- установит Python и зависимости;
-- создаст пользователя `fvgbot`;
-- разместит проект в `/opt/fvg-alert-bot`;
-- создаст и включит службу `fvg-alert-bot`;
-- запустит бота.
+- `fvg-alert-bot.service` — основной бот;
+- `fvg-alert-bot-backup.timer` — ежедневный backup runtime-state;
+- отдельного системного пользователя `fvgbot` без интерактивного входа.
 
-После завершения смотрите логи командой:
+## Размещение файлов
 
-```bash
-journalctl -u fvg-alert-bot -f
-```
+| Назначение | Путь |
+|---|---|
+| Активный релиз | `/opt/fvg-alert-bot` |
+| Предыдущий релиз | `/opt/fvg-alert-bot.previous` |
+| Runtime-state | `/var/lib/fvg-alert-bot` |
+| Секреты и настройки | `/etc/fvg-alert-bot.env` |
+| Резервные копии | `/var/backups/fvg-alert-bot` |
+| systemd units | `/etc/systemd/system/fvg-alert-bot*` |
 
-Для установки вручную используйте инструкцию ниже.
+Код и virtualenv принадлежат `root` и недоступны для записи процессу бота.
+Пользователь `fvgbot` может изменять только `/var/lib/fvg-alert-bot`.
 
-## 1. Подключитесь к серверу
+## Настройки
 
-```bash
-ssh root@IP_ВАШЕГО_СЕРВЕРА
-```
-
-Создайте отдельного системного пользователя и установите Python, Git и
-инструменты для виртуального окружения:
-
-```bash
-adduser --disabled-password --gecos "" fvgbot
-apt update
-apt install -y git python3 python3-venv python3-pip
-```
-
-## 2. Склонируйте проект
+Изменяйте production-конфигурацию здесь:
 
 ```bash
-sudo -u fvgbot -H bash
-cd /home/fvgbot
-git clone https://github.com/mishkacher/TB.git fvg-alert-bot
-cd fvg-alert-bot
+nano /etc/fvg-alert-bot.env
+chmod 640 /etc/fvg-alert-bot.env
+chown root:fvgbot /etc/fvg-alert-bot.env
+systemctl restart fvg-alert-bot
 ```
 
-Если репозиторий приватный, настройте SSH-ключ для GitHub и используйте адрес
-вида `git@github.com:mishkacher/TB.git`.
-
-## 3. Установите зависимости
-
-Всё ещё от имени `fvgbot`:
-
-```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements.txt
-cp .env.example .env
-nano .env
-```
-
-Заполните минимум эти поля:
+Минимальная конфигурация:
 
 ```env
 TELEGRAM_TOKEN=токен_из_BotFather
-ADMIN_TELEGRAM_IDS=ваш_числовой_Telegram_ID
-ALLOWED_TELEGRAM_IDS=ваш_числовой_Telegram_ID
+ADMIN_TELEGRAM_IDS=ваш_Telegram_ID
+ALLOWED_TELEGRAM_IDS=ваш_Telegram_ID
+PUBLIC_ACCESS_ENABLED=false
 ```
 
-`BITUNIX_API_KEY` и `BITUNIX_SECRET` для FVG-уведомлений не требуются: бот
-использует публичные рыночные данные.
+`PUBLIC_ACCESS_ENABLED=false` — безопасный production-default. Публичный режим
+нужно включать только осознанно. API-ключи Bitunix для FVG-уведомлений не нужны.
 
-Сохраните файл в `nano`: `Control+O`, `Enter`, затем `Control+X`. Ограничьте
-доступ к токену:
+Доступны защитные лимиты:
+
+```env
+MAX_ACTIVE_SYMBOLS=100
+MAX_SYMBOLS_PER_USER=20
+FVG_DELIVERY_QUEUE_SIZE=1000
+HEALTH_WRITE_INTERVAL_SECONDS=30
+BITUNIX_REQUESTS_PER_SECOND=8
+```
+
+## Проверка службы
 
 ```bash
-chmod 600 .env
-exit
-```
-
-## 4. Проверьте запуск вручную
-
-```bash
-sudo -u fvgbot -H bash -c 'cd /home/fvgbot/fvg-alert-bot && .venv/bin/python bot.py'
-```
-
-В консоли должно появиться `Trading Assistant запущен`. Остановите тестовый
-запуск сочетанием `Control+C`.
-
-Если Telegram показывает `Conflict`, где-то уже работает другой экземпляр с
-этим токеном. Остановите его и повторите запуск.
-
-## 5. Включите автозапуск systemd
-
-Создайте файл службы от имени `root`:
-
-```bash
-nano /etc/systemd/system/fvg-alert-bot.service
-```
-
-Вставьте содержимое:
-
-```ini
-[Unit]
-Description=FVG Alert Bot
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=fvgbot
-WorkingDirectory=/home/fvgbot/fvg-alert-bot
-Environment=MPLCONFIGDIR=/tmp/trading-assistant-mpl
-ExecStart=/home/fvgbot/fvg-alert-bot/.venv/bin/python -u bot.py
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Активируйте и запустите службу:
-
-```bash
-systemctl daemon-reload
-systemctl enable --now fvg-alert-bot
 systemctl status fvg-alert-bot
-```
-
-В статусе должно быть `active (running)`.
-
-## Управление и логи
-
-```bash
-# Смотреть логи в реальном времени
 journalctl -u fvg-alert-bot -f
-
-# Перезапустить бота
-systemctl restart fvg-alert-bot
-
-# Остановить бота
-systemctl stop fvg-alert-bot
-
-# Проверить статус
-systemctl status fvg-alert-bot
+systemctl is-enabled fvg-alert-bot
+systemctl is-active fvg-alert-bot
 ```
 
-## Обновление бота
+Проверка применённого sandboxing:
+
+```bash
+systemd-analyze security fvg-alert-bot.service
+systemctl cat fvg-alert-bot.service
+```
+
+Служба использует, среди прочего, `NoNewPrivileges`, `ProtectSystem=strict`,
+`ProtectHome`, пустой capability set, ограничение address families, лимиты памяти,
+файловых дескрипторов и процессов.
+
+## Безопасное обновление
+
+Обновите исходный checkout и повторно запустите установщик:
+
+```bash
+cd /root/TB
+git pull --ff-only
+bash scripts/install_vds.sh
+```
+
+Обновление проходит так:
+
+1. код копируется в staging-каталог;
+2. создаётся новый virtualenv;
+3. выполняются `compileall` и все unit-тесты;
+4. работающий бот останавливается только после успешных тестов;
+5. делается backup runtime-state;
+6. staging атомарно становится `/opt/fvg-alert-bot`;
+7. systemd проверяет запуск нового процесса;
+8. при ошибке автоматически возвращается предыдущий релиз.
+
+Таким образом, ошибка зависимостей или тестов не останавливает текущий процесс.
+
+## Резервные копии
+
+Таймер запускается ежедневно около `03:15 UTC` с небольшим случайным сдвигом.
+По умолчанию архивы хранятся 14 дней.
+
+```bash
+systemctl list-timers fvg-alert-bot-backup.timer
+systemctl start fvg-alert-bot-backup.service
+journalctl -u fvg-alert-bot-backup.service
+ls -lah /var/backups/fvg-alert-bot
+```
+
+Архив содержит содержимое `/var/lib/fvg-alert-bot`, а не только символическую
+ссылку `data` из каталога релиза.
+
+### Восстановление state
 
 ```bash
 systemctl stop fvg-alert-bot
-sudo -u fvgbot -H bash -c '
-  cd /home/fvgbot/fvg-alert-bot &&
-  git pull &&
-  .venv/bin/python -m pip install -r requirements.txt
-'
+rm -rf /var/lib/fvg-alert-bot/*
+tar -C /var/lib/fvg-alert-bot -xzf \
+  /var/backups/fvg-alert-bot/fvg-alert-bot-YYYYMMDDTHHMMSSZ.tar.gz
+chown -R fvgbot:fvgbot /var/lib/fvg-alert-bot
+chmod 700 /var/lib/fvg-alert-bot
 systemctl start fvg-alert-bot
 ```
 
-Файл `.env` не входит в Git и при обновлении сохраняется.
+Перед восстановлением сохраните отдельную копию текущего state.
+
+## Ручной rollback релиза
+
+Установщик оставляет один предыдущий релиз:
+
+```bash
+systemctl stop fvg-alert-bot
+mv /opt/fvg-alert-bot /opt/fvg-alert-bot.failed-manual
+mv /opt/fvg-alert-bot.previous /opt/fvg-alert-bot
+systemctl start fvg-alert-bot
+systemctl status fvg-alert-bot
+```
+
+Runtime-state и `/etc/fvg-alert-bot.env` при rollback не меняются.
+
+## Диагностика
+
+### Telegram сообщает `Conflict`
+
+С тем же токеном работает другой polling-процесс. Остановите локальный бот или
+другую VDS-службу.
+
+### Служба перезапускается
+
+```bash
+journalctl -u fvg-alert-bot -n 200 --no-pager
+systemctl show fvg-alert-bot \
+  -p NRestarts -p ExecMainStatus -p Result -p MemoryCurrent
+```
+
+### Проверка сети
+
+Боту нужен исходящий HTTPS/WSS-доступ к Telegram и Bitunix. Входящие TCP-порты
+для polling-бота открывать не требуется.
+
+### Проверка файловых прав
+
+```bash
+namei -l /opt/fvg-alert-bot/bot.py
+namei -l /var/lib/fvg-alert-bot
+namei -l /etc/fvg-alert-bot.env
+```
+
+Код должен принадлежать `root`, state — `fvgbot`, а env-файл — `root:fvgbot` с
+правами `640`.

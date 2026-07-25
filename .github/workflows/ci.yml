@@ -23,10 +23,17 @@ jobs:
       - self-hosted
       - fast
     timeout-minutes: 20
+    env:
+      # Existing handler tests exercise the explicitly public test fixture.
+      # Production remains closed by default in .env.example/config.py.
+      PUBLIC_ACCESS_ENABLED: "true"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Validate shell scripts
+        run: bash -n scripts/install_vds.sh scripts/backup_data.sh
 
       - name: Create isolated Python environment
         run: |
@@ -48,4 +55,16 @@ jobs:
       - name: Run unit tests
         env:
           MPLCONFIGDIR: ${{ runner.temp }}/trading-assistant-mpl
-        run: python -m unittest discover -s tests -v
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
+
+      - name: Upload test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-output
+          path: test-results.txt
+          if-no-files-found: ignore
+          retention-days: 7

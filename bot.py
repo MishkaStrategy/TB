@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
@@ -9,8 +11,8 @@ from handlers.fvg_alert import (
     fvg_alert,
     fvg_pre_alert,
     fvg_stats,
-    fvg_symbol,
 )
+from handlers.safe_fvg_symbol import fvg_symbol
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
 from handlers.menu import menu, menu_callback
 from handlers.admin import admin, admin_callback
@@ -42,10 +44,10 @@ async def post_init(application):
 
 
 async def track_user_activity(update, context):
-    """Record every incoming user action before command handlers run."""
+    """Record incoming activity without blocking the Telegram event loop."""
     user = update.effective_user
     if user is not None:
-        UserActivityRegistry().touch(user)
+        await asyncio.to_thread(UserActivityRegistry().touch, user)
 
 
 def main():
