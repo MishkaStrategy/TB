@@ -13,20 +13,20 @@ from alerts.fvg_models import FvgEvent
 
 
 UTC = timezone.utc
-_SCHEMA_VERSION = 1
+SCHEMA_VERSION = 1
 _MIGRATION_LOCKS: dict[str, threading.Lock] = {}
 _MIGRATION_LOCKS_GUARD = threading.Lock()
 
 
-def _utc_now() -> datetime:
+def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _json_dump(value) -> str:
+def _dump(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _json_load(value: str | None, default=None):
+def _load(value: str | None, default=None):
     if value is None:
         return default
     try:
@@ -36,17 +36,12 @@ def _json_load(value: str | None, default=None):
 
 
 class FvgEventStore:
-    """Thread-safe SQLite store with automatic legacy JSON import.
+    """Transactional event store with WAL and automatic JSON migration."""
 
-    A separate connection is opened for every operation. SQLite serializes
-    writers while WAL allows readers and the WebSocket ingestion path to
-    continue without rewriting the complete event history.
-    """
-
-    RETENTION_DAYS = 90
-    PRUNE_INTERVAL = timedelta(days=1)
     DEFAULT_PATH = Path("data/fvg_event_store.sqlite3")
     LEGACY_DEFAULT_PATH = Path("data/fvg_event_store.json")
+    RETENTION_DAYS = 90
+    PRUNE_INTERVAL = timedelta(days=1)
 
     def __init__(
         self,
@@ -63,18 +58,12 @@ class FvgEventStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         resolved = str(self.path.resolve())
         with _MIGRATION_LOCKS_GUARD:
-            self._migration_lock = _MIGRATION_LOCKS.setdefault(
-                resolved, threading.Lock()
-            )
-        with self._migration_lock:
+            lock = _MIGRATION_LOCKS.setdefault(resolved, threading.Lock())
+        with lock:
             self._prepare_database()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(
-            self.path,
-            timeout=30,
-            isolation_level=None,
-        )
+        connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
@@ -84,38 +73,32 @@ class FvgEventStore:
 
     def _prepare_database(self) -> None:
         legacy_data = None
-
-        # An explicit test/legacy path may itself contain the old JSON format.
-        if self.path.exists() and not self._is_sqlite_file(self.path):
-            legacy_data = self._read_legacy_json(self.path)
+        if self.path.exists() and not self._is_sqlite(self.path):
+            legacy_data = self._read_json(self.path)
             backup = self.path.with_suffix(self.path.suffix + ".legacy-json")
             backup.unlink(missing_ok=True)
             self.path.replace(backup)
-
-        if legacy_data is None and self.legacy_json_path is not None:
-            if self.legacy_json_path.exists():
-                legacy_data = self._read_legacy_json(self.legacy_json_path)
+        elif self.legacy_json_path and self.legacy_json_path.exists():
+            legacy_data = self._read_json(self.legacy_json_path)
 
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                self._create_schema(connection)
-                already_imported = connection.execute(
-                    "SELECT value_json FROM metadata WHERE key = 'legacy_json_imported'"
-                ).fetchone()
-                if legacy_data and already_imported is None:
-                    self._import_legacy(connection, legacy_data)
-                    connection.execute(
-                        "INSERT OR REPLACE INTO metadata(key, value_json) VALUES (?, ?)",
-                        ("legacy_json_imported", _json_dump(_utc_now().isoformat())),
-                    )
-                connection.execute("COMMIT")
-            except Exception:
-                connection.execute("ROLLBACK")
-                raise
+            self._create_schema(connection)
+
+        if not legacy_data:
+            return
+        with self._connect() as connection:
+            imported = connection.execute(
+                "SELECT 1 FROM metadata WHERE key = 'legacy_json_imported'"
+            ).fetchone()
+            if imported is None:
+                self._import_legacy(connection, legacy_data)
+                connection.execute(
+                    "INSERT INTO metadata(key, value_json) VALUES (?, ?)",
+                    ("legacy_json_imported", _dump(_now().isoformat())),
+                )
 
     @staticmethod
-    def _is_sqlite_file(path: Path) -> bool:
+    def _is_sqlite(path: Path) -> bool:
         try:
             with path.open("rb") as source:
                 return source.read(16) == b"SQLite format 3\x00"
@@ -123,7 +106,7 @@ class FvgEventStore:
             return False
 
     @staticmethod
-    def _read_legacy_json(path: Path) -> dict | None:
+    def _read_json(path: Path) -> dict | None:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -138,7 +121,6 @@ class FvgEventStore:
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
             );
-
             CREATE TABLE IF NOT EXISTS events (
                 event_id TEXT PRIMARY KEY,
                 event_type TEXT NOT NULL,
@@ -149,12 +131,10 @@ class FvgEventStore:
                 candle_c_close_time TEXT,
                 payload_json TEXT NOT NULL
             );
-
             CREATE INDEX IF NOT EXISTS idx_events_detected_at
                 ON events(detected_at);
             CREATE INDEX IF NOT EXISTS idx_events_direction_type_detected
                 ON events(direction, event_type, detected_at);
-
             CREATE TABLE IF NOT EXISTS deliveries (
                 event_id TEXT NOT NULL,
                 chat_id TEXT NOT NULL,
@@ -163,10 +143,8 @@ class FvgEventStore:
                 FOREIGN KEY(event_id) REFERENCES events(event_id)
                     ON DELETE CASCADE
             );
-
             CREATE INDEX IF NOT EXISTS idx_deliveries_delivered_at
                 ON deliveries(delivered_at);
-
             CREATE TABLE IF NOT EXISTS health (
                 key TEXT PRIMARY KEY,
                 value_json TEXT NOT NULL
@@ -175,7 +153,7 @@ class FvgEventStore:
         )
         connection.execute(
             "INSERT OR REPLACE INTO metadata(key, value_json) VALUES (?, ?)",
-            ("schema_version", _json_dump(_SCHEMA_VERSION)),
+            ("schema_version", _dump(SCHEMA_VERSION)),
         )
 
     def _import_legacy(self, connection: sqlite3.Connection, data: dict) -> None:
@@ -184,8 +162,11 @@ class FvgEventStore:
             for event_id, payload in events.items():
                 if not isinstance(payload, dict):
                     continue
-                normalized = {**payload, "event_id": payload.get("event_id", event_id)}
-                detected_at = normalized.get("detected_at")
+                payload = {
+                    **payload,
+                    "event_id": payload.get("event_id", str(event_id)),
+                }
+                detected_at = payload.get("detected_at")
                 if not isinstance(detected_at, str):
                     continue
                 connection.execute(
@@ -196,14 +177,14 @@ class FvgEventStore:
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        str(normalized["event_id"]),
-                        str(normalized.get("event_type", "UNKNOWN")),
-                        str(normalized.get("symbol", "UNKNOWN")),
-                        str(normalized.get("timeframe", "15m")),
-                        str(normalized.get("direction", "UNKNOWN")),
+                        str(payload["event_id"]),
+                        str(payload.get("event_type", "UNKNOWN")),
+                        str(payload.get("symbol", "UNKNOWN")),
+                        str(payload.get("timeframe", "15m")),
+                        str(payload.get("direction", "UNKNOWN")),
                         detected_at,
-                        normalized.get("candle_c_close_time"),
-                        _json_dump(normalized),
+                        payload.get("candle_c_close_time"),
+                        _dump(payload),
                     ),
                 )
 
@@ -212,10 +193,10 @@ class FvgEventStore:
             for event_id, recipients in deliveries.items():
                 if not isinstance(recipients, dict):
                     continue
-                event_exists = connection.execute(
+                exists = connection.execute(
                     "SELECT 1 FROM events WHERE event_id = ?", (str(event_id),)
                 ).fetchone()
-                if event_exists is None:
+                if exists is None:
                     continue
                 for chat_id, delivered_at in recipients.items():
                     connection.execute(
@@ -229,41 +210,34 @@ class FvgEventStore:
 
         health = data.get("health", {})
         if isinstance(health, dict):
-            for key, value in health.items():
-                connection.execute(
-                    "INSERT OR REPLACE INTO health(key, value_json) VALUES (?, ?)",
-                    (str(key), _json_dump(value)),
-                )
+            connection.executemany(
+                "INSERT OR REPLACE INTO health(key, value_json) VALUES (?, ?)",
+                [(str(key), _dump(value)) for key, value in health.items()],
+            )
 
     def record_event(self, event: FvgEvent) -> bool:
         payload = event.to_json()
         with self._connect() as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            try:
-                self._prune_if_due(connection, _utc_now())
-                cursor = connection.execute(
-                    """
-                    INSERT OR IGNORE INTO events(
-                        event_id, event_type, symbol, timeframe, direction,
-                        detected_at, candle_c_close_time, payload_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event.event_id,
-                        event.event_type.value,
-                        event.symbol,
-                        event.timeframe,
-                        event.direction.value,
-                        payload["detected_at"],
-                        payload.get("candle_c_close_time"),
-                        _json_dump(payload),
-                    ),
-                )
-                connection.execute("COMMIT")
-                return cursor.rowcount == 1
-            except Exception:
-                connection.execute("ROLLBACK")
-                raise
+            self._prune_if_due(connection, _now())
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO events(
+                    event_id, event_type, symbol, timeframe, direction,
+                    detected_at, candle_c_close_time, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.event_type.value,
+                    event.symbol,
+                    event.timeframe,
+                    event.direction.value,
+                    payload["detected_at"],
+                    payload.get("candle_c_close_time"),
+                    _dump(payload),
+                ),
+            )
+            return cursor.rowcount == 1
 
     def delivery_needed(self, chat_id: int, event_id: str) -> bool:
         with self._connect() as connection:
@@ -280,101 +254,87 @@ class FvgEventStore:
                 INSERT OR IGNORE INTO deliveries(event_id, chat_id, delivered_at)
                 VALUES (?, ?, ?)
                 """,
-                (event_id, str(chat_id), _utc_now().isoformat()),
+                (event_id, str(chat_id), _now().isoformat()),
             )
 
     def update_health(self, **values) -> None:
         if not values:
             return
-        rows = [(str(key), _json_dump(value)) for key, value in values.items()]
         with self._connect() as connection:
             connection.executemany(
                 """
                 INSERT INTO health(key, value_json) VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
                 """,
-                rows,
+                [(str(key), _dump(value)) for key, value in values.items()],
             )
 
     def increment_health(self, key: str, amount: int = 1) -> None:
-        amount = int(amount)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT value_json FROM health WHERE key = ?", (key,)
+            ).fetchone()
+            current = _load(row["value_json"], 0) if row else 0
             try:
-                row = connection.execute(
-                    "SELECT value_json FROM health WHERE key = ?", (key,)
-                ).fetchone()
-                current = _json_load(row["value_json"], 0) if row else 0
-                try:
-                    value = int(current) + amount
-                except (TypeError, ValueError):
-                    value = amount
-                connection.execute(
-                    """
-                    INSERT INTO health(key, value_json) VALUES (?, ?)
-                    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
-                    """,
-                    (key, _json_dump(value)),
-                )
-                connection.execute("COMMIT")
-            except Exception:
-                connection.execute("ROLLBACK")
-                raise
+                value = int(current) + int(amount)
+            except (TypeError, ValueError):
+                value = int(amount)
+            connection.execute(
+                """
+                INSERT INTO health(key, value_json) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
+                """,
+                (key, _dump(value)),
+            )
+            connection.commit()
 
     def health(self) -> dict:
         with self._connect() as connection:
-            health_rows = connection.execute(
+            rows = connection.execute(
                 "SELECT key, value_json FROM health"
             ).fetchall()
             event_count = connection.execute(
-                "SELECT COUNT(*) AS value FROM events"
-            ).fetchone()["value"]
+                "SELECT COUNT(*) FROM events"
+            ).fetchone()[0]
             delivery_count = connection.execute(
-                "SELECT COUNT(*) AS value FROM deliveries"
-            ).fetchone()["value"]
-        result = {
-            row["key"]: _json_load(row["value_json"])
-            for row in health_rows
-        }
+                "SELECT COUNT(*) FROM deliveries"
+            ).fetchone()[0]
+        result = {row["key"]: _load(row["value_json"]) for row in rows}
         result.update(events=event_count, deliveries=delivery_count)
         return result
 
     def summary(self, days: int | None = 7) -> dict:
-        cutoff = None
-        if days is not None:
-            cutoff = (_utc_now() - timedelta(days=days)).isoformat()
-
-        where = ""
-        parameters: tuple = ()
-        if cutoff is not None:
-            where = "WHERE detected_at >= ?"
-            parameters = (cutoff,)
-
-        result: dict[str, object] = {}
+        cutoff = None if days is None else (_now() - timedelta(days=days)).isoformat()
+        event_where = "" if cutoff is None else "WHERE detected_at >= ?"
+        delivery_where = (
+            "" if cutoff is None else "WHERE event.detected_at >= ?"
+        )
+        parameters = () if cutoff is None else (cutoff,)
         with self._connect() as connection:
             rows = connection.execute(
                 f"""
                 SELECT direction, event_type, COUNT(*) AS count
-                FROM events
-                {where}
+                FROM events {event_where}
                 GROUP BY direction, event_type
                 """,
                 parameters,
             ).fetchall()
-            delivery_row = connection.execute(
+            deliveries = connection.execute(
                 f"""
                 SELECT COUNT(*) AS count
                 FROM deliveries AS delivery
                 JOIN events AS event ON event.event_id = delivery.event_id
-                {('WHERE event.detected_at >= ?' if cutoff is not None else '')}
+                {delivery_where}
                 """,
                 parameters,
-            ).fetchone()
+            ).fetchone()["count"]
 
         counts = {
             (row["direction"], row["event_type"]): int(row["count"])
             for row in rows
         }
+        result: dict[str, object] = {}
         for direction in ("BULLISH", "BEARISH"):
             confirmed = counts.get((direction, "CONFIRMED_FVG"), 0)
             preliminary = counts.get((direction, "PRE_FVG"), 0)
@@ -383,28 +343,25 @@ class FvgEventStore:
                 "pre": preliminary,
                 "total": confirmed + preliminary,
             }
-        result["deliveries"] = int(delivery_row["count"])
+        result["deliveries"] = int(deliveries)
         return result
 
     def checkpoint(self, *, truncate: bool = False) -> tuple[int, int, int]:
-        """Flush WAL pages, primarily for backups and maintenance."""
         mode = "TRUNCATE" if truncate else "PASSIVE"
         with self._connect() as connection:
             row = connection.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
         return tuple(row) if row is not None else (0, 0, 0)
 
     def backup_to(self, destination: str | os.PathLike) -> Path:
-        """Create a transactionally consistent SQLite backup."""
-        destination_path = Path(destination)
-        destination_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = destination_path.with_suffix(destination_path.suffix + ".tmp")
+        destination = Path(destination)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix(destination.suffix + ".tmp")
         temporary.unlink(missing_ok=True)
-        with self._connect() as source:
-            with sqlite3.connect(temporary) as target:
-                source.backup(target)
+        with self._connect() as source, sqlite3.connect(temporary) as target:
+            source.backup(target)
         os.chmod(temporary, 0o600)
-        temporary.replace(destination_path)
-        return destination_path
+        temporary.replace(destination)
+        return destination
 
     def _prune_if_due(
         self,
@@ -414,8 +371,8 @@ class FvgEventStore:
         row = connection.execute(
             "SELECT value_json FROM health WHERE key = 'last_pruned_at'"
         ).fetchone()
-        if row is not None:
-            raw = _json_load(row["value_json"])
+        if row:
+            raw = _load(row["value_json"])
             try:
                 last_pruned = datetime.fromisoformat(raw).astimezone(UTC)
             except (TypeError, ValueError):
@@ -425,21 +382,20 @@ class FvgEventStore:
 
         cutoff = (now - timedelta(days=self.RETENTION_DAYS)).isoformat()
         cursor = connection.execute(
-            "DELETE FROM events WHERE detected_at < ?",
-            (cutoff,),
+            "DELETE FROM events WHERE detected_at < ?", (cutoff,)
         )
         connection.execute(
             """
             INSERT INTO health(key, value_json) VALUES (?, ?)
             ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
             """,
-            ("last_pruned_at", _json_dump(now.isoformat())),
+            ("last_pruned_at", _dump(now.isoformat())),
         )
         if cursor.rowcount:
             existing = connection.execute(
                 "SELECT value_json FROM health WHERE key = 'events_pruned'"
             ).fetchone()
-            previous = _json_load(existing["value_json"], 0) if existing else 0
+            previous = _load(existing["value_json"], 0) if existing else 0
             try:
                 total = int(previous) + int(cursor.rowcount)
             except (TypeError, ValueError):
@@ -449,5 +405,5 @@ class FvgEventStore:
                 INSERT INTO health(key, value_json) VALUES (?, ?)
                 ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json
                 """,
-                ("events_pruned", _json_dump(total)),
+                ("events_pruned", _dump(total)),
             )
