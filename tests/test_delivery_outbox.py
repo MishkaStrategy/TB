@@ -12,25 +12,29 @@ from alerts.fvg_models import (
     FvgEventType,
     event_id,
 )
-from alerts.fvg_service import FvgAlertService
+from alerts.fvg_service import FvgAlertService, OUTBOX_BATCH_SIZE
 from alerts.fvg_store import FvgEventStore
 
 
 UTC = timezone.utc
 
 
-def make_pre_event():
-    candle_c_open = datetime.now(UTC).replace(second=0, microsecond=0)
+def make_pre_event(index=0):
+    candle_c_open = (
+        datetime.now(UTC).replace(second=0, microsecond=0)
+        + timedelta(minutes=15 * index)
+    )
+    symbol = f"S{index:03d}USDT"
     return FvgEvent(
         event_id=event_id(
-            "BTCUSDT",
+            symbol,
             "15m",
             FvgDirection.BULLISH,
             candle_c_open,
             FvgEventType.PRE_FVG,
         ),
         event_type=FvgEventType.PRE_FVG,
-        symbol="BTCUSDT",
+        symbol=symbol,
         timeframe="15m",
         direction=FvgDirection.BULLISH,
         candle_a_open_time=candle_c_open - timedelta(minutes=30),
@@ -48,8 +52,11 @@ def make_pre_event():
 
 
 class RecipientSettings:
+    def __init__(self, recipients=(42,)):
+        self._recipients = list(recipients)
+
     def recipients(self, event):
-        return [42]
+        return list(self._recipients)
 
 
 class FailingBot:
@@ -109,6 +116,28 @@ class PersistentDeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.health()["outbox"], 0)
             self.assertEqual(store.health()["deliveries"], 1)
             self.assertFalse(store.delivery_needed(42, event.event_id))
+
+    async def test_deliver_drains_more_than_one_outbox_page(self):
+        with TemporaryDirectory() as directory:
+            database = Path(directory) / "events.sqlite3"
+            store = FvgEventStore(database)
+            recipients = range(10_000, 10_010)
+            service = FvgAlertService(
+                settings=RecipientSettings(recipients),
+                event_store=store,
+            )
+            bot = SuccessfulBot()
+            event_count = OUTBOX_BATCH_SIZE // 10 + 5
+            events = [make_pre_event(index) for index in range(event_count)]
+            expected = event_count * 10
+
+            await service.deliver(bot, events)
+
+            health = store.health()
+            self.assertGreater(expected, OUTBOX_BATCH_SIZE)
+            self.assertEqual(len(bot.messages), expected)
+            self.assertEqual(health["deliveries"], expected)
+            self.assertEqual(health["outbox"], 0)
 
 
 if __name__ == "__main__":
