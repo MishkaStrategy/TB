@@ -4,6 +4,7 @@ from decimal import Decimal
 from exchanges.bitunix import BitunixClient
 from handlers.funding import (
     build_funding_menu,
+    enrich_funding_rates,
     format_funding_rates,
     funding_page_count,
     top_funding_rates,
@@ -55,6 +56,33 @@ class FundingFormattingTests(unittest.TestCase):
         self.assertIn("+2.00%", text)
         self.assertIn("-5.00%", text)
         self.assertNotIn("+0.0005%", text)
+
+    def test_ticker_funding_field_cannot_override_batch_rate(self):
+        rates = [
+            {
+                "symbol": "TESTUSDT",
+                "fundingRate": "0.01514",
+                "fundingInterval": 4,
+            }
+        ]
+        tickers = [
+            {
+                "symbol": "TESTUSDT",
+                "fundingRate": "-1.514051",
+                "open": "100",
+                "lastPrice": "101",
+            }
+        ]
+
+        enriched = enrich_funding_rates(rates, tickers)
+        text = format_funding_rates(enriched)
+
+        self.assertEqual(enriched[0]["fundingRate"], "0.01514")
+        self.assertEqual(enriched[0]["fundingInterval"], 4)
+        self.assertEqual(enriched[0]["open"], "100")
+        self.assertEqual(enriched[0]["lastPrice"], "101")
+        self.assertIn("+1.5140%", text)
+        self.assertNotIn("−151.4051%", text)
 
     def test_sorts_positive_and_negative_rates_by_extremity(self):
         positive, negative = top_funding_rates(
