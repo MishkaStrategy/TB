@@ -32,7 +32,7 @@ def _decimal_value(item: dict, *keys: str) -> Decimal | None:
 
 
 def _funding_value(item: dict) -> Decimal | None:
-    """Return the funding rate as a fractional value from the Bitunix API."""
+    """Return the funding rate in Bitunix percentage-point units."""
     return _decimal_value(item, "fundingRate", "funding_rate", "rate")
 
 
@@ -83,8 +83,9 @@ def _format_table(
 
     lines.append("<code> #  Инструмент    Фандинг    Цена 24ч</code>")
     for index, (symbol, rate, price_change) in enumerate(items, start_index + 1):
-        # Bitunix funding-rate endpoints return a fraction: 0.0005 means 0.05%.
-        percent = abs(rate) * 100
+        # Live Bitunix funding values are already percentage points:
+        # -1.514051 must be displayed as -1.5141%, not -151.4051%.
+        percent = abs(rate)
         change = "н/д" if price_change is None else f"{price_change:+.2f}%"
         safe_symbol = escape(symbol[:16])
         lines.append(
@@ -155,10 +156,8 @@ def build_funding_menu(page: int, pages: int) -> InlineKeyboardMarkup:
 def enrich_funding_rates(rates: list[dict], tickers: list[dict]) -> list[dict]:
     """Add ticker prices without allowing ticker fields to replace funding data.
 
-    The live tickers response may contain a field named ``fundingRate`` whose
-    scale differs from the dedicated funding-rate endpoint. Only price fields
-    are copied from tickers, so the batch endpoint remains the source of truth
-    for funding rate, sign, interval, and settlement metadata.
+    Only price fields are copied from tickers, so the batch endpoint remains the
+    source of truth for funding rate, sign, interval, and settlement metadata.
     """
     tickers_by_symbol = {
         ticker.get("symbol"): ticker
