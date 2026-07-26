@@ -4,7 +4,16 @@ Telegram-бот для отслеживания Fair Value Gap (FVG) на фью
 Бот отправляет уведомления и показывает статистику, но не открывает сделки и не
 является финансовой рекомендацией.
 
-Текущая версия ветки `main`: **1.0.0-rc10**.
+Текущая стабильная версия: **1.0.0**.
+
+## Статус проекта
+
+Проект завершён и переведён в режим **feature freeze**.
+
+- основные production-функции считаются стабильными;
+- новые функции и плановые изменения не принимаются;
+- обновления допускаются только для критических production-ошибок и security fixes;
+- production рекомендуется устанавливать по тегу `v1.0.0`, а не из произвольного состояния `main`.
 
 ## Возможности
 
@@ -49,19 +58,19 @@ python3 -m venv .venv
 соединения к Telegram и Bitunix. Входящие порты, домен и веб-сервер не требуются.
 
 Перед установкой убедитесь, что на файловой системе `/opt` доступно не менее
-512 МБ и 5000 inode. Один Telegram-токен может использовать только один
+**1 ГБ** и 5000 inode. Один Telegram-токен может использовать только один
 polling-процесс.
 
-### Первая установка из `main`
+### Первая установка стабильного релиза
 
 ```bash
 ssh root@IP_АДРЕС_СЕРВЕРА
 apt update && apt install -y git
 git clone https://github.com/mishkacher/TB.git /root/TB
 cd /root/TB
-git checkout main
-git pull --ff-only origin main
-bash scripts/install_vds.sh
+git fetch --tags --prune
+git checkout v1.0.0
+FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 При первом запуске установщик запросит токен BotFather и Telegram ID
@@ -79,20 +88,21 @@ bash scripts/install_vds.sh
 - запускает systemd-службу и backup-таймер;
 - автоматически возвращает предыдущий релиз, если новый не запускается.
 
-### Обновление VDS после bugfix или новой функции
+### Обновление VDS
+
+Стабильную установку обновляйте только при публикации критического исправления:
 
 ```bash
 cd /root/TB
-git fetch origin --prune
-git checkout main
-git pull --ff-only origin main
-bash scripts/install_vds.sh
+git fetch --tags --prune
+git checkout vНОВАЯ_ВЕРСИЯ
+FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 Файл `/etc/fvg-alert-bot.env` и каталог `/var/lib/fvg-alert-bot` при обновлении
 сохраняются. Повторно вводить токен и Telegram ID не требуется.
 
-### Проверка после обновления
+### Проверка после установки
 
 ```bash
 cat /opt/fvg-alert-bot/VERSION
@@ -102,10 +112,10 @@ systemctl status fvg-alert-bot --no-pager --full
 journalctl -u fvg-alert-bot -n 100 --no-pager
 ```
 
-Ожидаемая версия после текущего обновления:
+Ожидаемая версия:
 
 ```text
-1.0.0-rc10
+1.0.0
 ```
 
 В Telegram проверьте `/menu`, `/funding` и `/admin`. В админ-панели кнопка
@@ -170,23 +180,16 @@ HEALTH_ALERT_COOLDOWN_SECONDS=1800
 
 ## Резервные копии и rollback
 
-Проверьте backup-таймер:
-
 ```bash
 systemctl list-timers fvg-alert-bot-backup.timer
 systemctl status fvg-alert-bot-backup.timer --no-pager
-```
-
-Запуск backup вручную:
-
-```bash
 systemctl start fvg-alert-bot-backup.service
 journalctl -u fvg-alert-bot-backup.service -n 100 --no-pager
 ls -lah /var/backups/fvg-alert-bot
 ```
 
 Установщик хранит предыдущий релиз в `/opt/fvg-alert-bot.previous`. Подробные
-процедуры восстановления и canary-проверки находятся в
+процедуры восстановления находятся в
 [`docs/VDS_DEPLOYMENT.md`](docs/VDS_DEPLOYMENT.md) и
 [`docs/VDS_FIRST_INSTALL_RECOVERY.md`](docs/VDS_FIRST_INSTALL_RECOVERY.md).
 
