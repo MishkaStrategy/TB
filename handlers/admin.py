@@ -1,5 +1,8 @@
-"""Administrator dashboard and user activity statistics."""
+"""Administrator dashboard, user statistics and operational health."""
 
+from __future__ import annotations
+
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -10,15 +13,43 @@ from database.user_activity import UserActivityRegistry
 
 
 def admin_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton(
-        "👥 Статистика пользователей", callback_data="admin:users"
-    )]])
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "👥 Статистика пользователей",
+                    callback_data="admin:users",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🩺 Состояние бота",
+                    callback_data="admin:health",
+                )
+            ],
+        ]
+    )
 
 
 def _format_time(raw):
     if not raw:
         return "—"
-    return datetime.fromisoformat(raw).astimezone().strftime("%d.%m.%Y %H:%M")
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return "некорректное значение"
+    return value.astimezone().strftime("%d.%m.%Y %H:%M:%S")
+
+
+def _format_bytes(value):
+    size = max(0, int(value or 0))
+    units = ("Б", "КБ", "МБ", "ГБ")
+    amount = float(size)
+    for unit in units:
+        if amount < 1024 or unit == units[-1]:
+            return f"{amount:.1f} {unit}" if unit != "Б" else f"{int(amount)} {unit}"
+        amount /= 1024
+    return f"{size} Б"
 
 
 def format_user_stats(registry=None, now=None):
@@ -29,10 +60,15 @@ def format_user_stats(registry=None, now=None):
     def active_since(delta):
         return sum(
             datetime.fromisoformat(user["last_seen"]) >= now - delta
-            for user in users if user.get("last_seen")
+            for user in users
+            if user.get("last_seen")
         )
 
-    latest = sorted(users, key=lambda user: user.get("last_seen", ""), reverse=True)[:5]
+    latest = sorted(
+        users,
+        key=lambda user: user.get("last_seen", ""),
+        reverse=True,
+    )[:5]
     lines = [
         "👥 Статистика пользователей",
         "",
@@ -45,16 +81,88 @@ def format_user_stats(registry=None, now=None):
         lines.extend(["", "Последняя активность:"])
         for user in latest:
             username = f" @{user['username']}" if user.get("username") else ""
-            lines.append(f"• {user.get('name', 'Без имени')}{username} — {_format_time(user.get('last_seen'))}")
+            lines.append(
+                f"• {user.get('name', 'Без имени')}{username} — "
+                f"{_format_time(user.get('last_seen'))}"
+            )
     return "\n".join(lines)
+
+
+def format_bot_health(event_store, now=None):
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    health = event_store.health()
+    ws_connected = health.get("ws_connected")
+    if ws_connected is True:
+        ws_status = "подключён"
+    elif ws_connected is False:
+        ws_status = "отключён"
+    else:
+        ws_status = "неизвестно"
+
+    database_size = 0
+    try:
+        database_size = event_store.path.stat().st_size
+    except OSError:
+        pass
+
+    last_ws = health.get("last_ws_message")
+    ws_age = ""
+    if last_ws:
+        try:
+            age = max(
+                0,
+                int(
+                    (
+                        now
+                        - datetime.fromisoformat(str(last_ws)).astimezone(
+                            timezone.utc
+                        )
+                    ).total_seconds()
+                ),
+            )
+            ws_age = f" ({age} сек. назад)"
+        except (TypeError, ValueError):
+            ws_age = ""
+
+    return "\n".join(
+        [
+            "🩺 Состояние FVG Alert Bot",
+            "",
+            f"Bitunix WebSocket: {ws_status}",
+            f"Последняя WS-свеча: {_format_time(last_ws)}{ws_age}",
+            (
+                "Последний REST recovery: "
+                f"{_format_time(health.get('last_rest_recovery'))}"
+            ),
+            f"Последняя ошибка: {health.get('last_error') or '—'}",
+            "",
+            f"Событий в SQLite: {int(health.get('events') or 0)}",
+            f"Успешных доставок: {int(health.get('deliveries') or 0)}",
+            f"Сообщений в outbox: {int(health.get('outbox') or 0)}",
+            (
+                "Ошибок доставки: "
+                f"{int(health.get('delivery_failures') or 0)}"
+            ),
+            (
+                "Повторных доставок: "
+                f"{int(health.get('delivery_retries') or 0)}"
+            ),
+            f"Размер SQLite: {_format_bytes(database_size)}",
+        ]
+    )
 
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     if user is None or not is_admin(user.id):
-        await update.effective_message.reply_text("Эта панель доступна только администраторам.")
+        await update.effective_message.reply_text(
+            "Эта панель доступна только администраторам."
+        )
         return
-    await update.effective_message.reply_text("🛠 Админ-панель", reply_markup=admin_keyboard())
+    await update.effective_message.reply_text(
+        "🛠 Админ-панель",
+        reply_markup=admin_keyboard(),
+    )
 
 
 async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,7 +172,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await query.answer()
     if not is_admin(user.id):
-        await query.edit_message_text("Эта панель доступна только администраторам.")
+        await query.edit_message_text(
+            "Эта панель доступна только администраторам."
+        )
         return
     if query.data == "admin:users":
-        await query.edit_message_text(format_user_stats(), reply_markup=admin_keyboard())
+        text = await asyncio.to_thread(format_user_stats)
+        await query.edit_message_text(text, reply_markup=admin_keyboard())
+    elif query.data == "admin:health":
+        from alerts.scheduler import get_fvg_service
+
+        text = await asyncio.to_thread(
+            format_bot_health,
+            get_fvg_service().event_store,
+        )
+        await query.edit_message_text(text, reply_markup=admin_keyboard())

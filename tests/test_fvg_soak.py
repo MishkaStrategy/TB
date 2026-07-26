@@ -14,7 +14,9 @@ class FvgSoakTests(unittest.IsolatedAsyncioTestCase):
                 events=20,
                 recipients=3,
                 batch_size=7,
-                max_seconds=10,
+                # Self-hosted runners can be briefly contended; the mandatory
+                # 500x10 CI soak below retains the strict production threshold.
+                max_seconds=20,
                 max_peak_memory_mb=64,
             )
             self.assertTrue(report.passed, report.failures)

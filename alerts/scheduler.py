@@ -6,6 +6,14 @@ from datetime import datetime, timezone
 
 from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
+from alerts.health_monitor import HealthAlertMonitor
+from config import (
+    ADMIN_TELEGRAM_IDS,
+    HEALTH_ALERT_COOLDOWN_SECONDS,
+    HEALTH_ALERT_INTERVAL_SECONDS,
+    HEALTH_ALERT_OUTBOX_THRESHOLD,
+    HEALTH_ALERT_STALE_WS_SECONDS,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -70,8 +78,47 @@ async def run_fvg_delivery_retry(context):
         service.event_store.increment_health("delivery_retry_job_failures")
 
 
+async def run_operational_health(context):
+    """Send throttled operational warnings and recovery notices to admins."""
+    service = context.job.data["fvg_service"]
+    monitor = context.job.data["health_monitor"]
+    try:
+        health = await asyncio.to_thread(service.event_store.health)
+        active_symbols = await asyncio.to_thread(service.settings.active_symbols)
+        alerts = monitor.evaluate(
+            health,
+            has_active_symbols=bool(active_symbols),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as error:
+        logger.exception("Operational health evaluation failed")
+        service.event_store.update_health(last_error=str(error))
+        service.event_store.increment_health("health_monitor_failures")
+        return
+
+    for message in alerts:
+        for admin_id in sorted(ADMIN_TELEGRAM_IDS):
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=message,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning(
+                    "Failed to send health alert to admin=%s: %s",
+                    admin_id,
+                    error,
+                )
+                service.event_store.increment_health(
+                    "health_alert_delivery_failures"
+                )
+
+
 def schedule_fvg_alerts(application):
-    """Register FVG control points, retry outbox and REST recovery."""
+    """Register FVG control points, outbox, health and REST recovery."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()
@@ -108,6 +155,20 @@ def schedule_fvg_alerts(application):
         first=15,
         name="fvg-rest-recovery",
         data={"fvg_service": service},
+    )
+    application.job_queue.run_repeating(
+        run_operational_health,
+        interval=HEALTH_ALERT_INTERVAL_SECONDS,
+        first=min(30, HEALTH_ALERT_INTERVAL_SECONDS),
+        name="fvg-operational-health",
+        data={
+            "fvg_service": service,
+            "health_monitor": HealthAlertMonitor(
+                stale_ws_seconds=HEALTH_ALERT_STALE_WS_SECONDS,
+                outbox_threshold=HEALTH_ALERT_OUTBOX_THRESHOLD,
+                cooldown_seconds=HEALTH_ALERT_COOLDOWN_SECONDS,
+            ),
+        },
     )
 
 
