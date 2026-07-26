@@ -5,12 +5,16 @@ from pathlib import Path
 class InstallVdsScriptTests(unittest.TestCase):
     def test_pre_switch_backup_uses_staging_runtime(self):
         script = Path("scripts/install_vds.sh").read_text(encoding="utf-8")
-        expected = """INSTALL_DIR=\"${STAGING_DIR}\" \\
-DATA_DIR=\"${STATE_DIR}\" \\
-BACKUP_DIR=\"${BACKUP_DIR}\" \\
-RETENTION_DAYS=14 \\
-PYTHON=\"${STAGING_DIR}/.venv/bin/python\" \\
-  \"${STAGING_DIR}/scripts/backup_data.sh\""""
+        expected = "\n".join(
+            [
+                'INSTALL_DIR="${STAGING_DIR}" \\',
+                'DATA_DIR="${STATE_DIR}" \\',
+                'BACKUP_DIR="${BACKUP_DIR}" \\',
+                'RETENTION_DAYS=14 \\',
+                'PYTHON="${STAGING_DIR}/.venv/bin/python" \\',
+                '  "${STAGING_DIR}/scripts/backup_data.sh"',
+            ]
+        )
 
         self.assertIn(expected, script)
 
