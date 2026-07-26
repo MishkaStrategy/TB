@@ -154,7 +154,7 @@ jobs:
           touch "${install_dir}/bot.py"
           printf 'TELEGRAM_TOKEN=ci-placeholder\n' > "${env_file}"
 
-          python scripts/render_systemd_units.py \
+          python3 scripts/render_systemd_units.py \
             --installer scripts/install_vds.sh \
             --output "${unit_dir}" \
             --service-user "$(id -un)" \
