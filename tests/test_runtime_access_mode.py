@@ -55,6 +55,7 @@ class DynamicAuthorizationTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch.object(auth, "_RUNTIME_SETTINGS", settings),
+                patch.object(auth, "PUBLIC_ACCESS_ENABLED", False),
                 patch.object(auth, "is_authorized", return_value=False),
                 patch.object(auth, "AccessRegistry") as registry_class,
             ):
