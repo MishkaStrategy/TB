@@ -15,6 +15,8 @@ STATE_DIR="/var/lib/fvg-alert-bot"
 ENV_FILE="/etc/fvg-alert-bot.env"
 BACKUP_DIR="/var/backups/fvg-alert-bot"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+MIN_FREE_MB="${FVG_INSTALL_MIN_FREE_MB:-512}"
+MIN_FREE_INODES="${FVG_INSTALL_MIN_FREE_INODES:-5000}"
 
 cleanup() {
   if [[ -d "${STAGING_DIR}" ]]; then
@@ -22,6 +24,35 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+check_storage_capacity() {
+  local filesystem_path="$(dirname "${INSTALL_DIR}")"
+  local available_kb available_mb available_inodes required_kb
+
+  if [[ ! "${MIN_FREE_MB}" =~ ^[0-9]+$ ]] || \
+     [[ ! "${MIN_FREE_INODES}" =~ ^[0-9]+$ ]]; then
+    echo "FVG_INSTALL_MIN_FREE_MB и FVG_INSTALL_MIN_FREE_INODES должны быть неотрицательными целыми числами." >&2
+    exit 1
+  fi
+
+  available_kb="$(df -Pk "${filesystem_path}" | awk 'NR == 2 {print $4}')"
+  available_inodes="$(df -Pi "${filesystem_path}" | awk 'NR == 2 {print $4}')"
+  required_kb=$((MIN_FREE_MB * 1024))
+  available_mb=$((available_kb / 1024))
+
+  if (( available_kb < required_kb )); then
+    echo "Недостаточно свободного места для безопасной установки: доступно ${available_mb} МБ, требуется не менее ${MIN_FREE_MB} МБ." >&2
+    df -h "${filesystem_path}" >&2
+    echo "Безопасная очистка: rm -rf /root/.cache/pip && apt-get clean" >&2
+    exit 1
+  fi
+
+  if (( available_inodes < MIN_FREE_INODES )); then
+    echo "Недостаточно свободных inode для безопасной установки: доступно ${available_inodes}, требуется не менее ${MIN_FREE_INODES}." >&2
+    df -ih "${filesystem_path}" >&2
+    exit 1
+  fi
+}
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Запустите скрипт с sudo: sudo bash scripts/install_vds.sh" >&2
@@ -33,9 +64,12 @@ if [[ ! -f "${PROJECT_DIR}/bot.py" ]]; then
   exit 1
 fi
 
+check_storage_capacity
+
 echo "Устанавливаю системные зависимости…"
 apt update
 apt install -y git python3 python3-venv python3-pip rsync
+check_storage_capacity
 
 if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
   adduser --system --group --home /var/lib/fvgbot "${SERVICE_USER}"
@@ -83,18 +117,23 @@ rsync -a --delete \
   "${PROJECT_DIR}/" "${STAGING_DIR}/"
 
 cp "${ENV_FILE}" "${STAGING_DIR}/.env"
-mkdir -p "${STAGING_DIR}/data"
+mkdir -p "${STAGING_DIR}/data" "${STAGING_DIR}/tmp/mpl"
 chown root:"${SERVICE_USER}" "${STAGING_DIR}/.env"
 chmod 640 "${STAGING_DIR}/.env"
-chown "${SERVICE_USER}:${SERVICE_USER}" "${STAGING_DIR}/data"
-chmod 700 "${STAGING_DIR}/data"
+chown -R "${SERVICE_USER}:${SERVICE_USER}" \
+  "${STAGING_DIR}/data" "${STAGING_DIR}/tmp"
+chmod 700 "${STAGING_DIR}/data" "${STAGING_DIR}/tmp" "${STAGING_DIR}/tmp/mpl"
 
+check_storage_capacity
 echo "Создаю виртуальное окружение кандидата…"
 python3 -m venv "${STAGING_DIR}/.venv"
-"${STAGING_DIR}/.venv/bin/python" -m pip install --upgrade pip
-"${STAGING_DIR}/.venv/bin/python" -m pip install \
+TMPDIR="${STAGING_DIR}/tmp" PIP_NO_CACHE_DIR=1 \
+  "${STAGING_DIR}/.venv/bin/python" -m pip install --upgrade pip
+TMPDIR="${STAGING_DIR}/tmp" PIP_NO_CACHE_DIR=1 \
+  "${STAGING_DIR}/.venv/bin/python" -m pip install \
   -r "${STAGING_DIR}/requirements.txt"
 
+check_storage_capacity
 echo "Проверяю кандидат до остановки работающего бота…"
 "${STAGING_DIR}/.venv/bin/python" -m compileall -q \
   "${STAGING_DIR}/bot.py" \
@@ -109,13 +148,14 @@ runuser -u "${SERVICE_USER}" -- bash -c "
   cd '${STAGING_DIR}'
   export PUBLIC_ACCESS_ENABLED=true
   export PYTHONDONTWRITEBYTECODE=1
-  export MPLCONFIGDIR=/tmp/trading-assistant-mpl
+  export TMPDIR='${STAGING_DIR}/tmp'
+  export MPLCONFIGDIR='${STAGING_DIR}/tmp/mpl'
   .venv/bin/python -m unittest discover -s tests -v
 "
 
 # The final release contains no writable code or local secrets/state.
 rm -f "${STAGING_DIR}/.env"
-rm -rf "${STAGING_DIR}/data"
+rm -rf "${STAGING_DIR}/data" "${STAGING_DIR}/tmp"
 chown -R root:root "${STAGING_DIR}"
 ln -s "${STATE_DIR}" "${STAGING_DIR}/data"
 chmod 750 "${STAGING_DIR}/scripts/backup_data.sh"
