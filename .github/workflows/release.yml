@@ -1,0 +1,106 @@
+name: Publish release from VERSION
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-version-release
+  cancel-in-progress: false
+
+jobs:
+  publish-release:
+    name: Publish VERSION tag and release
+    runs-on:
+      - self-hosted
+      - linux
+      - fast
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Validate VERSION
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid VERSION value: ${version}" >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Create tag and GitHub Release when missing
+        uses: actions/github-script@v9
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        with:
+          retries: 3
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const version = process.env.VERSION;
+            const tag = process.env.TAG;
+
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              core.info(`Release ${tag} already exists: ${existing.data.html_url}`);
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            try {
+              await github.rest.git.getRef({
+                owner,
+                repo,
+                ref: `tags/${tag}`,
+              });
+              core.info(`Tag ${tag} already exists.`);
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.git.createRef({
+                owner,
+                repo,
+                ref: `refs/tags/${tag}`,
+                sha: context.sha,
+              });
+              core.info(`Created tag ${tag} at ${context.sha}.`);
+            }
+
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const heading = `## ${version}`;
+            const start = changelog.indexOf(heading);
+            let body = 'See CHANGELOG.md and docs/RELEASE_CANDIDATE.md for details.';
+            if (start >= 0) {
+              const next = changelog.indexOf('\n## ', start + heading.length);
+              body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+            }
+
+            const release = await github.rest.repos.createRelease({
+              owner,
+              repo,
+              tag_name: tag,
+              target_commitish: context.sha,
+              name: `FVG Alert Bot ${version}`,
+              body,
+              draft: false,
+              prerelease: version.includes('-'),
+              generate_release_notes: false,
+            });
+            core.info(`Created release: ${release.data.html_url}`);
