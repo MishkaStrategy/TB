@@ -2,12 +2,21 @@ from functools import wraps
 
 from config import PUBLIC_ACCESS_ENABLED, is_authorized
 from database.access_control import AccessRegistry
+from database.runtime_settings import RuntimeSettings
+
+
+_RUNTIME_SETTINGS = RuntimeSettings()
+
+
+def public_access_enabled():
+    """Return the live access mode with the environment as initial fallback."""
+    return _RUNTIME_SETTINGS.public_access_enabled(default=PUBLIC_ACCESS_ENABLED)
 
 
 def authorized(handler):
     @wraps(handler)
     async def wrapped(update, context):
-        if PUBLIC_ACCESS_ENABLED:
+        if public_access_enabled():
             return await handler(update, context)
 
         user = update.effective_user
