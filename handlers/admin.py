@@ -8,11 +8,27 @@ from datetime import datetime, timedelta, timezone
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from config import is_admin
+from config import PUBLIC_ACCESS_ENABLED, is_admin
+from database.runtime_settings import RuntimeSettings
 from database.user_activity import UserActivityRegistry
 
 
-def admin_keyboard():
+_RUNTIME_SETTINGS = RuntimeSettings()
+
+
+def public_access_enabled():
+    """Return the access mode currently applied by authorization handlers."""
+    return _RUNTIME_SETTINGS.public_access_enabled(default=PUBLIC_ACCESS_ENABLED)
+
+
+def admin_keyboard(public_access=None):
+    if public_access is None:
+        public_access = public_access_enabled()
+    access_label = (
+        "🌐 Доступ: публичный"
+        if public_access
+        else "🔐 Доступ: приватный"
+    )
     return InlineKeyboardMarkup(
         [
             [
@@ -25,6 +41,12 @@ def admin_keyboard():
                 InlineKeyboardButton(
                     "🩺 Состояние бота",
                     callback_data="admin:health",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    access_label,
+                    callback_data="admin:toggle_access",
                 )
             ],
         ]
@@ -159,9 +181,10 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Эта панель доступна только администраторам."
         )
         return
+    current_access = await asyncio.to_thread(public_access_enabled)
     await update.effective_message.reply_text(
         "🛠 Админ-панель",
-        reply_markup=admin_keyboard(),
+        reply_markup=admin_keyboard(current_access),
     )
 
 
@@ -187,3 +210,23 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             get_fvg_service().event_store,
         )
         await query.edit_message_text(text, reply_markup=admin_keyboard())
+    elif query.data == "admin:toggle_access":
+        enabled = await asyncio.to_thread(
+            _RUNTIME_SETTINGS.toggle_public_access,
+            PUBLIC_ACCESS_ENABLED,
+        )
+        if enabled:
+            text = (
+                "🌐 Публичный доступ включён.\n\n"
+                "Бот теперь принимает команды от всех Telegram-пользователей."
+            )
+        else:
+            text = (
+                "🔐 Приватный доступ включён.\n\n"
+                "Бот принимает команды только от пользователей из allowlist "
+                "и одобренных заявок."
+            )
+        await query.edit_message_text(
+            text,
+            reply_markup=admin_keyboard(enabled),
+        )
