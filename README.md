@@ -68,7 +68,8 @@ Bitunix. Он специализируется только на FVG: уведо
 - доступ к серверу под `root` или пользователь с `sudo`;
 - токен Telegram-бота, полученный у BotFather;
 - числовой Telegram ID администратора;
-- исходящий доступ по HTTPS/WSS к Telegram и Bitunix.
+- исходящий доступ по HTTPS/WSS к Telegram и Bitunix;
+- не менее 512 МБ свободного места и 5000 свободных inode на файловой системе `/opt`.
 
 Входящие порты для работы polling-бота открывать не требуется. Домен и
 веб-сервер также не нужны.
@@ -88,7 +89,7 @@ apt update && apt install -y git
 git clone https://github.com/mishkacher/TB.git /root/TB
 cd /root/TB
 git fetch --tags
-git checkout v1.0.0-rc3
+git checkout v1.0.0-rc4
 bash scripts/install_vds.sh
 ```
 
@@ -103,10 +104,12 @@ bash scripts/install_vds.sh
 
 Установщик автоматически:
 
+- проверит свободное место и inode до загрузки зависимостей и запуска тестов;
 - установит `python3`, `python3-venv`, `python3-pip`, `rsync` и Git;
 - создаст системного пользователя `fvgbot` без интерактивного входа;
 - подготовит новый релиз в отдельном staging-каталоге;
-- установит зависимости в изолированный virtualenv;
+- установит зависимости в изолированный virtualenv без сохранения `pip`-кэша;
+- разместит временные файлы `pip`, SQLite-тестов и Matplotlib внутри staging;
 - выполнит компиляцию Python и полный набор unit-тестов;
 - остановит работающий бот только после успешной проверки кандидата;
 - сохранит runtime-state и создаст резервную копию;
@@ -123,20 +126,29 @@ bash scripts/install_vds.sh
 ```text
 duration ... exceeds limit 20.000s
 Python executable does not exist: /opt/fvg-alert-bot/.venv/bin/python
+sqlite3.OperationalError: database or disk is full
 ```
 
-переключитесь на исправленный релиз и повторите установку:
+проверьте и освободите место, затем переключитесь на исправленный релиз:
 
 ```bash
+df -h / /tmp /opt
+df -ih / /tmp /opt
+rm -rf /root/.cache/pip
+find /opt -maxdepth 1 -type d -name 'fvg-alert-bot.staging.*' -print -exec rm -rf -- {} +
+apt-get clean
+
 cd /root/TB
 git fetch --tags --prune
-git checkout v1.0.0-rc3
+git checkout v1.0.0-rc4
 bash scripts/install_vds.sh
 ```
 
-Токен и Telegram ID уже сохранены в `/etc/fvg-alert-bot.env`; повторно вводить
-их не потребуется. На чистой установке отсутствие unit-файла после одной из
-этих ошибок нормально: сбой произошёл до атомарного переключения релиза.
+Не удаляйте `/etc/fvg-alert-bot.env` и `/var/lib/fvg-alert-bot`. Токен и
+Telegram ID уже сохранены; повторно вводить их не потребуется. На чистой
+установке отсутствие unit-файла после этих ошибок нормально: сбой произошёл до
+атомарного переключения релиза. Подробности приведены в
+[памятке восстановления](docs/VDS_FIRST_INSTALL_RECOVERY.md).
 
 ### Проверка после установки
 
@@ -313,6 +325,22 @@ Runtime-state в `/var/lib/fvg-alert-bot` и секреты в
 journalctl -u fvg-alert-bot -n 200 --no-pager
 systemctl show fvg-alert-bot \
   -p NRestarts -p ExecMainStatus -p Result -p MemoryCurrent
+```
+
+#### Проверка диска и inode
+
+```bash
+df -h / /tmp /opt
+df -ih / /tmp /opt
+du -xh /root/.cache/pip /opt /var/log --max-depth=1 2>/dev/null | sort -h
+```
+
+По умолчанию установщик требует 512 МБ свободного места и 5000 inode на `/opt`.
+Порог можно повысить для конкретного запуска:
+
+```bash
+FVG_INSTALL_MIN_FREE_MB=1024 FVG_INSTALL_MIN_FREE_INODES=10000 \
+  bash scripts/install_vds.sh
 ```
 
 #### Проверка сети
