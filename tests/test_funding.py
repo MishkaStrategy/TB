@@ -33,42 +33,42 @@ class FakeSession:
 
 
 class FundingFormattingTests(unittest.TestCase):
-    def test_formats_fractional_api_rate_as_percent(self):
+    def test_formats_live_api_rate_as_percent_points(self):
         text = format_funding_rates(
             [
                 {
                     "symbol": "BTCUSDT",
-                    "fundingRate": "0.0005",
+                    "fundingRate": "1.514051",
                     "open": "100",
                     "lastPrice": "102",
                 },
                 {
                     "symbol": "ETHUSDT",
-                    "fundingRate": "-0.000125",
+                    "fundingRate": "-0.125",
                     "open": "200",
                     "lastPrice": "190",
                 },
             ]
         )
 
-        self.assertIn("+0.0500%", text)
-        self.assertIn("−0.0125%", text)
+        self.assertIn("+1.5141%", text)
+        self.assertIn("−0.1250%", text)
         self.assertIn("+2.00%", text)
         self.assertIn("-5.00%", text)
-        self.assertNotIn("+0.0005%", text)
+        self.assertNotIn("+151.4051%", text)
 
     def test_ticker_funding_field_cannot_override_batch_rate(self):
         rates = [
             {
                 "symbol": "TESTUSDT",
-                "fundingRate": "0.01514",
+                "fundingRate": "-1.514051",
                 "fundingInterval": 4,
             }
         ]
         tickers = [
             {
                 "symbol": "TESTUSDT",
-                "fundingRate": "-1.514051",
+                "fundingRate": "0.01514",
                 "open": "100",
                 "lastPrice": "101",
             }
@@ -77,20 +77,21 @@ class FundingFormattingTests(unittest.TestCase):
         enriched = enrich_funding_rates(rates, tickers)
         text = format_funding_rates(enriched)
 
-        self.assertEqual(enriched[0]["fundingRate"], "0.01514")
+        self.assertEqual(enriched[0]["fundingRate"], "-1.514051")
         self.assertEqual(enriched[0]["fundingInterval"], 4)
         self.assertEqual(enriched[0]["open"], "100")
         self.assertEqual(enriched[0]["lastPrice"], "101")
-        self.assertIn("+1.5140%", text)
+        self.assertIn("−1.5141%", text)
         self.assertNotIn("−151.4051%", text)
+        self.assertNotIn("+0.0151%", text)
 
     def test_sorts_positive_and_negative_rates_by_extremity(self):
         positive, negative = top_funding_rates(
             [
-                {"symbol": "AUSDT", "fundingRate": "0.0001"},
-                {"symbol": "BUSDT", "fundingRate": "0.0007"},
-                {"symbol": "CUSDT", "fundingRate": "-0.0002"},
-                {"symbol": "DUSDT", "fundingRate": "-0.0009"},
+                {"symbol": "AUSDT", "fundingRate": "0.01"},
+                {"symbol": "BUSDT", "fundingRate": "0.07"},
+                {"symbol": "CUSDT", "fundingRate": "-0.02"},
+                {"symbol": "DUSDT", "fundingRate": "-0.09"},
                 {"symbol": "ZEROUSDT", "fundingRate": "0"},
                 {"symbol": "BROKEN", "fundingRate": "not-a-number"},
             ]
@@ -98,11 +99,11 @@ class FundingFormattingTests(unittest.TestCase):
 
         self.assertEqual([item[0] for item in positive], ["BUSDT", "AUSDT"])
         self.assertEqual([item[0] for item in negative], ["DUSDT", "CUSDT"])
-        self.assertEqual(positive[0][1], Decimal("0.0007"))
+        self.assertEqual(positive[0][1], Decimal("0.07"))
 
     def test_paginates_top_fifty_in_each_direction(self):
         rates = [
-            {"symbol": f"P{index}USDT", "fundingRate": str(index / 100000)}
+            {"symbol": f"P{index}USDT", "fundingRate": str(index / 100)}
             for index in range(1, 26)
         ]
         self.assertEqual(funding_page_count(rates), 3)
