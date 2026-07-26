@@ -269,8 +269,9 @@ test -d /opt/fvg-alert-bot.previous && echo "Предыдущий релиз н�
 Затем выполните:
 
 ```bash
+FAILED_DIR="/opt/fvg-alert-bot.failed-manual.$(date -u +%Y%m%dT%H%M%SZ)"
 systemctl stop fvg-alert-bot
-mv /opt/fvg-alert-bot /opt/fvg-alert-bot.failed-manual
+mv /opt/fvg-alert-bot "${FAILED_DIR}"
 mv /opt/fvg-alert-bot.previous /opt/fvg-alert-bot
 systemctl start fvg-alert-bot
 systemctl status fvg-alert-bot --no-pager --full
@@ -298,7 +299,7 @@ systemctl show fvg-alert-bot \
 
 ```bash
 getent hosts api.telegram.org
-getent hosts api.bitunix.com
+getent hosts fapi.bitunix.com
 ```
 
 Боту нужен исходящий HTTPS/WSS-доступ. Входящие TCP-порты для polling-режима
