@@ -84,6 +84,26 @@ BITUNIX_REQUESTS_PER_SECOND = parse_positive_float(
     8,
     "BITUNIX_REQUESTS_PER_SECOND",
 )
+HEALTH_ALERT_INTERVAL_SECONDS = parse_positive_float(
+    os.getenv("HEALTH_ALERT_INTERVAL_SECONDS"),
+    60,
+    "HEALTH_ALERT_INTERVAL_SECONDS",
+)
+HEALTH_ALERT_STALE_WS_SECONDS = parse_positive_float(
+    os.getenv("HEALTH_ALERT_STALE_WS_SECONDS"),
+    180,
+    "HEALTH_ALERT_STALE_WS_SECONDS",
+)
+HEALTH_ALERT_OUTBOX_THRESHOLD = parse_positive_int(
+    os.getenv("HEALTH_ALERT_OUTBOX_THRESHOLD"),
+    100,
+    "HEALTH_ALERT_OUTBOX_THRESHOLD",
+)
+HEALTH_ALERT_COOLDOWN_SECONDS = parse_positive_float(
+    os.getenv("HEALTH_ALERT_COOLDOWN_SECONDS"),
+    1800,
+    "HEALTH_ALERT_COOLDOWN_SECONDS",
+)
 
 
 def is_authorized(telegram_id):
