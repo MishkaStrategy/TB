@@ -65,6 +65,19 @@ class BitunixFvgStream:
                 f"{int(age)} seconds"
             )
 
+    def _check_kline_watchdog(
+        self,
+        last_kline_at: float,
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Record and surface stale-stream reconnects on every receive loop."""
+        try:
+            self._raise_if_kline_stale(last_kline_at, now=now)
+        except ConnectionError:
+            self.service.event_store.increment_health("stale_ws_reconnects")
+            raise
+
     async def run(self, bot) -> None:
         delivery_worker = asyncio.create_task(
             self._deliver_worker(bot),
@@ -186,6 +199,11 @@ class BitunixFvgStream:
                             )
                         try:
                             while not self._stopping:
+                                # Check before every receive, not only after a timeout.
+                                # Frequent pong/ack/control messages must not conceal a
+                                # market stream that has stopped producing candles.
+                                self._check_kline_watchdog(last_kline_at)
+
                                 current = set(self._active_symbols())
                                 removed = subscribed - current
                                 added = current - subscribed
@@ -227,13 +245,6 @@ class BitunixFvgStream:
                                 try:
                                     message = await ws.receive(timeout=5)
                                 except asyncio.TimeoutError:
-                                    try:
-                                        self._raise_if_kline_stale(last_kline_at)
-                                    except ConnectionError:
-                                        self.service.event_store.increment_health(
-                                            "stale_ws_reconnects"
-                                        )
-                                        raise
                                     continue
                                 if message.type in {
                                     aiohttp.WSMsgType.CLOSE,
