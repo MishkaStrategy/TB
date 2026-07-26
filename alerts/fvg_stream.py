@@ -17,15 +17,25 @@ from config import FVG_DELIVERY_QUEUE_SIZE, MAX_ACTIVE_SYMBOLS
 
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
+DEFAULT_KLINE_STALE_SECONDS = 120.0
 
 
 class BitunixFvgStream:
     URL = "wss://fapi.bitunix.com/public/"
 
-    def __init__(self, service, reconnect_min=1, reconnect_max=60):
+    def __init__(
+        self,
+        service,
+        reconnect_min=1,
+        reconnect_max=60,
+        kline_stale_seconds=DEFAULT_KLINE_STALE_SECONDS,
+    ):
         self.service = service
         self.reconnect_min = reconnect_min
         self.reconnect_max = reconnect_max
+        self.kline_stale_seconds = float(kline_stale_seconds)
+        if self.kline_stale_seconds <= 0:
+            raise ValueError("kline_stale_seconds must be greater than zero")
         self._stopping = False
         self._delivery_queue = asyncio.Queue(maxsize=FVG_DELIVERY_QUEUE_SIZE)
         self._pending_event_ids: set[str] = set()
@@ -39,6 +49,21 @@ class BitunixFvgStream:
                 MAX_ACTIVE_SYMBOLS,
             )
         return symbols[:MAX_ACTIVE_SYMBOLS]
+
+    def _raise_if_kline_stale(
+        self,
+        last_kline_at: float,
+        *,
+        now: float | None = None,
+    ) -> None:
+        """Force reconnect when a live socket stops delivering market candles."""
+        current = time.monotonic() if now is None else float(now)
+        age = max(0.0, current - float(last_kline_at))
+        if age >= self.kline_stale_seconds:
+            raise ConnectionError(
+                "Bitunix WebSocket stale: no kline messages for "
+                f"{int(age)} seconds"
+            )
 
     async def run(self, bot) -> None:
         delivery_worker = asyncio.create_task(
@@ -60,8 +85,6 @@ class BitunixFvgStream:
             except asyncio.CancelledError:
                 raise
             except Exception as error:
-                # A malformed preference or transient persistence failure must not
-                # permanently stop the only delivery worker.
                 logger.exception("Unexpected FVG delivery worker failure")
                 self.service.event_store.update_health(last_error=str(error))
                 self.service.event_store.increment_health("delivery_worker_failures")
@@ -140,6 +163,7 @@ class BitunixFvgStream:
                         ]
                         await ws.send_json({"op": "subscribe", "args": args})
                         now = datetime.now(UTC)
+                        last_kline_at = time.monotonic()
                         self.service.event_store.update_health(
                             ws_connected=True,
                             subscribed_symbols=symbols,
@@ -203,6 +227,13 @@ class BitunixFvgStream:
                                 try:
                                     message = await ws.receive(timeout=5)
                                 except asyncio.TimeoutError:
+                                    try:
+                                        self._raise_if_kline_stale(last_kline_at)
+                                    except ConnectionError:
+                                        self.service.event_store.increment_health(
+                                            "stale_ws_reconnects"
+                                        )
+                                        raise
                                     continue
                                 if message.type in {
                                     aiohttp.WSMsgType.CLOSE,
@@ -216,8 +247,13 @@ class BitunixFvgStream:
                                 try:
                                     payload = json.loads(message.data)
                                 except (json.JSONDecodeError, TypeError) as error:
-                                    logger.warning("Invalid Bitunix WebSocket JSON: %s", error)
-                                    self.service.event_store.increment_health("invalid_messages")
+                                    logger.warning(
+                                        "Invalid Bitunix WebSocket JSON: %s",
+                                        error,
+                                    )
+                                    self.service.event_store.increment_health(
+                                        "invalid_messages"
+                                    )
                                     continue
                                 if (
                                     payload.get("ch", "").startswith("market_kline_")
@@ -234,6 +270,7 @@ class BitunixFvgStream:
                                             "invalid_candles"
                                         )
                                     else:
+                                        last_kline_at = time.monotonic()
                                         self._enqueue(events)
                         finally:
                             ping_task.cancel()
