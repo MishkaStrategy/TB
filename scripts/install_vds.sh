@@ -127,15 +127,19 @@ if systemctl is-active --quiet "${SERVICE_NAME}"; then
 fi
 
 # Capture writes that happened after the initial migration, then back up the
-# exact state that the new release will use.
+# exact state that the new release will use. Before the first switch there is no
+# active INSTALL_DIR yet, so the backup must explicitly use the staging code and
+# staging Python interpreter.
 if [[ -d "${INSTALL_DIR}/data" && ! -L "${INSTALL_DIR}/data" ]]; then
   rsync -a "${INSTALL_DIR}/data/" "${STATE_DIR}/"
 fi
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${STATE_DIR}"
 chmod 700 "${STATE_DIR}"
+INSTALL_DIR="${STAGING_DIR}" \
 DATA_DIR="${STATE_DIR}" \
 BACKUP_DIR="${BACKUP_DIR}" \
 RETENTION_DAYS=14 \
+PYTHON="${STAGING_DIR}/.venv/bin/python" \
   "${STAGING_DIR}/scripts/backup_data.sh"
 
 rm -rf "${PREVIOUS_DIR}"
