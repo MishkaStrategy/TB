@@ -104,6 +104,17 @@ class BitunixClient:
 
         return tickers[0]
 
+    def get_all_tickers(self):
+        """Return 24-hour ticker data for all futures instruments."""
+        response = self._get(
+            f"{self.BASE_URL}/api/v1/futures/market/tickers",
+        )
+        response.raise_for_status()
+        tickers = response.json().get("data", [])
+        if not isinstance(tickers, list):
+            raise ValueError("Unexpected tickers format from Bitunix")
+        return tickers
+
     def get_trading_pairs(self, symbols=None):
         """Return public futures instruments; no API credentials are required."""
         params = {}
@@ -140,6 +151,19 @@ class BitunixClient:
             raise ValueError(f"No funding rate returned for {symbol}")
 
         raise ValueError(f"Unexpected funding rate format for {symbol}")
+
+    def get_all_funding_rates(self):
+        """Return current funding rates for all futures instruments."""
+        response = self._get(
+            f"{self.BASE_URL}/api/v1/futures/market/funding_rate/batch",
+        )
+        response.raise_for_status()
+        rates = response.json().get("data", [])
+        if isinstance(rates, dict):
+            return [rates]
+        if isinstance(rates, list):
+            return rates
+        raise ValueError("Unexpected funding rates format from Bitunix")
 
     def get_historical_candles(
         self,
