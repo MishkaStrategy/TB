@@ -1,0 +1,132 @@
+name: Release diagnostics
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-diagnostics:
+    name: Dependency diagnostics
+    runs-on: [self-hosted, fast]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Produce pip-audit report
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv-diagnostics
+          .venv-diagnostics/bin/python -m pip install --upgrade pip pip-audit
+          set +e
+          .venv-diagnostics/bin/pip-audit \
+            -r requirements.txt \
+            --progress-spinner off \
+            --format json \
+            --output pip-audit.json
+          audit_status=$?
+          set -e
+          .venv-diagnostics/bin/python - <<'PY' | tee pip-audit-summary.txt
+          import json
+          from pathlib import Path
+
+          report = json.loads(Path("pip-audit.json").read_text(encoding="utf-8"))
+          found = False
+          for dependency in report.get("dependencies", []):
+              vulnerabilities = dependency.get("vulns", [])
+              if not vulnerabilities:
+                  continue
+              found = True
+              for vulnerability in vulnerabilities:
+                  fixes = ",".join(vulnerability.get("fix_versions") or []) or "no-fix"
+                  print(
+                      f"{dependency['name']}=={dependency['version']} "
+                      f"{vulnerability['id']} fixes={fixes}"
+                  )
+          if not found:
+              print("NO_VULNERABILITIES")
+          PY
+          echo "pip-audit exit status: ${audit_status}" | tee -a pip-audit-summary.txt
+      - name: Upload dependency diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-diagnostics
+          path: |
+            pip-audit.json
+            pip-audit-summary.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  systemd-diagnostics:
+    name: systemd diagnostics
+    runs-on: [self-hosted, linux, fast]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Produce systemd verification report
+        shell: bash
+        run: |
+          set -euo pipefail
+          sandbox="${RUNNER_TEMP}/fvg-vds-unit-diagnostics"
+          install_dir="${sandbox}/opt/fvg-alert-bot"
+          state_dir="${sandbox}/var/lib/fvg-alert-bot"
+          backup_dir="${sandbox}/var/backups/fvg-alert-bot"
+          env_file="${sandbox}/etc/fvg-alert-bot.env"
+          unit_dir="${sandbox}/units"
+
+          mkdir -p \
+            "${install_dir}/.venv/bin" \
+            "${install_dir}/scripts" \
+            "${state_dir}" \
+            "${backup_dir}" \
+            "$(dirname "${env_file}")" \
+            "${unit_dir}"
+          printf '#!/usr/bin/env bash\nexit 0\n' > "${install_dir}/.venv/bin/python"
+          chmod +x "${install_dir}/.venv/bin/python"
+          cp scripts/backup_data.sh "${install_dir}/scripts/backup_data.sh"
+          chmod +x "${install_dir}/scripts/backup_data.sh"
+          touch "${install_dir}/bot.py"
+          printf 'TELEGRAM_TOKEN=ci-placeholder\n' > "${env_file}"
+
+          python3 scripts/render_systemd_units.py \
+            --installer scripts/install_vds.sh \
+            --output "${unit_dir}" \
+            --service-user "$(id -un)" \
+            --service-group "$(id -gn)" \
+            --install-dir "${install_dir}" \
+            --state-dir "${state_dir}" \
+            --env-file "${env_file}" \
+            --backup-dir "${backup_dir}"
+
+          set +e
+          systemd-analyze verify \
+            "${unit_dir}/fvg-alert-bot.service" \
+            "${unit_dir}/fvg-alert-bot-backup.service" \
+            "${unit_dir}/fvg-alert-bot-backup.timer" \
+            > systemd-verify.txt 2>&1
+          verify_status=$?
+          set -e
+          cat systemd-verify.txt
+          echo "systemd-analyze exit status: ${verify_status}" | tee -a systemd-verify.txt
+          cp "${unit_dir}"/* .
+      - name: Upload systemd diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: systemd-diagnostics
+          path: |
+            systemd-verify.txt
+            fvg-alert-bot.service
+            fvg-alert-bot-backup.service
+            fvg-alert-bot-backup.timer
+          if-no-files-found: error
+          retention-days: 7
