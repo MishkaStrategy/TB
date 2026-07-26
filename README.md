@@ -88,7 +88,7 @@ apt update && apt install -y git
 git clone https://github.com/mishkacher/TB.git /root/TB
 cd /root/TB
 git fetch --tags
-git checkout v1.0.0-rc1
+git checkout v1.0.0-rc2
 bash scripts/install_vds.sh
 ```
 
@@ -117,6 +117,20 @@ bash scripts/install_vds.sh
 
 Повторный запуск установщика не спрашивает токен и ID заново: он использует
 существующий файл `/etc/fvg-alert-bot.env`.
+
+Если установка `v1.0.0-rc1` остановилась на сообщении
+`duration ... exceeds limit 20.000s`, переключитесь на исправленный релиз и
+повторите установку:
+
+```bash
+cd /root/TB
+git fetch --tags --prune
+git checkout v1.0.0-rc2
+bash scripts/install_vds.sh
+```
+
+Токен и Telegram ID уже сохранены в `/etc/fvg-alert-bot.env`; повторно вводить
+их не потребуется.
 
 ### Проверка после установки
 
