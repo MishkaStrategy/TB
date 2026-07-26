@@ -83,7 +83,7 @@ def _format_table(
 
     lines.append("<code> #  Инструмент    Фандинг    Цена 24ч</code>")
     for index, (symbol, rate, price_change) in enumerate(items, start_index + 1):
-        # Bitunix returns a fraction: 0.0005 means 0.05%, not 0.0005%.
+        # Bitunix funding-rate endpoints return a fraction: 0.0005 means 0.05%.
         percent = abs(rate) * 100
         change = "н/д" if price_change is None else f"{price_change:+.2f}%"
         safe_symbol = escape(symbol[:16])
@@ -152,6 +152,32 @@ def build_funding_menu(page: int, pages: int) -> InlineKeyboardMarkup:
     )
 
 
+def enrich_funding_rates(rates: list[dict], tickers: list[dict]) -> list[dict]:
+    """Add ticker prices without allowing ticker fields to replace funding data.
+
+    The live tickers response may contain a field named ``fundingRate`` whose
+    scale differs from the dedicated funding-rate endpoint. Only price fields
+    are copied from tickers, so the batch endpoint remains the source of truth
+    for funding rate, sign, interval, and settlement metadata.
+    """
+    tickers_by_symbol = {
+        ticker.get("symbol"): ticker
+        for ticker in tickers
+        if isinstance(ticker, dict) and ticker.get("symbol")
+    }
+    enriched_rates: list[dict] = []
+    for rate in rates:
+        if not isinstance(rate, dict):
+            continue
+        enriched = dict(rate)
+        ticker = tickers_by_symbol.get(rate.get("symbol"), {})
+        for key in ("open", "lastPrice", "last"):
+            if key in ticker:
+                enriched[key] = ticker[key]
+        enriched_rates.append(enriched)
+    return enriched_rates
+
+
 async def load_funding_rates() -> list[dict]:
     """Fetch funding rates and enrich them with optional 24-hour ticker data."""
     client = BitunixClient()
@@ -171,16 +197,7 @@ async def load_funding_rates() -> list[dict]:
     else:
         tickers = tickers_result
 
-    tickers_by_symbol = {
-        ticker.get("symbol"): ticker
-        for ticker in tickers
-        if isinstance(ticker, dict) and ticker.get("symbol")
-    }
-    return [
-        {**rate, **tickers_by_symbol.get(rate.get("symbol"), {})}
-        for rate in rates_result
-        if isinstance(rate, dict)
-    ]
+    return enrich_funding_rates(rates_result, tickers)
 
 
 async def _edit_text_safely(message, text: str, reply_markup: InlineKeyboardMarkup) -> None:
