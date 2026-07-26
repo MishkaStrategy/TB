@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 from alerts.fvg_models import FvgDirection
 from alerts.fvg_store import FvgAlertSettings
 from handlers.auth import authorized
+from handlers.funding import CACHE_KEY as FUNDING_CACHE_KEY, send_funding
 from handlers.fvg_alert import (
     build_fvg_stats_period_menu,
     format_fvg_stats,
@@ -35,6 +36,7 @@ def build_main_menu(chat_id, settings=None):
     rows.append([
         InlineKeyboardButton("📊 Статистика FVG", callback_data="menu:fvg-stats")
     ])
+    rows.append([InlineKeyboardButton("💸 Фандинг", callback_data="menu:funding")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -130,6 +132,24 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.edit_text("Панель управления FVG:", reply_markup=build_main_menu(chat_id))
     elif action == "fvg-stats":
         await send_fvg_stats(message)
+    elif action in {"funding", "funding-refresh"}:
+        rates = await send_funding(message, edit=True)
+        if rates is not None:
+            context.user_data[FUNDING_CACHE_KEY] = rates
+    elif action.startswith("funding-page:"):
+        page_value = action.removeprefix("funding-page:")
+        if page_value == "current":
+            return
+        try:
+            page = int(page_value)
+        except ValueError:
+            return
+        rates = context.user_data.get(FUNDING_CACHE_KEY)
+        rates = await send_funding(message, page=page, rates=rates, edit=True)
+        if rates is not None:
+            context.user_data[FUNDING_CACHE_KEY] = rates
+    elif action == "funding-back":
+        await message.edit_text("Панель управления FVG:", reply_markup=build_main_menu(chat_id))
     elif action.startswith("fvg-stats:"):
         period = action.split(":", 1)[1]
         days = None if period == "all" else int(period)
