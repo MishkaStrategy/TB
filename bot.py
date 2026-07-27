@@ -3,7 +3,7 @@ import asyncio
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
-from alerts.scheduler import schedule_fvg_alerts, start_fvg_stream, stop_fvg_stream
+from alerts.scheduler_multi import schedule_fvg_alerts, start_fvg_stream, stop_fvg_stream
 from config import TELEGRAM_TOKEN
 
 from handlers.start import start
@@ -14,8 +14,8 @@ from handlers.fvg_alert import (
 )
 from handlers.safe_fvg_symbol import fvg_symbol
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
-from handlers.funding import funding
-from handlers.funding_alert_ui import build_funding_alert_handlers
+from handlers.multi_funding import funding, funding_menu_callback
+from handlers.multi_funding_alert_ui import build_handlers as build_funding_alert_handlers
 from handlers.menu import menu, menu_callback
 from handlers.admin import admin, admin_callback
 from database.user_activity import UserActivityRegistry
@@ -69,13 +69,8 @@ def main():
     app.add_handler(TypeHandler(object, track_user_activity), group=-1)
 
     # FVG notifications, settings, statistics, funding, and administration.
-    app.add_handler(
-        CommandHandler("start", start)
-    )
-
-    app.add_handler(
-        CommandHandler("fvg_alert", fvg_alert)
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("fvg_alert", fvg_alert))
     app.add_handler(CommandHandler("fvg_pre_alert", fvg_pre_alert))
     app.add_handler(CommandHandler("fvg_stats", fvg_stats))
     app.add_handler(CommandHandler("fvg_symbol", fvg_symbol))
@@ -88,12 +83,18 @@ def main():
         app.add_handler(handler, group=1)
 
     app.add_handler(CommandHandler("menu", menu))
+    # Funding callbacks are registered before the generic menu router.
+    app.add_handler(
+        CallbackQueryHandler(
+            funding_menu_callback,
+            pattern=r"^menu:funding",
+        )
+    )
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CallbackQueryHandler(admin_callback, pattern=r"^admin:"))
 
     print("Trading Assistant запущен 🚀")
-
     app.run_polling()
 
 
