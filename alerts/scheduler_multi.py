@@ -26,5 +26,6 @@ def schedule_fvg_alerts(application):
     return base.schedule_fvg_alerts(application)
 
 
+get_fvg_service = base.get_fvg_service
 start_fvg_stream = base.start_fvg_stream
 stop_fvg_stream = base.stop_fvg_stream
