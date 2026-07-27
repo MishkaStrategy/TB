@@ -16,6 +16,7 @@ from alerts.funding_alerts import (
 from alerts.funding_exchange_store import FundingExchangeStore
 from exchanges.funding import EXCHANGE_LABELS, EXCHANGE_ORDER
 from handlers.auth import authorized
+from handlers.multi_funding import CHECK_INPUT_KEY, receive_funding_check
 
 INPUT_KEY = "waiting_funding_alert_value"
 
@@ -112,6 +113,7 @@ def build_menu(chat_id, settings_store=None, exchange_store=None):
         ],
         exchange_buttons[:3],
         exchange_buttons[3:],
+        [InlineKeyboardButton("🔎 Проверка фандинга", callback_data="menu:funding-check")],
         [InlineKeyboardButton("📈 Топ ставок", callback_data="menu:funding")],
         [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:funding-back")],
     ])
@@ -120,6 +122,8 @@ def build_menu(chat_id, settings_store=None, exchange_store=None):
 def _clear_input(context):
     context.user_data.pop(INPUT_KEY, None)
     context.chat_data.pop(INPUT_KEY, None)
+    context.user_data.pop(CHECK_INPUT_KEY, None)
+    context.chat_data.pop(CHECK_INPUT_KEY, None)
 
 
 async def _show(message, chat_id, *, edit):
@@ -200,6 +204,7 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def receive_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     state = context.user_data.get(INPUT_KEY) or context.chat_data.get(INPUT_KEY)
     if not state:
+        await receive_funding_check(update, context)
         return
     chat_id = update.effective_chat.id
     settings_store, exchange_store = _stores()
