@@ -1,9 +1,10 @@
-"""Multi-exchange funding leaderboard and dedicated Telegram callbacks."""
+"""Multi-exchange funding leaderboard, symbol check, and Telegram callbacks."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from decimal import Decimal, InvalidOperation
 from html import escape
 
@@ -27,6 +28,8 @@ PAGE_SIZE = 10
 TOP_LIMIT = 50
 CACHE_KEY = "funding_rates_by_exchange"
 VIEW_KEY = "funding_view_exchange"
+CHECK_INPUT_KEY = "waiting_funding_check_symbol"
+ALERT_INPUT_KEY = "waiting_funding_alert_value"
 
 
 def _decimal(item, *keys):
@@ -38,6 +41,16 @@ def _decimal(item, *keys):
         if value.is_finite():
             return value
     return None
+
+
+def normalize_funding_symbol(value) -> str:
+    """Normalize BTC, BTC/USDT, BTC-USDT, or BTC_USDT to BTCUSDT."""
+    compact = re.sub(r"[\s/_-]+", "", str(value or "").strip().upper())
+    if compact and not compact.endswith("USDT"):
+        compact += "USDT"
+    if not re.fullmatch(r"[A-Z0-9]{1,20}USDT", compact):
+        raise ValueError("Введите инструмент, например BTCUSDT или BTC/USDT.")
+    return compact
 
 
 def top_funding_rates(rates, limit=TOP_LIMIT):
@@ -106,6 +119,49 @@ def format_funding_rates(rates, page=0, exchange=DEFAULT_EXCHANGE):
     ))
 
 
+def _symbol_item(rates, symbol):
+    if not isinstance(rates, list):
+        return None
+    return next(
+        (
+            item
+            for item in rates
+            if isinstance(item, dict) and str(item.get("symbol", "")).upper() == symbol
+        ),
+        None,
+    )
+
+
+def format_symbol_funding(symbol, snapshot):
+    symbol = normalize_funding_symbol(symbol)
+    lines = [
+        f"🔎 <b>Проверка фандинга {escape(symbol)}</b>",
+        "Текущая ставка по подключённым биржам:",
+        "",
+    ]
+    for exchange in EXCHANGE_ORDER:
+        label = escape(EXCHANGE_LABELS[exchange])
+        if exchange not in snapshot:
+            lines.append(f"⚪ <b>{label}</b>: API временно недоступен")
+            continue
+        item = _symbol_item(snapshot.get(exchange), symbol)
+        if item is None:
+            lines.append(f"▫️ <b>{label}</b>: контракт не найден")
+            continue
+        rate = _decimal(item, "fundingRate", "funding_rate", "rate")
+        if rate is None:
+            lines.append(f"▫️ <b>{label}</b>: ставка недоступна")
+            continue
+        icon = "🟢" if rate > 0 else "🔴" if rate < 0 else "⚪"
+        sign = "+" if rate > 0 else ""
+        line = f"{icon} <b>{label}</b>: <code>{sign}{rate:.4f}%</code>"
+        change = _decimal(item, "priceChange24h")
+        if change is not None:
+            line += f" · 24ч {change:+.2f}%"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def build_funding_menu(page, pages, exchange=DEFAULT_EXCHANGE):
     exchange = normalize_exchange(exchange)
     exchange_buttons = [
@@ -140,8 +196,17 @@ def build_funding_menu(page, pages, exchange=DEFAULT_EXCHANGE):
         exchange_buttons[:3],
         exchange_buttons[3:],
         navigation,
+        [InlineKeyboardButton("🔎 Проверка фандинга", callback_data="menu:funding-check")],
         [InlineKeyboardButton("🔔 Уведомления", callback_data="funding-alert:open")],
         [InlineKeyboardButton("🔄 Показать актуальные", callback_data="menu:funding-refresh")],
+        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:funding-back")],
+    ])
+
+
+def build_funding_check_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔎 Проверить другой", callback_data="menu:funding-check")],
+        [InlineKeyboardButton("📈 Топ ставок", callback_data="menu:funding")],
         [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:funding-back")],
     ])
 
@@ -177,6 +242,19 @@ async def load_funding_snapshot(exchanges=None):
 def _cache(context):
     value = context.application.bot_data.get(CACHE_KEY, {})
     return value if isinstance(value, dict) else {DEFAULT_EXCHANGE: value}
+
+
+def _clear_check_input(context):
+    context.user_data.pop(CHECK_INPUT_KEY, None)
+    context.chat_data.pop(CHECK_INPUT_KEY, None)
+
+
+def _set_check_input(context):
+    context.user_data.pop(ALERT_INPUT_KEY, None)
+    context.chat_data.pop(ALERT_INPUT_KEY, None)
+    state = {"kind": "funding-check"}
+    context.user_data[CHECK_INPUT_KEY] = state
+    context.chat_data[CHECK_INPUT_KEY] = state
 
 
 async def _edit(message, text, markup):
@@ -227,8 +305,40 @@ async def show_funding(
         await message.reply_text(text, reply_markup=markup, parse_mode="HTML")
 
 
+async def receive_funding_check(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    state = context.user_data.get(CHECK_INPUT_KEY) or context.chat_data.get(CHECK_INPUT_KEY)
+    if not state:
+        return
+    try:
+        symbol = normalize_funding_symbol(update.effective_message.text)
+    except ValueError as error:
+        await update.effective_message.reply_text(f"Не получилось: {error}\nПопробуйте ещё раз.")
+        return
+    try:
+        snapshot = await load_funding_snapshot()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        LOGGER.exception("Failed to check funding for %s", symbol)
+        await update.effective_message.reply_text(
+            "⚠️ Не удалось получить ставки ни с одной биржи. Попробуйте позже.",
+            reply_markup=build_funding_check_menu(),
+        )
+        return
+    cache = _cache(context)
+    cache.update(snapshot)
+    context.application.bot_data[CACHE_KEY] = cache
+    _clear_check_input(context)
+    await update.effective_message.reply_text(
+        format_symbol_funding(symbol, snapshot),
+        reply_markup=build_funding_check_menu(),
+        parse_mode="HTML",
+    )
+
+
 @authorized
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    _clear_check_input(context)
     await show_funding(update.effective_message, context, edit=False)
 
 
@@ -239,6 +349,21 @@ async def funding_menu_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
     await query.answer()
     action = query.data.removeprefix("menu:")
+    if action == "funding-check":
+        _set_check_input(context)
+        await query.message.edit_text(
+            "🔎 <b>Проверка фандинга</b>\n\n"
+            "Введите инструмент, например <code>BTCUSDT</code>, "
+            "<code>BTC/USDT</code> или просто <code>BTC</code>.\n\n"
+            "Бот покажет текущую ставку на всех подключённых биржах.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📈 Топ ставок", callback_data="menu:funding")],
+                [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:funding-back")],
+            ]),
+            parse_mode="HTML",
+        )
+        return
+    _clear_check_input(context)
     if action == "funding-back":
         from handlers.menu import build_main_menu
         await query.message.edit_text(
