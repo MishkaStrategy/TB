@@ -3,6 +3,7 @@ import asyncio
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
+from alerts.process_watchdog import start_process_watchdog, stop_process_watchdog
 from alerts.scheduler_multi import schedule_fvg_alerts, start_fvg_stream, stop_fvg_stream
 from config import TELEGRAM_TOKEN
 
@@ -28,7 +29,7 @@ BOT_COMMANDS = (
     BotCommand("fvg_pre_alert", "Настроить пред-FVG T−3"),
     BotCommand("fvg_symbol", "Настроить инструменты FVG"),
     BotCommand("fvg_price", "Фильтр цены FVG"),
-    BotCommand("fvg_size", "Фильтр размера FVG"),
+    BotCommand("fvg_size", "Фильтр размера зоны"),
     BotCommand("fvg_stats", "Статистика FVG"),
     BotCommand("funding", "Топ ставок и уведомления"),
 )
@@ -44,6 +45,12 @@ async def post_init(application):
     await configure_bot_interface(application)
     schedule_fvg_alerts(application)
     await start_fvg_stream(application)
+    await start_process_watchdog(application)
+
+
+async def post_shutdown(application):
+    await stop_process_watchdog(application)
+    await stop_fvg_stream(application)
 
 
 async def track_user_activity(update, context):
@@ -62,7 +69,7 @@ def main():
         Application.builder()
         .token(TELEGRAM_TOKEN)
         .post_init(post_init)
-        .post_shutdown(stop_fvg_stream)
+        .post_shutdown(post_shutdown)
         .build()
     )
 
