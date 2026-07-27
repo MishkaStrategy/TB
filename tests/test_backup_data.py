@@ -24,8 +24,6 @@ class RuntimeBackupTests(unittest.TestCase):
             funding_path = data_dir / "funding_alerts.sqlite3"
             event_connection = sqlite3.connect(event_path)
             funding_connection = sqlite3.connect(funding_path)
-            self.addCleanup(event_connection.close)
-            self.addCleanup(funding_connection.close)
 
             for connection, table, value in (
                 (event_connection, "backup_probe", "event-row"),
@@ -49,14 +47,18 @@ class RuntimeBackupTests(unittest.TestCase):
                 "RETENTION_DAYS": "14",
                 "PYTHON": sys.executable,
             }
-            result = subprocess.run(
-                ["bash", str(BACKUP_SCRIPT)],
-                cwd=PROJECT_ROOT,
-                env=environment,
-                text=True,
-                capture_output=True,
-                check=False,
-            )
+            try:
+                result = subprocess.run(
+                    ["bash", str(BACKUP_SCRIPT)],
+                    cwd=PROJECT_ROOT,
+                    env=environment,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+            finally:
+                event_connection.close()
+                funding_connection.close()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
             archives = list(backup_dir.glob("fvg-alert-bot-*.tar.gz"))
