@@ -15,6 +15,7 @@ from handlers.fvg_alert import (
 from handlers.safe_fvg_symbol import fvg_symbol
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
 from handlers.funding import funding
+from handlers.funding_alert_ui import build_funding_alert_handlers
 from handlers.menu import menu, menu_callback
 from handlers.admin import admin, admin_callback
 from database.user_activity import UserActivityRegistry
@@ -29,7 +30,7 @@ BOT_COMMANDS = (
     BotCommand("fvg_price", "Фильтр цены FVG"),
     BotCommand("fvg_size", "Фильтр размера FVG"),
     BotCommand("fvg_stats", "Статистика FVG"),
-    BotCommand("funding", "Топ ставок фандинга"),
+    BotCommand("funding", "Топ ставок и уведомления"),
 )
 
 
@@ -81,6 +82,10 @@ def main():
     app.add_handler(CommandHandler("funding", funding))
     for handler in build_fvg_filter_handlers():
         app.add_handler(handler)
+    # The FVG filter has a catch-all text handler in group 0. Funding input
+    # lives in group 1 so both state machines can coexist safely.
+    for handler in build_funding_alert_handlers():
+        app.add_handler(handler, group=1)
 
     app.add_handler(CommandHandler("menu", menu))
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
