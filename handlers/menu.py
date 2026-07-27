@@ -133,9 +133,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "fvg-stats":
         await send_fvg_stats(message)
     elif action in {"funding", "funding-refresh"}:
-        rates = await send_funding(message, edit=True)
+        cached = context.application.bot_data.get(FUNDING_CACHE_KEY)
+        rates = await send_funding(message, edit=True, rates=cached)
         if rates is not None:
-            context.user_data[FUNDING_CACHE_KEY] = rates
+            context.application.bot_data[FUNDING_CACHE_KEY] = rates
     elif action.startswith("funding-page:"):
         page_value = action.removeprefix("funding-page:")
         if page_value == "current":
@@ -144,10 +145,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             page = int(page_value)
         except ValueError:
             return
-        rates = context.user_data.get(FUNDING_CACHE_KEY)
+        rates = context.application.bot_data.get(FUNDING_CACHE_KEY)
         rates = await send_funding(message, page=page, rates=rates, edit=True)
         if rates is not None:
-            context.user_data[FUNDING_CACHE_KEY] = rates
+            context.application.bot_data[FUNDING_CACHE_KEY] = rates
     elif action == "funding-back":
         await message.edit_text("Панель управления FVG:", reply_markup=build_main_menu(chat_id))
     elif action.startswith("fvg-stats:"):

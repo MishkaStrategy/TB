@@ -147,7 +147,13 @@ def build_funding_menu(page: int, pages: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             navigation,
-            [InlineKeyboardButton("🔄 Обновить", callback_data="menu:funding-refresh")],
+            [
+                InlineKeyboardButton(
+                    "🔔 Уведомления",
+                    callback_data="funding-alert:open",
+                )
+            ],
+            [InlineKeyboardButton("🔄 Показать актуальные", callback_data="menu:funding-refresh")],
             [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:funding-back")],
         ]
     )
@@ -226,7 +232,6 @@ async def send_funding(
             else:
                 await message.reply_text(text, reply_markup=markup)
             return None
-
     pages = funding_page_count(rates)
     page = min(max(page, 0), pages - 1)
     text = format_funding_rates(rates, page)
@@ -241,6 +246,7 @@ async def send_funding(
 
 @authorized
 async def funding(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    rates = await send_funding(update.effective_message)
+    cached = context.application.bot_data.get(CACHE_KEY)
+    rates = await send_funding(update.effective_message, rates=cached)
     if rates is not None:
-        context.user_data[CACHE_KEY] = rates
+        context.application.bot_data[CACHE_KEY] = rates
