@@ -6,11 +6,7 @@ from handlers.auth import authorized
 from handlers.menu import show_menu
 
 
-def _enable_confirmed_fvg_for_new_user(
-    chat_id: int,
-    settings: FvgAlertSettings | None = None,
-) -> bool:
-    """Persist default confirmed-FVG alerts once, without overriding user choice."""
+def _enable_confirmed_fvg_for_new_user(chat_id: int, settings: FvgAlertSettings | None = None) -> bool:
     settings = settings or FvgAlertSettings()
     user = settings.user(chat_id)
     user["enabled"] = True
@@ -32,18 +28,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     auto_enabled = _enable_confirmed_fvg_for_new_user(chat_id)
     activation_note = (
-        "\n\n✅ Уведомления о подтверждённых FVG включены автоматически "
-        "для BTCUSDT. Пред-FVG остаются выключенными — их можно включить "
-        "командой /fvg_pre_alert on."
+        "\n\n✅ Уведомления о подтверждённых FVG включены автоматически для BTCUSDT. "
+        "Пред-FVG остаются выключенными — их можно включить командой /fvg_pre_alert on."
         if auto_enabled
         else ""
     )
-
     await update.effective_message.reply_text(
         "🤖 FVG Alert Bot запущен!\n\n"
-        "Бот специализируется на Fair Value Gap (FVG) для фьючерсов Bitunix.\n"
-        "Он отслеживает предварительные FVG в точке T−3 и подтверждённые FVG "
-        "на 15-минутном таймфрейме.\n\n"
+        "Бот отслеживает FVG на Bitunix и ставки фандинга на нескольких биржах.\n"
+        "Поддерживаются Bitunix, Binance, Bybit, Bitget и Gate.\n\n"
         "Команды:\n"
         "/fvg_alert on|off — FVG 15m уведомления\n"
         "/fvg_pre_alert on|off — пред-FVG за 3 минуты\n"
@@ -51,9 +44,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/fvg_price BTCUSDT 50000 90000 both — фильтр цены\n"
         "/fvg_size — фильтр размера FVG\n"
         "/fvg_stats — статистика FVG-событий\n"
-        "/menu — кнопки управления\n\n"
-        "/admin — админ-панель и статистика пользователей.\n\n"
-        "Кнопка меню рядом с полем сообщения открывает настройки FVG."
+        "/funding — мультибиржевой топ ставок и уведомления\n"
+        "/donate — поддержать проект\n"
+        "/menu — открыть нижнее меню\n\n"
+        "/admin — админ-панель.\n\n"
+        "Основные разделы всегда доступны на клавиатуре под полем сообщения."
         f"{activation_note}"
     )
     await show_menu(update.effective_message, chat_id)
