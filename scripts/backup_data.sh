@@ -41,9 +41,12 @@ rsync -a \
   --exclude 'fvg_event_store.sqlite3' \
   --exclude 'fvg_event_store.sqlite3-wal' \
   --exclude 'fvg_event_store.sqlite3-shm' \
+  --exclude 'funding_alerts.sqlite3' \
+  --exclude 'funding_alerts.sqlite3-wal' \
+  --exclude 'funding_alerts.sqlite3-shm' \
   "${DATA_DIR}/" "${snapshot}/"
 
-# SQLite's backup API produces a consistent image while the bot is writing.
+# The event store exposes its own backup helper.
 event_database="${DATA_DIR}/fvg_event_store.sqlite3"
 if [[ -f "${event_database}" ]]; then
   PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" - \
@@ -53,6 +56,28 @@ from alerts.sqlite_event_store import FvgEventStore
 
 source, destination = sys.argv[1:3]
 FvgEventStore(source).backup_to(destination)
+PY
+fi
+
+# Funding settings are also live SQLite/WAL state. Use SQLite's backup API
+# instead of copying the database and WAL sidecars while the bot is writing.
+funding_database="${DATA_DIR}/funding_alerts.sqlite3"
+if [[ -f "${funding_database}" ]]; then
+  "${PYTHON}" - \
+    "${funding_database}" "${snapshot}/funding_alerts.sqlite3" <<'PY'
+import os
+import sqlite3
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+temporary = destination.with_suffix(destination.suffix + ".tmp")
+temporary.unlink(missing_ok=True)
+with sqlite3.connect(source) as source_connection, sqlite3.connect(temporary) as target:
+    source_connection.backup(target)
+os.chmod(temporary, 0o600)
+temporary.replace(destination)
 PY
 fi
 
