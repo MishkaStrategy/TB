@@ -13,7 +13,11 @@ from localization import CURRENT_CHAT_ID, localize_text, translate_label
 def _localize_safely(text: str, language: str, mode: str) -> str:
     if language != "en":
         return localize_text(text, language, mode)
-    protected = re.sub(r"\bиз\b", "__RU_OF__", text)
+    protected = text.replace(
+        "Поддерживаются Bitunix, Binance, Bybit, Bitget, Gate и BingX.",
+        "Supported exchanges: Bitunix, Binance, Bybit, Bitget, Gate and BingX.",
+    ).replace("Фандинг BingX", "BingX funding")
+    protected = re.sub(r"\bиз\b", "__RU_OF__", protected)
     protected = protected.replace("из", "__RU_IZ__")
     translated = localize_text(protected, language, mode)
     return translated.replace("__RU_OF__", "of").replace("__RU_IZ__", "из")
