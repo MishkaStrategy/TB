@@ -113,6 +113,7 @@ class FundingFormattingTests(unittest.TestCase):
         self.assertIn("menu:funding-page:0", callbacks)
         self.assertIn("menu:funding-page:current", callbacks)
         self.assertIn("menu:funding-page:2", callbacks)
+        self.assertIn("funding-alert:open", callbacks)
         self.assertIn("menu:funding-refresh", callbacks)
         self.assertIn("menu:funding-back", callbacks)
 
