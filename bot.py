@@ -3,6 +3,7 @@ import asyncio
 from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
+from alerts.process_watchdog import start_process_watchdog, stop_process_watchdog
 from alerts.scheduler_multi import schedule_fvg_alerts, start_fvg_stream, stop_fvg_stream
 from config import TELEGRAM_TOKEN
 from database.user_activity import UserActivityRegistry
@@ -48,7 +49,6 @@ BOT_COMMANDS_EN = (
 
 
 async def configure_bot_interface(application):
-    """Configure localized Telegram commands and the command-menu button."""
     await application.bot.set_my_commands(BOT_COMMANDS)
     await application.bot.set_my_commands(BOT_COMMANDS, language_code="ru")
     await application.bot.set_my_commands(BOT_COMMANDS_EN, language_code="en")
@@ -59,10 +59,15 @@ async def post_init(application):
     await configure_bot_interface(application)
     schedule_fvg_alerts(application)
     await start_fvg_stream(application)
+    await start_process_watchdog(application)
+
+
+async def post_shutdown(application):
+    await stop_process_watchdog(application)
+    await stop_fvg_stream(application)
 
 
 async def prepare_user_context(update, context):
-    """Set per-update locale context and initialize first-use preferences."""
     chat = update.effective_chat
     user = update.effective_user
     chat_id = chat.id if chat is not None else None
@@ -74,15 +79,10 @@ async def prepare_user_context(update, context):
         if user is not None and str(user.language_code or "").lower().startswith("en")
         else "ru"
     )
-    await asyncio.to_thread(
-        UserPreferences().ensure,
-        chat_id,
-        language=suggested_language,
-    )
+    await asyncio.to_thread(UserPreferences().ensure, chat_id, language=suggested_language)
 
 
 async def track_user_activity(update, context):
-    """Record incoming activity without blocking the Telegram event loop."""
     user = update.effective_user
     if user is not None:
         await asyncio.to_thread(UserActivityRegistry().touch, user)
@@ -96,13 +96,12 @@ def main():
         Application.builder()
         .bot(LocalizedExtBot(token=TELEGRAM_TOKEN))
         .post_init(post_init)
-        .post_shutdown(stop_fvg_stream)
+        .post_shutdown(post_shutdown)
         .build()
     )
 
     app.add_handler(TypeHandler(object, prepare_user_context), group=-2)
     app.add_handler(TypeHandler(object, track_user_activity), group=-1)
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fvg_alert", fvg_alert))
     app.add_handler(CommandHandler("fvg_pre_alert", fvg_pre_alert))
@@ -111,7 +110,6 @@ def main():
     app.add_handler(CommandHandler("funding", funding))
     app.add_handler(CommandHandler("donate", donate))
 
-    # Persistent menu buttons must win over free-text input state machines.
     for handler in build_settings_handlers():
         app.add_handler(handler)
     for handler in build_fvg_filter_handlers():
@@ -120,12 +118,8 @@ def main():
         app.add_handler(handler, group=1)
 
     app.add_handler(CommandHandler("menu", menu))
-    # Multi-exchange funding callbacks are registered before the generic menu router.
     app.add_handler(
-        CallbackQueryHandler(
-            funding_menu_callback,
-            pattern=r"^menu:funding",
-        )
+        CallbackQueryHandler(funding_menu_callback, pattern=r"^menu:funding")
     )
     app.add_handler(CallbackQueryHandler(menu_callback, pattern=r"^menu:"))
     app.add_handler(CommandHandler("admin", admin))
