@@ -4,14 +4,7 @@ Telegram-бот для отслеживания Fair Value Gap (FVG) и став
 фьючерсном рынке Bitunix. Бот отправляет уведомления и показывает статистику,
 но не открывает сделки и не является финансовой рекомендацией.
 
-Стабильная база проекта: **1.0.0**. Ветка `main` также содержит последующие
-функциональные обновления.
-
-## Статус проекта
-
-Версия `1.0.0` остаётся стабильной точкой восстановления. Разработка ветки
-`main` продолжена для новых модулей и production-исправлений. Перед обновлением
-рабочего сервера рекомендуется проверить CI и создать резервную копию runtime-state.
+Текущая версия ветки `main`: **1.1.0**.
 
 ## Возможности
 
@@ -19,45 +12,41 @@ Telegram-бот для отслеживания Fair Value Gap (FVG) и став
 - подтверждённые FVG на 15-минутном таймфрейме;
 - индивидуальные символы, направления, ценовые диапазоны и размеры зоны;
 - автоматическое включение подтверждённых FVG для `BTCUSDT` при первом `/start`;
-- повторный `/start` не отменяет ручное отключение уведомлений;
 - рейтинг положительных и отрицательных ставок фандинга Bitunix через `/funding`;
-- персональные уведомления по порогу фандинга с интервалом от 1 до 48 часов;
-- независимый выбор положительного и отрицательного фандинга;
+- персональные funding-уведомления с интервалом от 1 до 48 часов;
+- выбор положительного, отрицательного или обоих направлений;
 - подавление повторных уведомлений до нового пересечения порога;
-- переключение приватного и публичного доступа из `/admin` без перезапуска;
-- общий WebSocket Bitunix, watchdog зависшего потока и REST recovery;
+- приватный и публичный режим из `/admin` без перезапуска;
+- общий WebSocket Bitunix, watchdog и REST recovery;
 - SQLite/WAL для событий, доставок, outbox, funding-state и health-метрик;
 - атомарное VDS-обновление, автоматический rollback и ежедневные backup;
-- event-quality backtest без выдуманных торговых правил и P&L.
+- event-quality backtest без искусственного P&L.
+
+Подробности релиза: [`docs/RELEASE_1.1.0.md`](docs/RELEASE_1.1.0.md).
 
 ## Уведомления о фандинге
 
 Откройте `/funding` и нажмите `🔔 Уведомления`. Для каждого Telegram ID можно
 настроить:
 
-- частоту проверки от `1` до `48` часов с шагом один час;
+- частоту от `1` до `48` часов;
 - минимальный абсолютный процент фандинга;
 - положительное, отрицательное или оба направления;
 - включение и выключение рассылки.
 
-Бот получает общий снимок ставок один раз в час — в `HH:50` по UTC — и использует
-его для всех пользователей. Индивидуальная частота определяет, в какие из этих
-часовых контрольных точек проверяются настройки конкретного пользователя.
+Бот получает общий снимок ставок один раз в час — в `HH:50 UTC`. Индивидуальная
+частота определяет, в какие контрольные точки проверяется конкретный пользователь.
+Уведомление приходит только при новом пересечении порога.
 
-Уведомление приходит только при новом пересечении порога. Пока инструмент
-остаётся за порогом, повторные сообщения не отправляются. После возврата ставки
-в допустимый диапазон следующее пересечение снова создаёт уведомление.
-
-Настройки и текущее состояние пересечений хранятся в SQLite/WAL:
+Настройки и текущее состояние пересечений хранятся в:
 
 ```text
 data/funding_alerts.sqlite3
 ```
 
-База ограничена по размеру логикой хранения: полная история снимков не
-записывается, устаревшие пересечения удаляются через 7 дней, а выключенные и
-неизменявшиеся настройки — через 180 дней. Раз в сутки выполняются очистка,
-WAL checkpoint и incremental vacuum.
+Полная история снимков не сохраняется. Устаревшие пересечения удаляются через
+7 дней, выключенные неактивные настройки — через 180 дней. Раз в сутки
+выполняются WAL checkpoint и incremental vacuum.
 
 ## Локальный запуск
 
@@ -79,83 +68,76 @@ python3 -m venv .venv
 .venv/bin/python bot.py
 ```
 
-`PUBLIC_ACCESS_ENABLED=false` — безопасный режим по умолчанию. API-ключи Bitunix
-для FVG и funding не требуются.
+API-ключи Bitunix для FVG и funding не требуются.
 
-## Установка на Ubuntu/Debian VDS
+## Первая установка на Ubuntu/Debian VDS
 
-Поддерживаются Ubuntu 22.04/24.04 и Debian 12. Нужны исходящие HTTPS/WSS
-соединения к Telegram и Bitunix. Входящие порты, домен и веб-сервер не требуются.
-
-Перед установкой убедитесь, что на файловой системе `/opt` доступно не менее
-**1 ГБ** и 5000 inode. Один Telegram-токен может использовать только один
-polling-процесс.
-
-### Первая установка стабильного релиза
+Поддерживаются Ubuntu 22.04/24.04 и Debian 12. Перед установкой убедитесь, что
+на файловой системе `/opt` доступно не менее 1 ГБ и 5000 inode.
 
 ```bash
 ssh root@IP_АДРЕС_СЕРВЕРА
 apt update && apt install -y git
 git clone https://github.com/mishkacher/TB.git /root/TB
 cd /root/TB
-git fetch --tags --prune
-git checkout v1.0.0
+git checkout main
+test "$(cat VERSION)" = "1.1.0"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 При первом запуске установщик запросит токен BotFather и Telegram ID
-администратора. ID будет добавлен одновременно в `ADMIN_TELEGRAM_IDS` и
-`ALLOWED_TELEGRAM_IDS`.
+администратора. Он создаёт staging-релиз, новый virtualenv, выполняет компиляцию
+и unit-тесты, затем останавливает работающий процесс, делает backup и атомарно
+переключает релиз. При ошибке запуска выполняется rollback.
 
-Установщик:
+## Обновление существующего VDS до 1.1.0
 
-- проверяет свободное место и inode;
-- создаёт пользователя `fvgbot` и изолированный virtualenv;
-- собирает кандидат в отдельном staging-каталоге;
-- выполняет компиляцию Python и unit-тесты до остановки текущей службы;
-- сохраняет runtime-state и backup;
-- атомарно переключает активный релиз;
-- запускает systemd-службу и backup-таймер;
-- автоматически возвращает предыдущий релиз, если новый не запускается.
-
-### Обновление VDS из `main`
-
-Для установки текущего состояния `main`:
+Используйте подготовленный wrapper:
 
 ```bash
+ssh root@IP_АДРЕС_СЕРВЕРА
 cd /root/TB
 git fetch origin --prune
 git checkout main
 git pull --ff-only origin main
-FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
+EXPECTED_VERSION=1.1.0 bash scripts/update_vds.sh
 ```
 
-Для возврата к стабильной версии используйте тег `v1.0.0` вместо `main`.
-Файл `/etc/fvg-alert-bot.env` и каталог `/var/lib/fvg-alert-bot` при обновлении
-сохраняются. Повторно вводить токен и Telegram ID не требуется.
+Скрипт:
 
-### Проверка после установки
+1. проверяет root, чистоту Git checkout и наличие существующей установки;
+2. выполняет только fast-forward обновление `main`;
+3. проверяет целевую версию `1.1.0`;
+4. создаёт согласованный pre-update backup runtime-state;
+5. запускает атомарный установщик с минимальным запасом 1 ГБ;
+6. проверяет systemd, версию и ссылку на runtime-state;
+7. выполняет `PRAGMA quick_check` для обеих SQLite-баз;
+8. записывает установленный Git commit в `/opt/fvg-alert-bot/BUILD_COMMIT`.
+
+Файл `/etc/fvg-alert-bot.env` и каталог `/var/lib/fvg-alert-bot` сохраняются.
+Повторно вводить токен и Telegram ID не требуется.
+
+## Проверка после обновления
 
 ```bash
 cat /opt/fvg-alert-bot/VERSION
+cat /opt/fvg-alert-bot/BUILD_COMMIT
 systemctl is-active fvg-alert-bot
 systemctl is-enabled fvg-alert-bot
 systemctl status fvg-alert-bot --no-pager --full
 journalctl -u fvg-alert-bot -n 100 --no-pager
+ls -lah /var/backups/fvg-alert-bot
 ```
 
-После установки из `main` проверьте фактическую версию командой выше. Для
-стабильного тега `v1.0.0` ожидается:
+Ожидаемая версия:
 
 ```text
-1.0.0
+1.1.0
 ```
 
 В Telegram проверьте `/menu`, `/funding` и `/admin`. В разделе фандинга откройте
 `🔔 Уведомления`, задайте порог и убедитесь, что следующая проверка назначена на
-контрольную точку `HH:50`. В админ-панели кнопка `🔐 Доступ: приватный` /
-`🌐 Доступ: публичный` меняет режим сразу и сохраняет его в
-`data/runtime_settings.json`.
+`HH:50`.
 
 ## Production-настройки
 
@@ -174,18 +156,7 @@ ALLOWED_TELEGRAM_IDS=123456789
 PUBLIC_ACCESS_ENABLED=false
 ```
 
-Несколько ID перечисляются через запятую. При приватном доступе ID
-администратора должен присутствовать и в `ALLOWED_TELEGRAM_IDS`.
-
-После ручного редактирования:
-
-```bash
-chown root:fvgbot /etc/fvg-alert-bot.env
-chmod 640 /etc/fvg-alert-bot.env
-systemctl restart fvg-alert-bot
-```
-
-Защитные лимиты и operational alerts:
+Защитные лимиты:
 
 ```env
 MAX_ACTIVE_SYMBOLS=100
@@ -197,6 +168,14 @@ HEALTH_ALERT_INTERVAL_SECONDS=60
 HEALTH_ALERT_STALE_WS_SECONDS=180
 HEALTH_ALERT_OUTBOX_THRESHOLD=100
 HEALTH_ALERT_COOLDOWN_SECONDS=1800
+```
+
+После ручного изменения:
+
+```bash
+chown root:fvgbot /etc/fvg-alert-bot.env
+chmod 640 /etc/fvg-alert-bot.env
+systemctl restart fvg-alert-bot
 ```
 
 ## Файлы на VDS
@@ -211,28 +190,24 @@ HEALTH_ALERT_COOLDOWN_SECONDS=1800
 | systemd units | `/etc/systemd/system/fvg-alert-bot*` |
 
 Код и virtualenv принадлежат `root`. Процесс `fvgbot` записывает данные только в
-`/var/lib/fvg-alert-bot`. При production-установке файл funding-state находится
-в runtime-каталоге вместе с остальными SQLite-базами.
+`/var/lib/fvg-alert-bot`.
 
 ## Резервные копии и rollback
 
+Ежедневный архив содержит JSON-state и согласованные SQLite-снимки обеих баз.
+Live WAL/SHM-файлы в архив не копируются.
+
 ```bash
 systemctl list-timers fvg-alert-bot-backup.timer
-systemctl status fvg-alert-bot-backup.timer --no-pager
 systemctl start fvg-alert-bot-backup.service
 journalctl -u fvg-alert-bot-backup.service -n 100 --no-pager
 ls -lah /var/backups/fvg-alert-bot
 ```
 
 Установщик хранит предыдущий релиз в `/opt/fvg-alert-bot.previous`. Подробные
-процедуры восстановления находятся в
-[`docs/VDS_DEPLOYMENT.md`](docs/VDS_DEPLOYMENT.md) и
-[`docs/VDS_FIRST_INSTALL_RECOVERY.md`](docs/VDS_FIRST_INSTALL_RECOVERY.md).
+процедуры восстановления: [`docs/VDS_DEPLOYMENT.md`](docs/VDS_DEPLOYMENT.md).
 
 ## Диагностика
-
-Telegram `Conflict` означает, что тот же токен используется другим
-polling-процессом.
 
 ```bash
 journalctl -u fvg-alert-bot -n 200 --no-pager
@@ -244,6 +219,9 @@ getent hosts api.telegram.org
 getent hosts fapi.bitunix.com
 ```
 
+Telegram `Conflict` означает, что тот же токен используется другим
+polling-процессом.
+
 ## Команды Telegram
 
 - `/menu` — панель управления;
@@ -254,14 +232,8 @@ getent hosts fapi.bitunix.com
 - `/fvg_price BTCUSDT 50000 90000 both` — ценовой фильтр;
 - `/fvg_size` — фильтр размера зоны;
 - `/fvg_stats` — статистика FVG;
-- `/funding` — рейтинг ставок и настройки персональных funding-уведомлений;
-- `/admin` — админ-панель, состояние сервиса и режим доступа.
-
-## Fibonacci
-
-Подтверждённый профиль уровней TradingView хранится в
-[`fibonacci-settings.json`](fibonacci-settings.json). Он является справочным
-артефактом и не влияет на FVG-рассылку.
+- `/funding` — рейтинг ставок и funding-уведомления;
+- `/admin` — состояние сервиса и режим доступа.
 
 ## Историческая проверка FVG
 
@@ -277,10 +249,6 @@ getent hosts fapi.bitunix.com
   --output data/reports/btcusdt_fvg_quality_2025.json
 ```
 
-Отчёт измеряет touch/full fill, задержку заполнения, MFE/MAE и горизонты
-1/4/16/96 свечей. Методология описана в
-[`docs/FVG_BACKTEST.md`](docs/FVG_BACKTEST.md).
-
 ## Проверки
 
 ```bash
@@ -289,6 +257,6 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-CI проверяет shell-скрипты, компиляцию Python, unit-тесты, funding-scheduler,
-очистку SQLite, dependency audit, bounded soak, Linux/systemd units и research
-smoke по публичным данным Bitunix.
+CI проверяет shell-скрипты, компиляцию Python, unit-тесты, согласованность backup,
+funding-scheduler, очистку SQLite, dependency audit, bounded soak,
+Linux/systemd units и Bitunix research smoke.
