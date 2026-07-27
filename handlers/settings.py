@@ -25,6 +25,17 @@ MENU_ALIASES = {
     "❤️ Донат": "donate", "❤️ Donate": "donate",
 }
 MENU_PATTERN = rf"^(?:{'|'.join(re.escape(label) for label in MENU_ALIASES)})$"
+INPUT_STATE_KEYS = (
+    "waiting_fvg_filter_range",
+    "waiting_funding_alert_value",
+    "waiting_funding_check_symbol",
+)
+
+
+def _clear_input_states(context: ContextTypes.DEFAULT_TYPE) -> None:
+    for key in INPUT_STATE_KEYS:
+        context.user_data.pop(key, None)
+        context.chat_data.pop(key, None)
 
 
 def format_settings_text(chat_id: int, preferences=None) -> str:
@@ -81,6 +92,7 @@ async def show_settings(message, chat_id: int, *, edit=False) -> None:
 @authorized
 async def persistent_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message, chat_id = update.effective_message, update.effective_chat.id
+    _clear_input_states(context)
     action = MENU_ALIASES.get(message.text)
     if action == "fvg":
         await message.reply_text("Настройки применяются отдельно для твоего Telegram ID.", reply_markup=build_fvg_settings_menu(chat_id))
