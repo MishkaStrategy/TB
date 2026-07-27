@@ -74,6 +74,11 @@ MAX_SYMBOLS_PER_USER = parse_positive_int(
 FVG_DELIVERY_QUEUE_SIZE = parse_positive_int(
     os.getenv("FVG_DELIVERY_QUEUE_SIZE"), 1000, "FVG_DELIVERY_QUEUE_SIZE"
 )
+FVG_PROCESS_RESTART_STALE_SECONDS = parse_positive_float(
+    os.getenv("FVG_PROCESS_RESTART_STALE_SECONDS"),
+    1000,
+    "FVG_PROCESS_RESTART_STALE_SECONDS",
+)
 HEALTH_WRITE_INTERVAL_SECONDS = parse_positive_float(
     os.getenv("HEALTH_WRITE_INTERVAL_SECONDS"),
     30,
