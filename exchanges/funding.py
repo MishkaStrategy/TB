@@ -10,11 +10,12 @@ import requests
 from exchanges.bitunix import BitunixClient
 
 
-EXCHANGE_ORDER = ("bitunix", "binance", "bybit", "bitget", "gate")
+EXCHANGE_ORDER = ("bitunix", "binance", "bybit", "bingx", "bitget", "gate")
 EXCHANGE_LABELS = {
     "bitunix": "Bitunix",
     "binance": "Binance",
     "bybit": "Bybit",
+    "bingx": "BingX",
     "bitget": "Bitget",
     "gate": "Gate",
 }
@@ -67,12 +68,27 @@ def _text(value: Decimal | None) -> str | None:
 def _record(exchange, symbol, funding_rate, price_change_24h=None):
     if not symbol or funding_rate is None:
         return None
+    normalized_symbol = (
+        str(symbol)
+        .upper()
+        .replace("_", "")
+        .replace("-", "")
+        .replace("/", "")
+    )
     return {
         "exchange": normalize_exchange(exchange),
-        "symbol": str(symbol).upper().replace("_", ""),
+        "symbol": normalized_symbol,
         "fundingRate": _text(funding_rate),
         "priceChange24h": _text(price_change_24h),
     }
+
+
+def _payload_items(value) -> list[dict]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
 
 
 class PublicFundingClient:
@@ -80,6 +96,7 @@ class PublicFundingClient:
 
     BINANCE_BASE_URL = "https://fapi.binance.com"
     BYBIT_BASE_URL = "https://api.bybit.com"
+    BINGX_BASE_URL = "https://open-api.bingx.com"
     BITGET_BASE_URL = "https://api.bitget.com"
     GATE_BASE_URL = "https://api.gateio.ws/api/v4"
 
@@ -171,6 +188,26 @@ class PublicFundingClient:
                 symbol,
                 _percent_from_ratio(item.get("fundingRate")),
                 _percent_from_ratio(item.get("price24hPcnt")),
+            )
+            if record:
+                normalized.append(record)
+        return normalized
+
+    def _load_bingx(self):
+        payload = self._get_json(
+            f"{self.BINGX_BASE_URL}/openApi/swap/v2/quote/premiumIndex"
+        )
+        if str(payload.get("code", "0")) != "0":
+            raise ValueError(f"BingX funding error: {payload.get('msg', 'unknown')}")
+        normalized = []
+        for item in _payload_items(payload.get("data")):
+            symbol = item.get("symbol")
+            if not str(symbol or "").endswith("-USDT"):
+                continue
+            record = _record(
+                "bingx",
+                symbol,
+                _percent_from_ratio(item.get("lastFundingRate")),
             )
             if record:
                 normalized.append(record)
