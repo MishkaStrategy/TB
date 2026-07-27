@@ -36,7 +36,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "🤖 FVG Alert Bot запущен!\n\n"
         "Бот отслеживает FVG на Bitunix и ставки фандинга на нескольких биржах.\n"
-        "Поддерживаются Bitunix, Binance, Bybit, Bitget и Gate.\n\n"
+        "Поддерживаются Bitunix, Binance, Bybit, Bitget, Gate и BingX.\n\n"
         "Команды:\n"
         "/fvg_alert on|off — FVG 15m уведомления\n"
         "/fvg_pre_alert on|off — пред-FVG за 3 минуты\n"
