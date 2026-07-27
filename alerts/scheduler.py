@@ -1,9 +1,10 @@
-"""Telegram JobQueue integration for FVG alerts."""
+"""Telegram JobQueue integration for FVG and funding alerts."""
 
 import asyncio
 import logging
 from datetime import datetime, timezone
 
+from alerts.funding_alerts import FundingAlertService, next_hour_at_50
 from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
 from alerts.health_monitor import HealthAlertMonitor
@@ -14,6 +15,7 @@ from config import (
     HEALTH_ALERT_OUTBOX_THRESHOLD,
     HEALTH_ALERT_STALE_WS_SECONDS,
 )
+from handlers.funding import CACHE_KEY as FUNDING_CACHE_KEY
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,7 @@ logger = logging.getLogger(__name__)
 _FVG_SERVICE = None
 _FVG_STREAM = None
 _FVG_TASK = None
+_FUNDING_SERVICE = None
 
 
 def get_fvg_service():
@@ -29,6 +32,13 @@ def get_fvg_service():
     if _FVG_SERVICE is None:
         _FVG_SERVICE = FvgAlertService()
     return _FVG_SERVICE
+
+
+def get_funding_service():
+    global _FUNDING_SERVICE
+    if _FUNDING_SERVICE is None:
+        _FUNDING_SERVICE = FundingAlertService()
+    return _FUNDING_SERVICE
 
 
 async def run_fvg_recovery(context):
@@ -117,8 +127,23 @@ async def run_operational_health(context):
                 )
 
 
+async def run_funding_alerts(context):
+    """Refresh funding once at :50 and notify users whose schedules are due."""
+    service = context.job.data["funding_service"]
+    try:
+        rates = await service.run(context.bot)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Hourly funding alert job failed")
+        return
+    if rates is not None:
+        # One shared cache instead of one full rates list per Telegram user.
+        context.bot_data[FUNDING_CACHE_KEY] = rates
+
+
 def schedule_fvg_alerts(application):
-    """Register FVG control points, outbox, health and REST recovery."""
+    """Register FVG control points, funding, outbox, health and REST recovery."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()
@@ -169,6 +194,16 @@ def schedule_fvg_alerts(application):
                 cooldown_seconds=HEALTH_ALERT_COOLDOWN_SECONDS,
             ),
         },
+    )
+
+    now = datetime.now(timezone.utc)
+    funding_delay = (next_hour_at_50(now) - now).total_seconds()
+    application.job_queue.run_repeating(
+        run_funding_alerts,
+        interval=3600,
+        first=funding_delay,
+        name="funding-hourly-at-50",
+        data={"funding_service": get_funding_service()},
     )
 
 
