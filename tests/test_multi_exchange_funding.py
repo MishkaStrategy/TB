@@ -66,6 +66,37 @@ class PublicFundingAdapterTests(unittest.TestCase):
         self.assertEqual(rates[0]["fundingRate"], "0.01")
         self.assertEqual(rates[0]["priceChange24h"], "2.5")
 
+    def test_bingx_public_batch_is_normalized(self):
+        session = FakeSession([
+            {
+                "code": 0,
+                "msg": "",
+                "data": [
+                    {
+                        "symbol": "BTC-USDT",
+                        "lastFundingRate": "0.0005",
+                        "nextFundingTime": 1780000000000,
+                    },
+                    {
+                        "symbol": "BTC-USD",
+                        "lastFundingRate": "0.0007",
+                    },
+                ],
+            }
+        ])
+        rates = PublicFundingClient(
+            session=session,
+            bitunix_client=FakeBitunix(),
+        ).load("bingx")
+        self.assertEqual(rates, [{
+            "exchange": "bingx",
+            "symbol": "BTCUSDT",
+            "fundingRate": "0.05",
+            "priceChange24h": None,
+        }])
+        self.assertIn("/openApi/swap/v2/quote/premiumIndex", session.calls[0][0])
+        self.assertNotIn("headers", session.calls[0][1])
+
     def test_bybit_bitget_and_gate_are_normalized(self):
         bybit = PublicFundingClient(
             session=FakeSession([
@@ -145,7 +176,9 @@ class FundingViewTests(unittest.TestCase):
             for button in row
         ]
         self.assertIn("✅ Bybit", labels)
+        self.assertIn("BingX", labels)
         self.assertIn("menu:funding-exchange:binance", callbacks)
+        self.assertIn("menu:funding-exchange:bingx", callbacks)
         self.assertIn("menu:funding-exchange:gate", callbacks)
         self.assertIn("menu:funding-check", callbacks)
         self.assertIn(
@@ -172,6 +205,9 @@ class FundingViewTests(unittest.TestCase):
                     }
                 ],
                 "binance": [],
+                "bingx": [
+                    {"symbol": "BTCUSDT", "fundingRate": "0.05"}
+                ],
                 "bitget": [
                     {"symbol": "BTCUSDT", "fundingRate": "-0.03"}
                 ],
@@ -182,6 +218,7 @@ class FundingViewTests(unittest.TestCase):
         )
         self.assertIn("Проверка фандинга BTCUSDT", text)
         self.assertIn("Bitunix</b>: <code>+0.2500%</code>", text)
+        self.assertIn("BingX</b>: <code>+0.0500%</code>", text)
         self.assertIn("Bitget</b>: <code>-0.0300%</code>", text)
         self.assertIn("Binance</b>: контракт не найден", text)
         self.assertIn("Bybit</b>: API временно недоступен", text)
@@ -203,8 +240,8 @@ class FundingExchangeStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.toggle(10, "bitunix")
             self.assertEqual(
-                store.toggle(10, "binance"),
-                ("bitunix", "binance"),
+                store.toggle(10, "bingx"),
+                ("bitunix", "bingx"),
             )
 
     def test_migrates_existing_bitunix_crossings(self):
@@ -233,17 +270,17 @@ class FundingExchangeStoreTests(unittest.TestCase):
             "notify_negative": True,
         }
         snapshot = {
-            "binance": [
+            "bingx": [
                 {"symbol": "BTCUSDT", "fundingRate": "0.4"}
             ],
             "bybit": [
                 {"symbol": "ETHUSDT", "fundingRate": "-0.5"}
             ],
         }
-        matches = matching_crossings(snapshot, settings, ("bybit",))
+        matches = matching_crossings(snapshot, settings, ("bingx",))
         self.assertEqual(
             matches,
-            {("bybit", "ETHUSDT", "negative"): Decimal("-0.5")},
+            {("bingx", "BTCUSDT", "positive"): Decimal("0.4")},
         )
 
 
