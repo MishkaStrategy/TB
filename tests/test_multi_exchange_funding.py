@@ -8,7 +8,12 @@ from alerts.funding_alerts import FundingAlertStore
 from alerts.funding_exchange_store import FundingExchangeStore
 from alerts.multi_funding_alerts import matching_crossings
 from exchanges.funding import PublicFundingClient
-from handlers.multi_funding import build_funding_menu, format_funding_rates
+from handlers.multi_funding import (
+    build_funding_menu,
+    format_funding_rates,
+    format_symbol_funding,
+    normalize_funding_symbol,
+)
 
 UTC = timezone.utc
 
@@ -127,7 +132,7 @@ class PublicFundingAdapterTests(unittest.TestCase):
 
 
 class FundingViewTests(unittest.TestCase):
-    def test_menu_contains_exchange_switches(self):
+    def test_menu_contains_exchange_switches_and_symbol_check(self):
         markup = build_funding_menu(0, 1, "bybit")
         labels = [
             button.text
@@ -142,10 +147,45 @@ class FundingViewTests(unittest.TestCase):
         self.assertIn("✅ Bybit", labels)
         self.assertIn("menu:funding-exchange:binance", callbacks)
         self.assertIn("menu:funding-exchange:gate", callbacks)
+        self.assertIn("menu:funding-check", callbacks)
         self.assertIn(
             "Фандинг Bybit",
             format_funding_rates([], exchange="bybit"),
         )
+
+    def test_normalizes_symbol_input(self):
+        self.assertEqual(normalize_funding_symbol("btc"), "BTCUSDT")
+        self.assertEqual(normalize_funding_symbol("eth/usdt"), "ETHUSDT")
+        self.assertEqual(normalize_funding_symbol("1000pepe-usdt"), "1000PEPEUSDT")
+        with self.assertRaises(ValueError):
+            normalize_funding_symbol("???")
+
+    def test_formats_one_symbol_across_all_exchanges(self):
+        text = format_symbol_funding(
+            "BTC",
+            {
+                "bitunix": [
+                    {
+                        "symbol": "BTCUSDT",
+                        "fundingRate": "0.25",
+                        "priceChange24h": "2",
+                    }
+                ],
+                "binance": [],
+                "bitget": [
+                    {"symbol": "BTCUSDT", "fundingRate": "-0.03"}
+                ],
+                "gate": [
+                    {"symbol": "BTCUSDT", "fundingRate": "0"}
+                ],
+            },
+        )
+        self.assertIn("Проверка фандинга BTCUSDT", text)
+        self.assertIn("Bitunix</b>: <code>+0.2500%</code>", text)
+        self.assertIn("Bitget</b>: <code>-0.0300%</code>", text)
+        self.assertIn("Binance</b>: контракт не найден", text)
+        self.assertIn("Bybit</b>: API временно недоступен", text)
+        self.assertIn("Gate</b>: <code>0.0000%</code>", text)
 
 
 class FundingExchangeStoreTests(unittest.TestCase):
