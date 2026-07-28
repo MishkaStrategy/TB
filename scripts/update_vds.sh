@@ -11,7 +11,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/fvg-alert-bot}"
 STATE_DIR="${STATE_DIR:-/var/lib/fvg-alert-bot}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/fvg-alert-bot}"
 TARGET_BRANCH="${TARGET_BRANCH:-main}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-1.1.0}"
+EXPECTED_VERSION="${EXPECTED_VERSION:-1.2.0}"
 MIN_FREE_MB="${FVG_INSTALL_MIN_FREE_MB:-1024}"
 
 fail() {
