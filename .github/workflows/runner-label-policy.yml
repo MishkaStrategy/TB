@@ -1,0 +1,95 @@
+name: Runner label policy
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate self-hosted runner labels
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install YAML parser
+        run: python -m pip install --disable-pip-version-check "PyYAML>=6,<7"
+
+      - name: Enforce capability labels
+        shell: bash
+        run: |
+          python <<'PY'
+          from pathlib import Path
+          import sys
+          import yaml
+
+          workflows = Path(".github/workflows")
+          errors = []
+
+          def labels_from(value):
+              if isinstance(value, str):
+                  return [value.strip()]
+              if isinstance(value, list):
+                  return [str(item).strip() for item in value]
+              if isinstance(value, dict):
+                  return labels_from(value.get("labels", []))
+              return []
+
+          def inspect(node, file_name, location="jobs"):
+              if isinstance(node, dict):
+                  for key, value in node.items():
+                      current = f"{location}.{key}"
+                      if key == "runs-on":
+                          labels = labels_from(value)
+                          normalized = [label.lower() for label in labels]
+                          if "self-hosted" in normalized:
+                              capability_labels = [
+                                  label
+                                  for label in labels
+                                  if label.lower() != "self-hosted"
+                              ]
+                              if not capability_labels:
+                                  errors.append(
+                                      f"{file_name}:{current}: self-hosted requires "
+                                      "at least one capability label, for example "
+                                      "[self-hosted, fast], [self-hosted, docker], "
+                                      "or [self-hosted, macos]."
+                                  )
+                      inspect(value, file_name, current)
+              elif isinstance(node, list):
+                  for index, item in enumerate(node):
+                      inspect(item, file_name, f"{location}[{index}]")
+
+          for workflow_file in sorted(workflows.glob("*.y*ml")):
+              try:
+                  document = yaml.safe_load(
+                      workflow_file.read_text(encoding="utf-8")
+                  )
+              except Exception as exc:
+                  errors.append(f"{workflow_file}: invalid YAML: {exc}")
+                  continue
+              inspect(document, str(workflow_file))
+
+          if errors:
+              print("Runner label policy violations:")
+              for error in errors:
+                  print(f"  - {error}")
+              sys.exit(1)
+
+          print("Runner label policy passed.")
+          PY
