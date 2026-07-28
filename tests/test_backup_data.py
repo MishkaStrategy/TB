@@ -38,6 +38,9 @@ class RuntimeBackupTests(unittest.TestCase):
                 '{"public_access_enabled": false}',
                 encoding="utf-8",
             )
+            manual_backups = data_dir / ".manual_backups"
+            manual_backups.mkdir()
+            (manual_backups / "old-backup.tar.gz").write_bytes(b"not recursive")
 
             environment = {
                 **os.environ,
@@ -69,6 +72,7 @@ class RuntimeBackupTests(unittest.TestCase):
                 archive.extractall(extract_dir)
 
             self.assertTrue((extract_dir / "runtime_settings.json").is_file())
+            self.assertFalse((extract_dir / ".manual_backups").exists())
             self.assertFalse((extract_dir / "fvg_event_store.sqlite3-wal").exists())
             self.assertFalse((extract_dir / "funding_alerts.sqlite3-wal").exists())
 
