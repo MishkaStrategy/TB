@@ -1,0 +1,110 @@
+name: Temporary runner label inventory
+
+on:
+  push:
+    branches:
+      - agent/runner-label-policy
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Inventory runs-on filters
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*'
+          python3 - <<'PY'
+          import json, os, re, subprocess, urllib.request
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          current = os.environ['GITHUB_REF_NAME']
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{repo}/pulls?state=open&per_page=100',
+              headers={
+                  'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+              },
+          )
+          with urllib.request.urlopen(req) as response:
+              pulls = json.load(response)
+
+          refs = {'main', current}
+          for pr in pulls:
+              head = pr.get('head') or {}
+              head_repo = head.get('repo') or {}
+              if head_repo.get('full_name') == repo and head.get('ref'):
+                  refs.add(head['ref'])
+
+          rows = set()
+          for branch in sorted(refs):
+              ref = f'refs/remotes/origin/{branch}'
+              exists = subprocess.run(
+                  ['git', 'show-ref', '--verify', '--quiet', ref],
+                  check=False,
+              ).returncode == 0
+              if not exists:
+                  continue
+              paths = subprocess.check_output(
+                  ['git', 'ls-tree', '-r', '--name-only', ref, '--', '.github/workflows'],
+                  text=True,
+              ).splitlines()
+              for path in paths:
+                  if not path.endswith(('.yml', '.yaml')):
+                      continue
+                  text = subprocess.check_output(['git', 'show', f'{ref}:{path}'], text=True)
+                  lines = text.splitlines()
+                  in_jobs = False
+                  current_job = '<unknown>'
+                  i = 0
+                  while i < len(lines):
+                      line = lines[i]
+                      stripped = line.strip()
+                      indent = len(line) - len(line.lstrip(' '))
+                      if re.match(r'^jobs:\s*(?:#.*)?$', stripped):
+                          in_jobs = True
+                          current_job = '<unknown>'
+                          i += 1
+                          continue
+                      if in_jobs and indent == 0 and stripped and not stripped.startswith('#'):
+                          in_jobs = False
+                      if in_jobs:
+                          match_job = re.match(r'^  ([A-Za-z0-9_.-]+):\s*(?:#.*)?$', line)
+                          if match_job:
+                              current_job = match_job.group(1)
+                          match = re.match(r'^(\s*)runs-on:\s*(.*)$', line)
+                          if match:
+                              value = match.group(2).split(' #', 1)[0].strip()
+                              if not value:
+                                  base_indent = len(match.group(1))
+                                  values = []
+                                  j = i + 1
+                                  while j < len(lines):
+                                      nxt = lines[j]
+                                      nxt_indent = len(nxt) - len(nxt.lstrip(' '))
+                                      nxt_stripped = nxt.strip()
+                                      if nxt_stripped and nxt_indent <= base_indent:
+                                          break
+                                      item = re.match(r'^\s*-\s*(.+?)(?:\s+#.*)?$', nxt)
+                                      if item:
+                                          values.append(item.group(1).strip())
+                                      j += 1
+                                  value = '[' + ', '.join(values) + ']'
+                              rows.add((branch, path, current_job, value))
+                      i += 1
+
+          print('INVENTORY_BEGIN')
+          for branch, path, job, value in sorted(rows):
+              print(f'{branch}|{path}|{job}|{value}')
+          print('INVENTORY_END')
+          PY
