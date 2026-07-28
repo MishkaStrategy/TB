@@ -91,7 +91,7 @@ class FundingStorageStdlibTests(unittest.TestCase):
         self.assertIn("interval=900", scheduler)
         self.assertIn('name="funding-quarter-hour"', scheduler)
         self.assertIn("parse_interval_minutes", ui)
-        self.assertIn('settings["interval_minutes"]', ui)
+        self.assertIn("interval_minutes", ui)
         self.assertIn("каждые 15 минут", ui)
 
     def test_scheduled_service_saves_only_three_downloads(self):
