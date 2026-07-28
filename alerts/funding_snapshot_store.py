@@ -98,6 +98,14 @@ class FundingSnapshotStore:
         )
         return max(cursor.rowcount, 0)
 
+    def _checkpoint(self) -> None:
+        """Prevent the WAL from accumulating deleted snapshot pages between cleanups."""
+        connection = self._connect()
+        try:
+            connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            connection.close()
+
     def save(self, snapshot, *, captured_at: datetime) -> dict:
         if not isinstance(snapshot, dict) or not snapshot:
             raise ValueError("Funding snapshot must be a non-empty dictionary.")
@@ -134,6 +142,7 @@ class FundingSnapshotStore:
             connection.commit()
         finally:
             connection.close()
+        self._checkpoint()
         return {
             "captured_at": captured_at.astimezone(UTC),
             "exchange_count": exchange_count,
