@@ -22,6 +22,8 @@ from localization import set_current_chat_id
 from localized_bot import LocalizedExtBot
 
 
+USER_PREFERENCES = UserPreferences()
+
 BOT_COMMANDS = (
     BotCommand("menu", "Открыть главное меню"),
     BotCommand("admin", "Админ-панель"),
@@ -79,7 +81,11 @@ async def prepare_user_context(update, context):
         if user is not None and str(user.language_code or "").lower().startswith("en")
         else "ru"
     )
-    await asyncio.to_thread(UserPreferences().ensure, chat_id, language=suggested_language)
+    await asyncio.to_thread(
+        USER_PREFERENCES.ensure,
+        chat_id,
+        language=suggested_language,
+    )
 
 
 async def track_user_activity(update, context):
@@ -94,7 +100,7 @@ def main():
 
     app = (
         Application.builder()
-        .bot(LocalizedExtBot(token=TELEGRAM_TOKEN))
+        .bot(LocalizedExtBot(token=TELEGRAM_TOKEN, preferences=USER_PREFERENCES))
         .post_init(post_init)
         .post_shutdown(post_shutdown)
         .build()
