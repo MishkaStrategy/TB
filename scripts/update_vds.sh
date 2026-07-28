@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Safely update an existing FVG Alert Bot VDS installation from GitHub main.
+# Safely update an existing FVG Alert Bot VDS installation from a reviewed ref.
 # Run as root from the repository checkout:
-#   bash scripts/update_vds.sh
+#   TARGET_REF=v1.2.0 EXPECTED_VERSION=1.2.0 bash scripts/update_vds.sh
 
 set -euo pipefail
 
@@ -10,8 +10,9 @@ PROJECT_DIR="${PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 INSTALL_DIR="${INSTALL_DIR:-/opt/fvg-alert-bot}"
 STATE_DIR="${STATE_DIR:-/var/lib/fvg-alert-bot}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/fvg-alert-bot}"
-TARGET_BRANCH="${TARGET_BRANCH:-main}"
+TARGET_REF="${TARGET_REF:-main}"
 EXPECTED_VERSION="${EXPECTED_VERSION:-1.2.0}"
+EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 MIN_FREE_MB="${FVG_INSTALL_MIN_FREE_MB:-1024}"
 
 fail() {
@@ -36,18 +37,36 @@ current_commit="$(git -C "${PROJECT_DIR}" rev-parse HEAD)"
 current_version="$(cat "${INSTALL_DIR}/VERSION" 2>/dev/null || echo unknown)"
 echo "Текущая установка: version=${current_version}, checkout=${current_commit}"
 
-echo "Получаю актуальный ${TARGET_BRANCH}…"
-git -C "${PROJECT_DIR}" fetch origin "${TARGET_BRANCH}" --tags --prune
-git -C "${PROJECT_DIR}" checkout "${TARGET_BRANCH}"
-git -C "${PROJECT_DIR}" pull --ff-only origin "${TARGET_BRANCH}"
+echo "Получаю актуальный ref ${TARGET_REF}…"
+git -C "${PROJECT_DIR}" fetch origin --tags --prune
+
+if git -C "${PROJECT_DIR}" rev-parse --verify --quiet \
+  "refs/remotes/origin/${TARGET_REF}^{commit}" >/dev/null; then
+  if git -C "${PROJECT_DIR}" show-ref --verify --quiet \
+    "refs/heads/${TARGET_REF}"; then
+    git -C "${PROJECT_DIR}" checkout "${TARGET_REF}"
+  else
+    git -C "${PROJECT_DIR}" checkout -b "${TARGET_REF}" \
+      --track "origin/${TARGET_REF}"
+  fi
+  git -C "${PROJECT_DIR}" merge --ff-only "origin/${TARGET_REF}"
+elif git -C "${PROJECT_DIR}" rev-parse --verify --quiet \
+  "refs/tags/${TARGET_REF}^{commit}" >/dev/null; then
+  git -C "${PROJECT_DIR}" checkout --detach "refs/tags/${TARGET_REF}"
+else
+  fail "не найден remote branch или tag: ${TARGET_REF}"
+fi
 
 target_commit="$(git -C "${PROJECT_DIR}" rev-parse HEAD)"
 target_version="$(tr -d '[:space:]' < "${PROJECT_DIR}/VERSION")"
 if [[ -n "${EXPECTED_VERSION}" && "${target_version}" != "${EXPECTED_VERSION}" ]]; then
   fail "ожидалась версия ${EXPECTED_VERSION}, в checkout указана ${target_version}"
 fi
+if [[ -n "${EXPECTED_COMMIT}" && "${target_commit}" != "${EXPECTED_COMMIT}"* ]]; then
+  fail "ожидался commit ${EXPECTED_COMMIT}, получен ${target_commit}"
+fi
 
-echo "Целевой релиз: version=${target_version}, commit=${target_commit}"
+echo "Целевой релиз: ref=${TARGET_REF}, version=${target_version}, commit=${target_commit}"
 
 installed_python="${INSTALL_DIR}/.venv/bin/python"
 if [[ ! -x "${installed_python}" ]]; then
@@ -113,6 +132,7 @@ PY
 
 echo
 echo "VDS успешно обновлён."
+echo "Ref: ${TARGET_REF}"
 echo "Версия: ${installed_version}"
 echo "Коммит: ${target_commit}"
 echo "Backup: ${latest_backup}"
