@@ -4,7 +4,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from alerts.funding_alerts import FundingAlertService, next_hour_at_50
+from alerts.funding_alerts import FundingAlertService
+from alerts.funding_quarter_hour import next_quarter_hour
 from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
 from alerts.health_monitor import HealthAlertMonitor
@@ -128,14 +129,14 @@ async def run_operational_health(context):
 
 
 async def run_funding_alerts(context):
-    """Refresh funding once at :50 and notify users whose schedules are due."""
+    """Refresh funding on each quarter hour and notify users whose schedules are due."""
     service = context.job.data["funding_service"]
     try:
         rates = await service.run(context.bot)
     except asyncio.CancelledError:
         raise
     except Exception:
-        logger.exception("Hourly funding alert job failed")
+        logger.exception("Quarter-hour funding alert job failed")
         return
     if rates is not None:
         # One shared cache instead of one full rates list per Telegram user.
@@ -197,12 +198,12 @@ def schedule_fvg_alerts(application):
     )
 
     now = datetime.now(timezone.utc)
-    funding_delay = (next_hour_at_50(now) - now).total_seconds()
+    funding_delay = (next_quarter_hour(now) - now).total_seconds()
     application.job_queue.run_repeating(
         run_funding_alerts,
-        interval=3600,
+        interval=900,
         first=funding_delay,
-        name="funding-hourly-at-50",
+        name="funding-quarter-hour",
         data={"funding_service": get_funding_service()},
     )
 
