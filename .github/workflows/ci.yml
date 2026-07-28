@@ -26,15 +26,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Compile bounded funding storage
+      - name: Compile funding changes
         run: >-
           python3 -m compileall -q
           alerts/funding_alerts.py
           alerts/funding_quarter_hour.py
           alerts/funding_snapshot_store.py
+          alerts/funding_exchange_store.py
+          alerts/multi_funding_alerts.py
+          alerts/scheduler.py
+          handlers/multi_funding_alert_ui.py
+          tests/test_funding_quarter_hour.py
           tests/test_funding_storage_stdlib.py
 
-      - name: Verify migration and three-snapshot bound
+      - name: Verify migration, scheduled saves and three-snapshot bound
         run: python3 -m unittest -v tests.test_funding_storage_stdlib
 
   tests:
