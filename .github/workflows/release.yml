@@ -100,13 +100,19 @@ jobs:
 
             if (release) return;
 
-            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-            const heading = `## ${version}`;
-            const start = changelog.indexOf(heading);
-            let body = 'See CHANGELOG.md and the matching release document for details.';
-            if (start >= 0) {
-              const next = changelog.indexOf('\n## ', start + heading.length);
-              body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+            const releaseDocument = `docs/RELEASE_${version}.md`;
+            let body;
+            if (fs.existsSync(releaseDocument)) {
+              body = fs.readFileSync(releaseDocument, 'utf8').trim();
+            } else {
+              const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+              const heading = `## ${version}`;
+              const start = changelog.indexOf(heading);
+              body = 'See CHANGELOG.md for details.';
+              if (start >= 0) {
+                const next = changelog.indexOf('\n## ', start + heading.length);
+                body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+              }
             }
 
             release = (await github.rest.repos.createRelease({
