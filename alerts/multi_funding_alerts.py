@@ -1,4 +1,4 @@
-"""Multi-exchange funding notification service using existing schedule settings."""
+"""Multi-exchange funding notifications on a shared quarter-hour snapshot."""
 
 from __future__ import annotations
 
@@ -7,8 +7,10 @@ import logging
 from decimal import Decimal, InvalidOperation
 from html import escape
 
-from alerts.funding_alerts import FundingAlertStore, parse_threshold, utc_now
+from alerts.funding_quarter_hour import FundingAlertStore
+from alerts.funding_alerts import parse_threshold, utc_now
 from alerts.funding_exchange_store import FundingExchangeStore
+from alerts.funding_snapshot_store import FundingSnapshotStore
 from exchanges.funding import EXCHANGE_LABELS, exchange_label, normalize_exchange
 
 LOGGER = logging.getLogger(__name__)
@@ -88,10 +90,17 @@ def format_alert(settings, exchanges, crossings):
 
 
 class MultiFundingAlertService:
-    def __init__(self, settings_store=None, exchange_store=None, loader=None):
+    def __init__(
+        self,
+        settings_store=None,
+        exchange_store=None,
+        snapshot_store=None,
+        loader=None,
+    ):
         self.settings_store = settings_store or FundingAlertStore()
         path = getattr(self.settings_store, "path", None)
         self.exchange_store = exchange_store or FundingExchangeStore(path)
+        self.snapshot_store = snapshot_store or FundingSnapshotStore(path)
         self.loader = loader
 
     async def _load(self):
@@ -109,11 +118,22 @@ class MultiFundingAlertService:
         except asyncio.CancelledError:
             raise
         except Exception:
-            LOGGER.exception("Hourly multi-exchange funding refresh failed")
+            LOGGER.exception("Quarter-hour multi-exchange funding refresh failed")
             return None
         if not isinstance(snapshot, dict) or not snapshot:
             LOGGER.error("No exchange returned a funding snapshot")
             return None
+
+        try:
+            await asyncio.to_thread(
+                self.snapshot_store.save,
+                snapshot,
+                captured_at=current_time,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            LOGGER.exception("Failed to persist bounded funding snapshot history")
 
         available = {
             key

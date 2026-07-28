@@ -8,11 +8,8 @@ from decimal import Decimal
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
-from alerts.funding_alerts import (
-    FundingAlertStore,
-    parse_interval_hours,
-    parse_threshold,
-)
+from alerts.funding_alerts import parse_threshold
+from alerts.funding_quarter_hour import FundingAlertStore, parse_interval_minutes
 from alerts.funding_exchange_store import FundingExchangeStore
 from exchanges.funding import EXCHANGE_LABELS, EXCHANGE_ORDER
 from handlers.auth import authorized
@@ -27,6 +24,16 @@ def _mark(value):
 
 def _threshold(value: Decimal):
     return format(value, "f").rstrip("0").rstrip(".") or "0"
+
+
+def format_interval(minutes: int) -> str:
+    minutes = parse_interval_minutes(minutes)
+    hours, remainder = divmod(minutes, 60)
+    if not hours:
+        return f"{minutes} мин."
+    if not remainder:
+        return f"{hours} ч."
+    return f"{hours} ч. {remainder} мин."
 
 
 def _stores():
@@ -50,9 +57,9 @@ def format_settings(chat_id, settings_store=None, exchange_store=None):
         direction = "отрицательный"
     next_check = settings.get("next_check_at")
     if not settings["enabled"]:
-        next_text = "после включения — в ближайшие :50"
+        next_text = "после включения — в ближайшую четверть часа"
     elif next_check is None:
-        next_text = "в ближайшие :50"
+        next_text = "в ближайшую четверть часа"
     else:
         next_text = next_check.astimezone(timezone.utc).strftime(
             "%d.%m %H:%M UTC"
@@ -61,12 +68,13 @@ def format_settings(chat_id, settings_store=None, exchange_store=None):
     return (
         "🔔 <b>Уведомления о фандинге</b>\n\n"
         f"Статус: {'✅ включены' if settings['enabled'] else '⏸️ выключены'}\n"
-        f"Частота: каждые {settings['interval_hours']} ч.\n"
+        f"Частота: каждые {format_interval(settings['interval_minutes'])}\n"
         f"Порог: {_threshold(settings['threshold'])}%\n"
         f"Направление: {direction}\n"
         f"Биржи: {exchange_text}\n"
         f"Следующая проверка: {next_text}\n\n"
-        "Общий снимок выбранных бирж обновляется в 50 минут каждого часа."
+        "Общий снимок всех бирж обновляется каждые 15 минут. "
+        "В базе остаются только три последних снимка."
     )
 
 
@@ -93,7 +101,7 @@ def build_menu(chat_id, settings_store=None, exchange_store=None):
         [InlineKeyboardButton(status, callback_data="funding-alert:toggle")],
         [
             InlineKeyboardButton(
-                f"⏱ {settings['interval_hours']} ч.",
+                f"⏱ {format_interval(settings['interval_minutes'])}",
                 callback_data="funding-alert:interval",
             ),
             InlineKeyboardButton(
@@ -155,8 +163,8 @@ async def callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.chat_data[INPUT_KEY] = state
         await query.answer()
         prompt = (
-            "Введите частоту уведомлений целым числом от 1 до 48.\n"
-            "Например: 4"
+            "Введите частоту уведомлений от 15 до 2880 минут.\n"
+            "Шаг — 15 минут. Примеры: 15, 30, 45, 60 или 1,5ч."
             if action == "interval"
             else "Введите порог фандинга в процентах положительным числом.\n"
             "Например: 0,3"
@@ -210,9 +218,9 @@ async def receive_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings_store, exchange_store = _stores()
     try:
         if state["kind"] == "interval":
-            value = parse_interval_hours(update.effective_message.text)
+            value = parse_interval_minutes(update.effective_message.text)
             settings_store.set_interval(chat_id, value)
-            confirmation = f"✅ Частота сохранена: каждые {value} ч."
+            confirmation = f"✅ Частота сохранена: каждые {format_interval(value)}"
         else:
             value = parse_threshold(update.effective_message.text)
             settings_store.set_threshold(chat_id, value)
