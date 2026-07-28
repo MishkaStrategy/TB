@@ -36,8 +36,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Copy low-frequency JSON state, excluding live SQLite files and sidecars.
 rsync -a \
+  --exclude '.manual_backups' \
   --exclude 'fvg_event_store.sqlite3' \
   --exclude 'fvg_event_store.sqlite3-wal' \
   --exclude 'fvg_event_store.sqlite3-shm' \
@@ -46,7 +46,6 @@ rsync -a \
   --exclude 'funding_alerts.sqlite3-shm' \
   "${DATA_DIR}/" "${snapshot}/"
 
-# The event store exposes its own backup helper.
 event_database="${DATA_DIR}/fvg_event_store.sqlite3"
 if [[ -f "${event_database}" ]]; then
   PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" - \
@@ -59,8 +58,6 @@ FvgEventStore(source).backup_to(destination)
 PY
 fi
 
-# Funding settings are also live SQLite/WAL state. Use SQLite's backup API
-# instead of copying the database and WAL sidecars while the bot is writing.
 funding_database="${DATA_DIR}/funding_alerts.sqlite3"
 if [[ -f "${funding_database}" ]]; then
   "${PYTHON}" - \

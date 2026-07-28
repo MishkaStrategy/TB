@@ -1,86 +1,83 @@
-"""Button-based Telegram interface and its central feature registry."""
+"""Button-based Telegram interface for FVG controls and the main menu."""
 
-from dataclasses import dataclass
-
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from alerts.fvg_models import FvgDirection
 from alerts.fvg_store import FvgAlertSettings
 from handlers.auth import authorized
-from handlers.funding import CACHE_KEY as FUNDING_CACHE_KEY, send_funding
-from handlers.fvg_alert import (
-    build_fvg_stats_period_menu,
-    format_fvg_stats,
-    send_fvg_stats,
-)
+from handlers.fvg_alert import build_fvg_stats_period_menu, format_fvg_stats, send_fvg_stats
 
 
-@dataclass(frozen=True)
-class MenuAction:
-    key: str
-    label: str
+REPLY_MENU_FVG = "📉 FVG"
+REPLY_MENU_FUNDING = "💸 Фандинг"
+REPLY_MENU_ALERTS = "🔔 Уведомления"
+REPLY_MENU_STATS = "📊 Статистика"
+REPLY_MENU_SETTINGS = "⚙️ Настройки"
+REPLY_MENU_DONATE = "❤️ Донат"
 
 
-MAIN_ACTIONS: tuple[MenuAction, ...] = ()
+def build_reply_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [REPLY_MENU_FVG, REPLY_MENU_FUNDING],
+            [REPLY_MENU_ALERTS, REPLY_MENU_STATS],
+            [REPLY_MENU_SETTINGS, REPLY_MENU_DONATE],
+        ],
+        resize_keyboard=True,
+        is_persistent=True,
+        input_field_placeholder="Выберите раздел",
+    )
 
 
 def build_main_menu(chat_id, settings=None):
     settings = settings or FvgAlertSettings()
-    rows = [
-        [InlineKeyboardButton(action.label, callback_data=f"menu:{action.key}")]
-        for action in MAIN_ACTIONS
-    ]
     fvg_label = "🔔 Настройки FVG 15м" if settings.is_enabled(chat_id) else "🔕 Настройки FVG 15м"
-    rows.append([InlineKeyboardButton(fvg_label, callback_data="menu:fvg-settings")])
-    rows.append([
-        InlineKeyboardButton("📊 Статистика FVG", callback_data="menu:fvg-stats")
-    ])
-    rows.append([InlineKeyboardButton("💸 Фандинг", callback_data="menu:funding")])
-    return InlineKeyboardMarkup(rows)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(fvg_label, callback_data="menu:fvg-settings")],
+            [InlineKeyboardButton("📊 Статистика FVG", callback_data="menu:fvg-stats")],
+            [InlineKeyboardButton("💸 Фандинг", callback_data="menu:funding")],
+            [InlineKeyboardButton("⚙️ Настройки", callback_data="settings:open")],
+        ]
+    )
 
 
 def build_fvg_settings_menu(chat_id, settings=None):
     settings = settings or FvgAlertSettings()
     user = settings.user(chat_id)
+
     def mark(enabled):
         return "✅" if enabled else "⏸️"
+
     symbols = user.get("symbols", {}).values()
-    price_enabled = any(
-        item.get("price_filter", {}).get("enabled", False) for item in symbols
-    )
+    price_enabled = any(item.get("price_filter", {}).get("enabled", False) for item in symbols)
     symbols = user.get("symbols", {}).values()
-    size_enabled = any(
-        item.get("size_filter", {}).get("enabled", False) for item in symbols
+    size_enabled = any(item.get("size_filter", {}).get("enabled", False) for item in symbols)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"{mark(user['enabled'])} Модуль FVG", callback_data="menu:fvg-toggle")],
+            [
+                InlineKeyboardButton(f"{mark(user['notify_confirmed_fvg'])} Подтверждённые", callback_data="menu:fvg-confirmed-toggle"),
+                InlineKeyboardButton(f"{mark(user['notify_pre_fvg'])} Пред-FVG T−3", callback_data="menu:pre-fvg-toggle"),
+            ],
+            [
+                InlineKeyboardButton(f"{mark(user['bullish_enabled'])} 🐮 Бычьи", callback_data="menu:fvg-bull-toggle"),
+                InlineKeyboardButton(f"{mark(user['bearish_enabled'])} 🐻 Медвежьи", callback_data="menu:fvg-bear-toggle"),
+            ],
+            [
+                InlineKeyboardButton("➕ Инструменты", callback_data="menu:fvg-symbol-help"),
+                InlineKeyboardButton(f"{mark(price_enabled)} Цена", callback_data="menu:fvg-price"),
+            ],
+            [InlineKeyboardButton(f"{mark(size_enabled)} 📏 Размер FVG", callback_data="menu:fvg-size")],
+            [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:fvg-back")],
+        ]
     )
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"{mark(user['enabled'])} Модуль FVG", callback_data="menu:fvg-toggle")],
-        [
-            InlineKeyboardButton(f"{mark(user['notify_confirmed_fvg'])} Подтверждённые", callback_data="menu:fvg-confirmed-toggle"),
-            InlineKeyboardButton(f"{mark(user['notify_pre_fvg'])} Пред-FVG T−3", callback_data="menu:pre-fvg-toggle"),
-        ],
-        [
-            InlineKeyboardButton(f"{mark(user['bullish_enabled'])} 🐮 Бычьи", callback_data="menu:fvg-bull-toggle"),
-            InlineKeyboardButton(f"{mark(user['bearish_enabled'])} 🐻 Медвежьи", callback_data="menu:fvg-bear-toggle"),
-        ],
-        [
-            InlineKeyboardButton("➕ Инструменты", callback_data="menu:fvg-symbol-help"),
-            InlineKeyboardButton(
-                f"{mark(price_enabled)} Цена", callback_data="menu:fvg-price"
-            ),
-        ],
-        [InlineKeyboardButton(
-            f"{mark(size_enabled)} 📏 Размер FVG", callback_data="menu:fvg-size"
-        )],
-        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:fvg-back")],
-    ])
 
 
 async def show_menu(message, chat_id):
-    await message.reply_text(
-        "Панель управления FVG:",
-        reply_markup=build_main_menu(chat_id),
-    )
+    await message.reply_text("Главное меню закреплено на клавиатуре ниже.", reply_markup=build_reply_menu())
+    await message.reply_text("Панель управления:", reply_markup=build_main_menu(chat_id))
 
 
 @authorized
@@ -103,8 +100,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.edit_text("Настройки применяются отдельно для твоего Telegram ID.", reply_markup=build_fvg_settings_menu(chat_id, settings))
     elif action == "fvg-toggle":
         settings = FvgAlertSettings()
-        enabled = not settings.is_enabled(chat_id)
-        settings.set_enabled(chat_id, enabled)
+        settings.set_enabled(chat_id, not settings.is_enabled(chat_id))
         await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
     elif action == "fvg-confirmed-toggle":
         settings = FvgAlertSettings()
@@ -113,8 +109,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
     elif action == "pre-fvg-toggle":
         settings = FvgAlertSettings()
-        enabled = not settings.user(chat_id)["notify_pre_fvg"]
-        settings.set_pre_enabled(chat_id, enabled)
+        settings.set_pre_enabled(chat_id, not settings.user(chat_id)["notify_pre_fvg"])
         await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
     elif action in {"fvg-bull-toggle", "fvg-bear-toggle"}:
         settings = FvgAlertSettings()
@@ -129,32 +124,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "После добавления настрой «💰 Фильтр цены» и «📏 Размер FVG»."
         )
     elif action == "fvg-back":
-        await message.edit_text("Панель управления FVG:", reply_markup=build_main_menu(chat_id))
+        await message.edit_text("Панель управления:", reply_markup=build_main_menu(chat_id))
     elif action == "fvg-stats":
         await send_fvg_stats(message)
-    elif action in {"funding", "funding-refresh"}:
-        cached = context.application.bot_data.get(FUNDING_CACHE_KEY)
-        rates = await send_funding(message, edit=True, rates=cached)
-        if rates is not None:
-            context.application.bot_data[FUNDING_CACHE_KEY] = rates
-    elif action.startswith("funding-page:"):
-        page_value = action.removeprefix("funding-page:")
-        if page_value == "current":
-            return
-        try:
-            page = int(page_value)
-        except ValueError:
-            return
-        rates = context.application.bot_data.get(FUNDING_CACHE_KEY)
-        rates = await send_funding(message, page=page, rates=rates, edit=True)
-        if rates is not None:
-            context.application.bot_data[FUNDING_CACHE_KEY] = rates
-    elif action == "funding-back":
-        await message.edit_text("Панель управления FVG:", reply_markup=build_main_menu(chat_id))
     elif action.startswith("fvg-stats:"):
         period = action.split(":", 1)[1]
         days = None if period == "all" else int(period)
-        await message.edit_text(
-            format_fvg_stats(days),
-            reply_markup=build_fvg_stats_period_menu(days),
-        )
+        await message.edit_text(format_fvg_stats(days), reply_markup=build_fvg_stats_period_menu(days))

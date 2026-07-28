@@ -1,6 +1,7 @@
 """Persistent access decisions for Telegram users."""
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 
@@ -13,6 +14,16 @@ class AccessRegistry:
 
     def is_allowed(self, user_id):
         return self.status(user_id) == "allowed"
+
+    def users(self, status=None):
+        users = self._read().get("users", {})
+        if status is None:
+            return deepcopy(users)
+        return {
+            str(user_id): deepcopy(record)
+            for user_id, record in users.items()
+            if isinstance(record, dict) and record.get("status") == status
+        }
 
     def request(self, user_id, name, username):
         data = self._read()
@@ -46,7 +57,7 @@ class AccessRegistry:
             return {}
         try:
             return json.loads(self.path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, json.JSONDecodeError):
             return {}
 
     def _write(self, data):

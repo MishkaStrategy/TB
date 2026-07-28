@@ -16,9 +16,7 @@ concurrency:
 jobs:
   publish-release:
     name: Publish VERSION tag and release
-    runs-on:
-      - self-hosted
-      - fast
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -37,6 +35,23 @@ jobs:
           fi
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+          echo "archive=fvg-alert-bot-${version}.tar.gz" >> "${GITHUB_OUTPUT}"
+
+      - name: Build source archive and checksum
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          set -euo pipefail
+          git archive \
+            --format=tar.gz \
+            --prefix="fvg-alert-bot-${VERSION}/" \
+            --output="${ARCHIVE}" \
+            HEAD
+          sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
+          test -s "${ARCHIVE}"
+          test -s "${ARCHIVE}.sha256"
 
       - name: Create tag and GitHub Release when missing
         uses: actions/github-script@v9
@@ -52,14 +67,15 @@ jobs:
             const version = process.env.VERSION;
             const tag = process.env.TAG;
 
+            let release;
             try {
               const existing = await github.rest.repos.getReleaseByTag({
                 owner,
                 repo,
                 tag,
               });
-              core.info(`Release ${tag} already exists: ${existing.data.html_url}`);
-              return;
+              release = existing.data;
+              core.info(`Release ${tag} already exists: ${release.html_url}`);
             } catch (error) {
               if (error.status !== 404) throw error;
             }
@@ -82,16 +98,24 @@ jobs:
               core.info(`Created tag ${tag} at ${context.sha}.`);
             }
 
-            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-            const heading = `## ${version}`;
-            const start = changelog.indexOf(heading);
-            let body = 'See CHANGELOG.md and docs/RELEASE_CANDIDATE.md for details.';
-            if (start >= 0) {
-              const next = changelog.indexOf('\n## ', start + heading.length);
-              body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+            if (release) return;
+
+            const releaseDocument = `docs/RELEASE_${version}.md`;
+            let body;
+            if (fs.existsSync(releaseDocument)) {
+              body = fs.readFileSync(releaseDocument, 'utf8').trim();
+            } else {
+              const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+              const heading = `## ${version}`;
+              const start = changelog.indexOf(heading);
+              body = 'See CHANGELOG.md for details.';
+              if (start >= 0) {
+                const next = changelog.indexOf('\n## ', start + heading.length);
+                body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+              }
             }
 
-            const release = await github.rest.repos.createRelease({
+            release = (await github.rest.repos.createRelease({
               owner,
               repo,
               tag_name: tag,
@@ -101,5 +125,18 @@ jobs:
               draft: false,
               prerelease: version.includes('-'),
               generate_release_notes: false,
-            });
-            core.info(`Created release: ${release.data.html_url}`);
+            })).data;
+            core.info(`Created release: ${release.html_url}`);
+
+      - name: Upload release archive
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" \
+            "${ARCHIVE}" \
+            "${ARCHIVE}.sha256" \
+            --clobber
