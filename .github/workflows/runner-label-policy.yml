@@ -35,11 +35,13 @@ jobs:
         run: |
           python <<'PY'
           from pathlib import Path
+          import re
           import sys
           import yaml
 
           workflows = Path(".github/workflows")
           errors = []
+          warnings = []
 
           def labels_from(value):
               if isinstance(value, str):
@@ -50,40 +52,70 @@ jobs:
                   return labels_from(value.get("labels", []))
               return []
 
-          def inspect(node, file_name, location="jobs"):
-              if isinstance(node, dict):
-                  for key, value in node.items():
-                      current = f"{location}.{key}"
-                      if key == "runs-on":
-                          labels = labels_from(value)
-                          normalized = [label.lower() for label in labels]
-                          if "self-hosted" in normalized:
-                              capability_labels = [
-                                  label
-                                  for label in labels
-                                  if label.lower() != "self-hosted"
-                              ]
-                              if not capability_labels:
-                                  errors.append(
-                                      f"{file_name}:{current}: self-hosted requires "
-                                      "at least one capability label, for example "
-                                      "[self-hosted, fast], [self-hosted, docker], "
-                                      "or [self-hosted, macos]."
-                                  )
-                      inspect(value, file_name, current)
-              elif isinstance(node, list):
-                  for index, item in enumerate(node):
-                      inspect(item, file_name, f"{location}[{index}]")
+          def runs_on_blocks(text):
+              lines = text.splitlines()
+              for index, line in enumerate(lines):
+                  match = re.match(r"^(?P<indent> *)runs-on\s*:", line)
+                  if not match:
+                      continue
+
+                  indent = len(match.group("indent"))
+                  block = [line[indent:]]
+                  cursor = index + 1
+
+                  while cursor < len(lines):
+                      candidate = lines[cursor]
+                      if not candidate.strip():
+                          block.append("")
+                          cursor += 1
+                          continue
+
+                      candidate_indent = len(candidate) - len(
+                          candidate.lstrip(" ")
+                      )
+                      if candidate_indent <= indent:
+                          break
+
+                      block.append(candidate[indent:])
+                      cursor += 1
+
+                  yield index + 1, "\n".join(block)
 
           for workflow_file in sorted(workflows.glob("*.y*ml")):
-              try:
-                  document = yaml.safe_load(
-                      workflow_file.read_text(encoding="utf-8")
-                  )
-              except Exception as exc:
-                  errors.append(f"{workflow_file}: invalid YAML: {exc}")
-                  continue
-              inspect(document, str(workflow_file))
+              text = workflow_file.read_text(encoding="utf-8")
+
+              for line_number, block in runs_on_blocks(text):
+                  try:
+                      parsed = yaml.safe_load(block) or {}
+                      value = parsed.get("runs-on")
+                  except Exception as exc:
+                      warnings.append(
+                          f"{workflow_file}:{line_number}: could not parse "
+                          f"runs-on block: {exc}"
+                      )
+                      continue
+
+                  labels = labels_from(value)
+                  normalized = [label.lower() for label in labels]
+
+                  if "self-hosted" not in normalized:
+                      continue
+
+                  capability_labels = [
+                      label
+                      for label in labels
+                      if label.lower() != "self-hosted"
+                  ]
+                  if not capability_labels:
+                      errors.append(
+                          f"{workflow_file}:{line_number}: self-hosted requires "
+                          "at least one capability label, for example "
+                          "[self-hosted, fast], [self-hosted, docker], "
+                          "or [self-hosted, macos]."
+                      )
+
+          for warning in warnings:
+              print(f"::warning::{warning}")
 
           if errors:
               print("Runner label policy violations:")
