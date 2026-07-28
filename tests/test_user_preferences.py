@@ -1,5 +1,7 @@
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from database.user_preferences import UserPreferences
 from localization import localize_text, translate_label
@@ -20,6 +22,22 @@ class UserPreferencesTests(unittest.TestCase):
                 UserPreferences(path).user(42),
                 {"language": "en", "message_mode": "compact"},
             )
+
+    def test_repeated_delivery_reads_use_shared_memory_cache(self):
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/preferences.json"
+            UserPreferences(path).ensure(42, language="en")
+
+            with patch.object(
+                Path,
+                "read_text",
+                side_effect=AssertionError("preference file was read on the hot path"),
+            ):
+                for _ in range(1_000):
+                    self.assertEqual(
+                        UserPreferences(path).user(42),
+                        {"language": "en", "message_mode": "detailed"},
+                    )
 
     def test_rejects_unknown_values(self):
         with TemporaryDirectory() as directory:
