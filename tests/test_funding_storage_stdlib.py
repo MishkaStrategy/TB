@@ -84,6 +84,16 @@ class FundingStorageStdlibTests(unittest.TestCase):
             wal_path = Path(f"{path}-wal")
             self.assertTrue(not wal_path.exists() or wal_path.stat().st_size == 0)
 
+    def test_scheduler_and_ui_are_wired_to_minute_settings(self):
+        scheduler = Path("alerts/scheduler.py").read_text(encoding="utf-8")
+        ui = Path("handlers/multi_funding_alert_ui.py").read_text(encoding="utf-8")
+        self.assertIn("next_quarter_hour", scheduler)
+        self.assertIn("interval=900", scheduler)
+        self.assertIn('name="funding-quarter-hour"', scheduler)
+        self.assertIn("parse_interval_minutes", ui)
+        self.assertIn('settings["interval_minutes"]', ui)
+        self.assertIn("каждые 15 минут", ui)
+
     def test_scheduled_service_saves_only_three_downloads(self):
         module_names = (
             "exchanges.funding",
