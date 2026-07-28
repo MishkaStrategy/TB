@@ -33,14 +33,19 @@ def _parse_datetime(value: str | None) -> datetime | None:
         return None
 
 
-def next_quarter_hour(now: datetime | None = None) -> datetime:
-    """Return the nearest future UTC control point at :00, :15, :30 or :45."""
-    current = (now or utc_now()).astimezone(UTC)
-    slot = current.replace(
+def _quarter_floor(value: datetime) -> datetime:
+    current = value.astimezone(UTC)
+    return current.replace(
         minute=(current.minute // INTERVAL_STEP_MINUTES) * INTERVAL_STEP_MINUTES,
         second=0,
         microsecond=0,
     )
+
+
+def next_quarter_hour(now: datetime | None = None) -> datetime:
+    """Return the nearest future UTC control point at :00, :15, :30 or :45."""
+    current = (now or utc_now()).astimezone(UTC)
+    slot = _quarter_floor(current)
     if slot <= current:
         slot += timedelta(minutes=INTERVAL_STEP_MINUTES)
     return slot
@@ -50,12 +55,32 @@ def parse_interval_minutes(value) -> int:
     """Parse a duration and require a 15-minute step up to 48 hours."""
     text = str(value).strip().lower().replace(" ", "").replace(",", ".")
     multiplier = Decimal("1")
-    for suffix in ("минут", "минуты", "мин", "minutes", "minute", "mins", "min", "m", "м"):
+    for suffix in (
+        "минут",
+        "минуты",
+        "мин",
+        "minutes",
+        "minute",
+        "mins",
+        "min",
+        "m",
+        "м",
+    ):
         if text.endswith(suffix):
             text = text[: -len(suffix)]
             break
     else:
-        for suffix in ("часов", "часа", "час", "hours", "hour", "hrs", "hr", "h", "ч"):
+        for suffix in (
+            "часов",
+            "часа",
+            "час",
+            "hours",
+            "hour",
+            "hrs",
+            "hr",
+            "h",
+            "ч",
+        ):
             if text.endswith(suffix):
                 text = text[: -len(suffix)]
                 multiplier = Decimal("60")
@@ -66,7 +91,10 @@ def parse_interval_minutes(value) -> int:
         raise ValueError(
             "Частота должна быть от 15 минут до 48 часов с шагом 15 минут."
         ) from error
-    if not minutes_decimal.is_finite() or minutes_decimal != minutes_decimal.to_integral_value():
+    if (
+        not minutes_decimal.is_finite()
+        or minutes_decimal != minutes_decimal.to_integral_value()
+    ):
         raise ValueError(
             "Частота должна быть от 15 минут до 48 часов с шагом 15 минут."
         )
@@ -107,7 +135,8 @@ class FundingAlertStore(LegacyFundingAlertStore):
                     "ADD COLUMN interval_minutes INTEGER NOT NULL DEFAULT 60"
                 )
             migrated = connection.execute(
-                "SELECT value FROM metadata WHERE key = 'funding_interval_minutes_migrated'"
+                "SELECT value FROM metadata "
+                "WHERE key = 'funding_interval_minutes_migrated'"
             ).fetchone()
             if not migrated:
                 connection.execute(
@@ -296,7 +325,7 @@ class FundingAlertStore(LegacyFundingAlertStore):
     def advance(self, chat_id: int, now=None) -> datetime:
         current_time = (now or utc_now()).astimezone(UTC)
         settings = self.user(chat_id)
-        next_check = settings["next_check_at"] or current_time
+        next_check = settings["next_check_at"] or _quarter_floor(current_time)
         step = timedelta(minutes=settings["interval_minutes"])
         while next_check <= current_time:
             next_check += step
