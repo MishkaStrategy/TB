@@ -1,0 +1,11 @@
+name: Runner dependency audit PR
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    uses: MishkaStrategy/ci-workflows/.github/workflows/runner-dependency-audit.yml@agent/runner-label-policy
