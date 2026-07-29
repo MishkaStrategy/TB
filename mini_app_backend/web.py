@@ -9,7 +9,8 @@ from collections.abc import Iterable
 from aiohttp import web
 
 from .auth import TelegramInitDataError, validate_init_data
-from .service import MiniAppSettingsService, SettingsValidationError
+from .runtime_service import MiniAppSettingsService
+from .service import SettingsValidationError
 
 LOGGER = logging.getLogger(__name__)
 INIT_DATA_HEADER = "X-Telegram-Init-Data"
@@ -34,7 +35,11 @@ def _normalize_origins(values: Iterable[str] | str | None) -> frozenset[str]:
         return frozenset()
     if isinstance(values, str):
         values = values.split(",")
-    return frozenset(str(value).strip().rstrip("/") for value in values if str(value).strip())
+    return frozenset(
+        str(value).strip().rstrip("/")
+        for value in values
+        if str(value).strip()
+    )
 
 
 def create_mini_app_application(
@@ -155,8 +160,11 @@ def create_mini_app_application(
         )
         return web.json_response(envelope)
 
+    async def options(_request: web.Request) -> web.Response:
+        return web.Response(status=204)
+
     app.router.add_get("/healthz", health)
     app.router.add_get("/api/mini-app/settings", get_settings)
     app.router.add_put("/api/mini-app/settings", put_settings)
-    app.router.add_route("OPTIONS", "/{tail:.*}", lambda _request: web.Response(status=204))
+    app.router.add_route("OPTIONS", "/{tail:.*}", options)
     return app
