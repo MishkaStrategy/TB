@@ -19,6 +19,7 @@ from alerts.funding_alerts import FundingAlertStore
 from alerts.scheduler_multi import get_fvg_service
 from config import ALLOWED_TELEGRAM_IDS, PUBLIC_ACCESS_ENABLED, is_admin
 from database.access_control import AccessRegistry
+from database.operations_status import OperationsStatusReader
 from database.runtime_settings import RuntimeSettings
 from database.user_activity import UserActivityRegistry
 
@@ -26,6 +27,23 @@ _RUNTIME_SETTINGS = RuntimeSettings()
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 MANUAL_BACKUP_DIR = DATA_DIR / ".manual_backups"
+
+
+_STATUS_LABELS = {
+    "starting": "запускается",
+    "running": "работает",
+    "stopping": "останавливается",
+    "stopped": "остановлен",
+    "failed": "ошибка",
+    "shutdown_timeout": "тайм-аут остановки",
+    "interrupted": "предыдущий запуск прерван",
+    "idle": "ожидает",
+    "success": "успешно",
+    "cancelled": "отменено",
+    "skipped": "пропущено",
+    "stale": "lease истёк",
+}
+_DATABASE_LABELS = {"fvg": "FVG", "funding": "Funding"}
 
 
 def public_access_enabled() -> bool:
@@ -40,6 +58,7 @@ def admin_keyboard(public_access=None) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(access, callback_data="admin:toggle_access")],
         [InlineKeyboardButton("👥 Разрешённые пользователи", callback_data="admin:allowed")],
         [InlineKeyboardButton("📡 WebSocket", callback_data="admin:websocket"), InlineKeyboardButton("📨 Очередь уведомлений", callback_data="admin:queue")],
+        [InlineKeyboardButton("⚙️ Операции", callback_data="admin:operations")],
         [InlineKeyboardButton("🗄 Базы данных", callback_data="admin:databases"), InlineKeyboardButton("🖥 Память и нагрузка", callback_data="admin:resources")],
         [InlineKeyboardButton("💾 Резервная копия", callback_data="admin:backup"), InlineKeyboardButton("🏷 Версия релиза", callback_data="admin:version")],
         [InlineKeyboardButton("♻️ Перезапустить бота", callback_data="admin:restart")],
@@ -63,6 +82,19 @@ def _format_bytes(value) -> str:
             return f"{amount:.1f} {unit}" if unit != "Б" else f"{int(amount)} {unit}"
         amount /= 1024
     return "0 Б"
+
+
+def _format_signed_bytes(value) -> str:
+    if value is None:
+        return "—"
+    value = int(value)
+    sign = "+" if value > 0 else "−" if value < 0 else ""
+    return f"{sign}{_format_bytes(abs(value))}"
+
+
+def _status_label(value) -> str:
+    value = str(value or "неизвестно")
+    return _STATUS_LABELS.get(value, value)
 
 
 def format_allowed_users() -> str:
@@ -103,6 +135,106 @@ def format_queue_status() -> str:
         f"Повторных доставок: {int(health.get('delivery_retries') or 0)}",
         f"Навсегда отклонено Telegram: {int(health.get('delivery_permanent_failures') or 0)}",
     ])
+
+
+def format_operations_status(snapshot=None) -> str:
+    if snapshot is None:
+        path = get_fvg_service().event_store.path
+        snapshot = OperationsStatusReader(path).snapshot()
+
+    lines = ["⚙️ Операционное состояние", ""]
+    if not snapshot.get("available"):
+        error = snapshot.get("error_message") or "неизвестная ошибка"
+        lines.extend([
+            "Runtime SQLite недоступна.",
+            f"Причина: {error}",
+        ])
+        return "\n".join(lines)
+
+    lifecycle = snapshot.get("lifecycle", {})
+    lines.append("Процесс")
+    state = lifecycle.get("state") if lifecycle.get("available") else None
+    if state is None:
+        lines.append("• lifecycle history: нет данных")
+    else:
+        lines.extend([
+            f"• Статус: {_status_label(state.get('status'))}",
+            f"• PID: {int(state.get('pid') or 0)}",
+            f"• Фаза: {state.get('last_phase') or '—'}",
+            f"• Обновлено: {_format_time(state.get('updated_at'))}",
+            f"• Результат остановки: {state.get('shutdown_outcome') or '—'}",
+        ])
+        if state.get("last_error_message"):
+            error_name = state.get("last_error_class") or "Error"
+            lines.append(f"• Ошибка: {error_name}: {state['last_error_message']}")
+
+    tasks = snapshot.get("tasks", {})
+    lines.extend(["", "Фоновые задачи"])
+    if not tasks.get("available"):
+        lines.append("• registry: нет данных")
+    else:
+        counts = tasks.get("counts", {})
+        counts_text = ", ".join(
+            f"{_status_label(status)}: {count}"
+            for status, count in sorted(counts.items())
+        ) or "нет зарегистрированных задач"
+        lines.extend([
+            f"• Всего: {int(tasks.get('total') or 0)}",
+            f"• Статусы: {counts_text}",
+            f"• Просрочено: {int(tasks.get('overdue_count') or 0)}",
+            f"• Истёк lease: {int(tasks.get('expired_lease_count') or 0)}",
+        ])
+        problems = tasks.get("problems", [])
+        if problems:
+            lines.append("• Требуют внимания:")
+            for item in problems[:5]:
+                flags = []
+                if item.get("expired_lease"):
+                    flags.append("lease")
+                if item.get("overdue"):
+                    flags.append("overdue")
+                if item.get("consecutive_failures"):
+                    flags.append(f"ошибок подряд {item['consecutive_failures']}")
+                suffix = f" · {', '.join(flags)}" if flags else ""
+                error_code = item.get("last_error_code")
+                error_suffix = f" · {error_code}" if error_code else ""
+                lines.append(
+                    f"  — {item['task_name']}: {_status_label(item.get('status'))}{suffix}{error_suffix}"
+                )
+
+    databases = snapshot.get("databases", {})
+    lines.extend(["", "Снимки баз данных"])
+    if not databases.get("available"):
+        lines.append("• observability: нет данных")
+    else:
+        latest = databases.get("latest", [])
+        if not latest:
+            lines.append("• снимков пока нет")
+        for item in latest:
+            label = _DATABASE_LABELS.get(item.get("database_key"), item.get("database_key"))
+            total = (
+                int(item.get("main_bytes") or 0)
+                + int(item.get("wal_bytes") or 0)
+                + int(item.get("shm_bytes") or 0)
+            )
+            availability = "доступна" if item.get("available") else "ошибка"
+            lines.append(
+                f"• {label}: {availability} · {_format_bytes(total)} · {_format_time(item.get('captured_at'))}"
+            )
+            if item.get("error_message"):
+                lines.append(f"  — {item['error_message']}")
+
+        growth = databases.get("growth_24h", [])
+        if growth:
+            lines.append("• Изменение за 24 часа:")
+            for item in growth:
+                label = _DATABASE_LABELS.get(item.get("database_key"), item.get("database_key"))
+                lines.append(
+                    f"  — {label}: файл {_format_signed_bytes(item.get('main_bytes_delta'))}, used {_format_signed_bytes(item.get('used_bytes_delta'))}"
+                )
+
+    lines.extend(["", f"Снимок: {_format_time(snapshot.get('captured_at'))}"])
+    return "\n".join(lines)
 
 
 def _sqlite_status(path: Path) -> tuple[str, int]:
@@ -206,6 +338,8 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(await asyncio.to_thread(format_websocket_status), reply_markup=admin_keyboard())
     elif action == "queue":
         await query.edit_message_text(await asyncio.to_thread(format_queue_status), reply_markup=admin_keyboard())
+    elif action == "operations":
+        await query.edit_message_text(await asyncio.to_thread(format_operations_status), reply_markup=admin_keyboard())
     elif action == "databases":
         await query.edit_message_text(await asyncio.to_thread(format_database_status), reply_markup=admin_keyboard())
     elif action == "resources":
