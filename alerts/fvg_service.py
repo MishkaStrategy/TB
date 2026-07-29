@@ -121,6 +121,7 @@ class FvgAlertService:
         settings=None,
         event_store=None,
         delivery_registry=None,
+        suppress_unavailable_users=None,
     ):
         self.client = client or BitunixClient()
         self.detector = detector or FvgDetector()
@@ -133,19 +134,25 @@ class FvgAlertService:
             self.delivery_registry = TelegramDeliveryRegistry(
                 getattr(self.event_store, "path", None)
             )
+        self.suppress_unavailable_users = (
+            USER_BLOCK_STATUS_ENABLED
+            if suppress_unavailable_users is None
+            else bool(suppress_unavailable_users)
+        )
         self.cache = CandleCache()
         self._delivery_lock = asyncio.Lock()
         self._last_ws_health_write = 0.0
 
     def _delivery_allowed(self, chat_id: int | str) -> bool:
         return (
-            self.delivery_registry is None
+            not self.suppress_unavailable_users
+            or self.delivery_registry is None
             or self.delivery_registry.can_deliver(chat_id)
         )
 
     def _filter_recipients(self, recipients) -> list[int]:
         recipients = list(recipients)
-        if self.delivery_registry is None:
+        if self.delivery_registry is None or not self.suppress_unavailable_users:
             return recipients
         allowed = [chat_id for chat_id in recipients if self._delivery_allowed(chat_id)]
         suppressed = len(recipients) - len(allowed)
