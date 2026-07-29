@@ -32,6 +32,7 @@ class TelegramErrorDecision:
     retryable: bool
     delivery_status: TelegramDeliveryStatus | None = None
     retry_after_seconds: float | None = None
+    ambiguous_delivery: bool = False
     notify_admin: bool = False
     log_level: str = "warning"
 
@@ -80,6 +81,7 @@ _SERVER_PATTERNS = (
     "internal server error",
     "telegram server error",
 )
+_PRE_SEND_TIMEOUT_CAUSES = frozenset({"ConnectTimeout", "PoolTimeout"})
 
 
 def _contains(message: str, patterns: tuple[str, ...]) -> bool:
@@ -96,12 +98,22 @@ def _retry_after_seconds(error: BaseException) -> float | None:
         return None
 
 
+def _cause_class_name(error: BaseException) -> str | None:
+    cause = getattr(error, "__cause__", None) or getattr(error, "__context__", None)
+    return type(cause).__name__ if cause is not None else None
+
+
 def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
     """Return retry, finalization and user-status policy for a Telegram error.
 
     Classification intentionally uses public exception class names instead of
     importing python-telegram-bot classes. This keeps the policy independently
     testable and also handles wrapped/subclassed Telegram exceptions.
+
+    A read/write timeout can happen after Telegram accepted ``sendMessage`` but
+    before the response reached the bot. Repeating that request can duplicate an
+    alert, so such timeouts are explicitly marked as ambiguous. Connection-pool
+    and connect timeouts are considered pre-send and remain safely retryable.
     """
 
     class_name = type(error).__name__
@@ -167,19 +179,23 @@ def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
         )
 
     if class_name in {"TimedOut", "TimeoutError"}:
+        pre_send = _cause_class_name(error) in _PRE_SEND_TIMEOUT_CAUSES
         return TelegramErrorDecision(
             kind=TelegramErrorKind.TEMPORARY,
-            code="timeout",
-            retryable=True,
+            code="timeout_before_send" if pre_send else "timeout",
+            retryable=pre_send,
             delivery_status=TelegramDeliveryStatus.TEMPORARILY_UNAVAILABLE,
+            ambiguous_delivery=not pre_send,
         )
 
     if class_name in {"NetworkError", "ConnectError", "ReadError", "WriteError"}:
+        ambiguous = class_name in {"ReadError", "WriteError"}
         return TelegramErrorDecision(
             kind=TelegramErrorKind.TEMPORARY,
             code="network_error",
-            retryable=True,
+            retryable=not ambiguous,
             delivery_status=TelegramDeliveryStatus.TEMPORARILY_UNAVAILABLE,
+            ambiguous_delivery=ambiguous,
         )
 
     if _contains(message, _SERVER_PATTERNS):
@@ -216,8 +232,8 @@ def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
             log_level="critical",
         )
 
-    # Preserve the current conservative behavior for unknown failures. A later
-    # outbox-state migration will impose max-attempt and dead-letter limits.
+    # Preserve a conservative temporary classification for unknown errors. The
+    # explicit outbox worker still caps attempts and eventually dead-letters it.
     return TelegramErrorDecision(
         kind=TelegramErrorKind.TEMPORARY,
         code="unknown_temporary_error",
