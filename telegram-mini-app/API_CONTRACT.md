@@ -1,49 +1,28 @@
 # Mini App API contract
 
-## Статус реализации
-
-Реализованы:
-
-- `GET /healthz`;
-- `GET /api/mini-app/settings`;
-- `PUT /api/mini-app/settings`;
-- проверка Telegram `initData`;
-- проверка срока действия `auth_date`;
-- публичный/приватный режим доступа;
-- чтение и сохранение общих, FVG и funding-настроек;
-- серверная проверка административных прав;
-- структурированные ошибки;
-- ограничение размера запроса;
-- точный CORS allowlist;
-- очистка мультибиржевого funding crossing-state.
-
-Опасные административные действия пока не реализованы и не входят в общий `PUT`.
-
 ## Общие правила
 
 - Авторизация выполняется только по проверенному Telegram `initData`.
-- Заголовок: `X-Telegram-Init-Data`.
-- Telegram ID из JSON-body не используется для идентификации.
-- Все числовые значения принимаются строками там, где важна точность `Decimal`.
-- Ответ всегда содержит нормализованную полную модель настроек.
-- Частичные обновления не используются: `PUT` сохраняет полную модель после серверной валидации.
-- Поля административного раздела возвращаются только после повторной проверки `is_admin(telegram_id)`.
-- Максимальный размер тела запроса по умолчанию — 256 КБ.
+- Telegram ID извлекается сервером и не принимается из JSON-body.
+- Все значения повторно валидируются backend до первой записи.
+- Ответ содержит нормализованную полную модель настроек.
+- Точные десятичные значения передаются строками.
+- Административные поля возвращаются только после повторной проверки `is_admin(telegram_id)`.
+- Общий `PUT` не выполняет backup, restart и изменение allowlist.
 
-## GET `/healthz`
+## Авторизация
 
-Endpoint не требует Telegram-авторизации и используется только для проверки доступности API.
+Frontend передаёт исходную строку Telegram:
 
-```json
-{
-  "status": "ok",
-  "service": "telegram-mini-app"
-}
+```text
+X-Telegram-Init-Data: <window.Telegram.WebApp.initData>
 ```
+
+Backend проверяет HMAC-SHA-256, обязательные поля, отсутствие дубликатов, `auth_date`, срок действия и допустимое отклонение времени.
 
 ## GET `/api/mini-app/settings`
 
-Пример ответа:
+Пример сокращённого ответа:
 
 ```json
 {
@@ -97,15 +76,33 @@ Endpoint не требует Telegram-авторизации и использу
       "nextCheckAt": null
     },
     "admin": {
-      "available": false,
+      "available": true,
       "publicAccessEnabled": false,
       "allowedUsers": [],
       "diagnostics": {
-        "websocket": "unknown",
-        "outbox": 0,
-        "deliveryFailures": 0,
-        "databases": "unknown",
-        "release": "1.2.0"
+        "websocket": "connected",
+        "lastWebsocketMessage": "2026-07-29T12:00:00+00:00",
+        "lastRestRecovery": "2026-07-29T11:45:00+00:00",
+        "lastError": null,
+        "outbox": 2,
+        "deliveries": 12480,
+        "deliveryFailures": 7,
+        "deliveryRetries": 19,
+        "deliveryPermanentFailures": 1,
+        "databases": "ok",
+        "fvgDatabaseStatus": "ok",
+        "fvgDatabaseBytes": 3420160,
+        "fundingDatabaseStatus": "ok",
+        "fundingDatabaseBytes": 921600,
+        "jsonSettingsBytes": 48128,
+        "processMemoryBytes": 118489088,
+        "loadAverage": [0.24, 0.31, 0.28],
+        "diskFreeBytes": 68719476736,
+        "diskTotalBytes": 107374182400,
+        "pid": 2481,
+        "release": "1.2.0",
+        "gitCommit": "abc123",
+        "pythonVersion": "3.12.8"
       }
     }
   },
@@ -118,15 +115,13 @@ Endpoint не требует Telegram-авторизации и использу
     "maxFvgSymbols": 20
   },
   "source": "api",
-  "updatedAt": "2026-07-29T12:00:00Z"
+  "updatedAt": "2026-07-29T12:00:00+00:00"
 }
 ```
 
-`limits.maxFvgSymbols` формируется backend из текущего `MAX_SYMBOLS_PER_USER`. Frontend не должен использовать жёстко заданный лимит.
+Для обычного пользователя `admin.available=false`, allowlist пуст, а `diagnostics` сохраняет ту же полную схему с безопасными значениями `unknown`, `null` и `0`.
 
 ## PUT `/api/mini-app/settings`
-
-Body:
 
 ```json
 {
@@ -139,17 +134,13 @@ Body:
 }
 ```
 
-Фактически отправляется полная структура `settings` из GET. Поля `user`, `limits`, `source` и `updatedAt` обратно не отправляются.
+Отправляется полная структура из GET. Ответ имеет тот же формат и содержит значения после серверной нормализации.
 
-Ответ имеет тот же формат, что GET, и содержит значения после серверной нормализации.
-
-## Маппинг на текущий Python-код
-
-### `general`
+## Маппинг `general`
 
 Источник: `database.user_preferences.UserPreferences`.
 
-| Mini App | Текущее поле |
+| Mini App | Хранилище |
 |---|---|
 | `language` | `language` |
 | `messageMode` | `message_mode` |
@@ -159,11 +150,11 @@ Body:
 - `language`: `ru`, `en`;
 - `messageMode`: `compact`, `detailed`.
 
-### `fvg`
+## Маппинг `fvg`
 
 Источник: `alerts.fvg_store.FvgAlertSettings`.
 
-| Mini App | Текущее поле |
+| Mini App | Хранилище |
 |---|---|
 | `enabled` | `enabled` |
 | `notifyConfirmedFvg` | `notify_confirmed_fvg` |
@@ -172,81 +163,72 @@ Body:
 | `bearishEnabled` | `bearish_enabled` |
 | `symbols[].symbol` | ключ в `symbols` |
 | `symbols[].enabled` | `symbols[symbol].enabled` |
-| `priceFilter.enabled` | `price_filter.enabled` |
-| `priceFilter.min` | `price_filter.min` |
-| `priceFilter.max` | `price_filter.max` |
-| `sizeFilter.enabled` | `size_filter.enabled` |
-| `sizeFilter.unit` | `size_filter.unit` |
-| `sizeFilter.min` | `size_filter.min` |
+| `priceFilter.*` | `price_filter.*` |
+| `sizeFilter.*` | `size_filter.*` |
 
-Маппинг scope:
+Scope:
 
-| Mini App | Текущее поле фильтра |
+| Mini App | Хранилище |
 |---|---|
 | `preFvg` | `apply_to_pre_fvg` |
 | `confirmedFvg` | `apply_to_confirmed_fvg` |
 | `bullish` | `apply_to_bullish` |
 | `bearish` | `apply_to_bearish` |
 
-Серверная валидация:
+Ограничения:
 
 - максимум `MAX_SYMBOLS_PER_USER` инструментов;
-- символ нормализуется в uppercase;
-- длина символа — 5–20 латинских букв и цифр;
-- дубликаты после нормализации запрещены;
-- границы должны быть конечными неотрицательными Decimal;
+- символ из 5–20 латинских букв и цифр, нормализованный в uppercase;
+- отсутствие дубликатов после нормализации;
+- границы — конечные неотрицательные Decimal;
 - минимальная цена не выше максимальной;
-- размер использует только минимум;
-- `sizeFilter.unit`: `USD` или `PERCENT`.
+- размер FVG использует только минимум;
+- единица размера: `USD` или `PERCENT`.
 
-Полная FVG-модель пользователя записывается одной транзакцией только после успешной валидации всего payload.
-
-### `funding`
+## Маппинг `funding`
 
 Источники:
 
 - `alerts.funding_quarter_hour.FundingAlertStore`;
 - `alerts.funding_exchange_store.FundingExchangeStore`.
 
-| Mini App | Текущее поле/метод |
+| Mini App | Хранилище/метод |
 |---|---|
 | `enabled` | `enabled` / `set_enabled` |
 | `intervalMinutes` | `interval_minutes` / `set_interval` |
 | `threshold` | `threshold` / `set_threshold` |
 | `notifyPositive` | `notify_positive` |
 | `notifyNegative` | `notify_negative` |
-| `exchanges` | `FundingExchangeStore.selected/set_selected` |
+| `exchanges` | `selected` / `set_selected` |
 | `nextCheckAt` | `next_check_at`, read-only |
 
 Ограничения:
 
-- интервал от 15 до 2880 минут;
-- шаг интервала 15 минут;
-- threshold — конечное строго положительное число;
+- интервал 15–2880 минут с шагом 15 минут;
+- threshold — конечное положительное число;
 - выбрано хотя бы одно направление;
-- выбрана хотя бы одна биржа;
-- биржи: `bitunix`, `binance`, `bybit`, `bingx`, `bitget`, `gate`;
-- после изменений порога, направлений или бирж очищается мультибиржевой crossing-state;
-- при отключении рассылки crossing-state также очищается.
+- выбрана хотя бы одна поддерживаемая биржа;
+- биржи: `bitunix`, `binance`, `bybit`, `bingx`, `bitget`, `gate`.
 
-### `admin`
+При изменении порога, направлений, бирж или отключении рассылки очищается legacy и мультибиржевой crossing-state.
+
+## Административные данные
 
 Источники:
 
-- `database.runtime_settings.RuntimeSettings`;
-- `database.access_control.AccessRegistry`;
-- `database.user_activity.UserActivityRegistry`;
-- health-данные FVG event store;
-- SQLite `PRAGMA quick_check`;
-- файл `VERSION`.
+- `RuntimeSettings`;
+- `AccessRegistry`;
+- `UserActivityRegistry`;
+- health-метрики FVG event store;
+- `PRAGMA quick_check` SQLite;
+- `/proc/self/status` или `resource.getrusage`;
+- `os.getloadavg`;
+- `shutil.disk_usage`;
+- `VERSION`, `BUILD_COMMIT` и версия Python.
 
-`available` вычисляется сервером и не сохраняется из пользовательского payload.
+Через общий PUT администратор может менять только `publicAccessEnabled`. `available`, `allowedUsers` и `diagnostics` являются server-owned и read-only.
 
-Через общий PUT разрешено изменять только `publicAccessEnabled`, и только подтверждённому администратору. Для обычного пользователя административные значения из payload игнорируются.
-
-Поля `allowedUsers` и `diagnostics` read-only.
-
-Backup, restart и изменение allowlist должны использовать отдельные endpoint с повторным подтверждением:
+Будущие опасные операции используют отдельные endpoint:
 
 ```text
 POST /api/mini-app/admin/backup
@@ -256,28 +238,7 @@ POST /api/mini-app/admin/allowlist
 DELETE /api/mini-app/admin/allowlist/{telegram_id}
 ```
 
-Backend не доверяет `admin.available` или любым административным значениям, пришедшим от frontend.
-
-## Доступ
-
-В приватном режиме пользователь допускается, если выполняется хотя бы одно условие:
-
-- Telegram ID находится в `ALLOWED_TELEGRAM_IDS`;
-- Telegram ID находится в `ADMIN_TELEGRAM_IDS`;
-- пользователь разрешён через `AccessRegistry`;
-- серверная проверка `is_admin` успешна.
-
-В публичном режиме доступ разрешён всем пользователям с корректным Telegram `initData`.
-
-## CORS
-
-`MINI_APP_ALLOWED_ORIGINS` содержит точный список origins через запятую. Разрешение `*` не используется.
-
-Если frontend и API размещены на одном origin, CORS можно не настраивать.
-
 ## Ошибки
-
-Формат:
 
 ```json
 {
@@ -291,20 +252,8 @@ Backend не доверяет `admin.available` или любым админис
 
 Коды HTTP:
 
-- `400` — ошибка формата или валидации;
-- `401` — отсутствует, просрочен или не прошёл проверку Telegram `initData`;
-- `403` — доступ к Mini App или административному действию запрещён;
-- `415` — неверный `Content-Type`;
-- `500` — внутренняя ошибка сохранения.
-
-## Переменные окружения
-
-```env
-MINI_APP_BACKEND_ENABLED=false
-MINI_APP_BACKEND_HOST=127.0.0.1
-MINI_APP_BACKEND_PORT=8080
-MINI_APP_AUTH_MAX_AGE_SECONDS=3600
-MINI_APP_ALLOWED_ORIGINS=
-```
-
-API выключен по умолчанию и не изменяет работу production-бота, пока `MINI_APP_BACKEND_ENABLED` не установлен в `true`.
+- `400` — формат или валидация;
+- `401` — отсутствует или не прошёл проверку Telegram `initData`;
+- `403` — нет доступа;
+- `415` — неверный Content-Type;
+- `500` — внутренняя ошибка без раскрытия секретов.
