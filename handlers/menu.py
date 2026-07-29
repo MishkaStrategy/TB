@@ -4,7 +4,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMa
 from telegram.ext import ContextTypes
 
 from alerts.fvg_models import FvgDirection
-from alerts.fvg_store import FvgAlertSettings
+from alerts.fvg_store import FvgAlertSettings, split_instrument_key
 from exchanges.fvg_candles import is_bitcoin_symbol
 from handlers.auth import authorized
 from handlers.fvg_alert import build_fvg_stats_period_menu, format_fvg_stats, send_fvg_stats
@@ -45,6 +45,16 @@ def build_main_menu(chat_id, settings=None):
     )
 
 
+def _config_symbol(key: str, config: dict) -> str:
+    symbol = config.get("symbol")
+    if symbol:
+        return symbol
+    try:
+        return split_instrument_key(key)[1]
+    except ValueError:
+        return ""
+
+
 def build_fvg_settings_menu(chat_id, settings=None):
     settings = settings or FvgAlertSettings()
     user = settings.user(chat_id)
@@ -52,10 +62,14 @@ def build_fvg_settings_menu(chat_id, settings=None):
     def mark(enabled):
         return "✅" if enabled else "⏸️"
 
-    instruments = list(user.get("symbols", {}).values())
-    price_enabled = any(item.get("price_filter", {}).get("enabled", False) for item in instruments)
-    size_enabled = any(item.get("size_filter", {}).get("enabled", False) for item in instruments)
-    has_bitcoin = any(is_bitcoin_symbol(item.get("symbol", "")) for item in instruments)
+    instruments = list(user.get("symbols", {}).items())
+    price_enabled = any(item.get("price_filter", {}).get("enabled", False) for _, item in instruments)
+    size_enabled = any(item.get("size_filter", {}).get("enabled", False) for _, item in instruments)
+    has_bitcoin = any(
+        is_bitcoin_symbol(_config_symbol(key, item))
+        for key, item in instruments
+        if _config_symbol(key, item)
+    )
 
     rows = [
         [InlineKeyboardButton(
@@ -133,8 +147,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == "pre-fvg-toggle":
         settings = FvgAlertSettings()
         has_bitcoin = any(
-            is_bitcoin_symbol(config.get("symbol", ""))
-            for config in settings.user(chat_id).get("symbols", {}).values()
+            is_bitcoin_symbol(_config_symbol(key, config))
+            for key, config in settings.user(chat_id).get("symbols", {}).items()
+            if _config_symbol(key, config)
         )
         if not has_bitcoin:
             await message.reply_text("Пред-FVG доступен только после добавления Bitcoin-инструмента.")
