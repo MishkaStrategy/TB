@@ -18,12 +18,14 @@ from config import (
     DATABASE_OBSERVABILITY_INTERVAL_SECONDS,
     DATABASE_OBSERVABILITY_RETENTION_DAYS,
     DATABASE_OBSERVABILITY_ROW_COUNTS_ENABLED,
+    GRACEFUL_SHUTDOWN_ENABLED,
     HEALTH_ALERT_INTERVAL_SECONDS,
     OUTBOX_RETRY_POLICY_ENABLED,
 )
 from database.background_tasks import BackgroundTaskRegistry
 from database.sqlite_observability import SQLiteObservabilityService
 from handlers.multi_funding import CACHE_KEY
+from operations.graceful_fvg_stream import GracefulBitunixFvgStream
 from operations.task_runtime import TrackedTaskRunner
 from operations.task_watchdog import BackgroundTaskWatchdog
 
@@ -143,7 +145,6 @@ async def _run_tracked(
     except asyncio.CancelledError:
         raise
     except Exception:
-        # The persistent runner has already recorded the uncaught failure.
         LOGGER.exception("Tracked background job failed task=%s", task_name)
         _increment_task_metric("background_task_uncaught_failures")
         return None
@@ -316,5 +317,122 @@ def schedule_fvg_alerts(application):
     return result
 
 
-start_fvg_stream = base.start_fvg_stream
-stop_fvg_stream = base.stop_fvg_stream
+async def start_fvg_stream(application):
+    if not GRACEFUL_SHUTDOWN_ENABLED:
+        return await base.start_fvg_stream(application)
+    if base._FVG_TASK is not None and not base._FVG_TASK.done():
+        return base._FVG_TASK
+    base._FVG_STREAM = GracefulBitunixFvgStream(get_fvg_service())
+    base._FVG_TASK = asyncio.create_task(
+        base._FVG_STREAM.run(application.bot),
+        name="bitunix-fvg-stream",
+    )
+    return base._FVG_TASK
+
+
+async def stop_fvg_stream(application, *, timeout_seconds: float | None = None):
+    if not GRACEFUL_SHUTDOWN_ENABLED or not isinstance(
+        base._FVG_STREAM,
+        GracefulBitunixFvgStream,
+    ):
+        await base.stop_fvg_stream(application)
+        return {
+            "graceful": False,
+            "drained": None,
+            "pending_before": None,
+            "pending_after": None,
+            "task_cancelled": False,
+            "timeout": False,
+        }
+
+    stream = base._FVG_STREAM
+    task = base._FVG_TASK
+    budget = max(0.01, float(timeout_seconds or 1.0))
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    task_cancelled = False
+    task_error = None
+    drain_result = {
+        "drained": False,
+        "pending_before": stream.pending_delivery_count,
+        "pending_after": stream.pending_delivery_count,
+        "timeout": False,
+    }
+
+    stream.stop_accepting()
+    try:
+        drain_budget = max(0.01, budget * 0.8)
+        drain_result = await stream.drain(timeout_seconds=drain_budget)
+        remaining = max(0.0, budget - (loop.time() - started))
+
+        if task is not None and not task.done():
+            if drain_result["drained"] and remaining > 0:
+                try:
+                    await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
+                except asyncio.TimeoutError:
+                    task.cancel()
+                    task_cancelled = True
+            else:
+                task.cancel()
+                task_cancelled = True
+
+        if task is not None:
+            results = await asyncio.gather(task, return_exceptions=True)
+            if results and isinstance(results[0], BaseException):
+                if not isinstance(results[0], asyncio.CancelledError):
+                    task_error = str(results[0])[:500]
+    except asyncio.CancelledError:
+        if task is not None and not task.done():
+            task.cancel()
+        worker = getattr(stream, "_delivery_worker_task", None)
+        if worker is not None and not worker.done():
+            worker.cancel()
+        await asyncio.gather(
+            *[item for item in (task, worker) if item is not None],
+            return_exceptions=True,
+        )
+        raise
+    finally:
+        base._FVG_TASK = None
+        base._FVG_STREAM = None
+
+    timeout = bool(drain_result["timeout"] or task_cancelled)
+    return {
+        "graceful": True,
+        **drain_result,
+        "task_cancelled": task_cancelled,
+        "task_error": task_error,
+        "timeout": timeout,
+    }
+
+
+async def drain_fvg_outbox(application, *, timeout_seconds: float) -> dict:
+    service = get_fvg_service()
+    method = getattr(service, "retry_pending", None)
+    if not callable(method):
+        return {
+            "enabled": True,
+            "supported": False,
+            "completed": 0,
+            "timeout": False,
+        }
+    try:
+        completed = await asyncio.wait_for(
+            method(application.bot, limit=1000),
+            timeout=max(0.01, float(timeout_seconds)),
+        )
+    except asyncio.CancelledError:
+        raise
+    except asyncio.TimeoutError:
+        return {
+            "enabled": True,
+            "supported": True,
+            "completed": 0,
+            "timeout": True,
+        }
+    return {
+        "enabled": True,
+        "supported": True,
+        "completed": int(completed or 0),
+        "timeout": False,
+    }

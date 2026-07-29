@@ -192,6 +192,26 @@ BACKGROUND_TASK_STALE_MULTIPLIER = parse_positive_float(
     "BACKGROUND_TASK_STALE_MULTIPLIER",
 )
 
+# Application lifecycle tracking and bounded delivery drain during PTB post_stop.
+RUNTIME_LIFECYCLE_ENABLED = parse_bool(
+    os.getenv("RUNTIME_LIFECYCLE_ENABLED"),
+    default=False,
+)
+GRACEFUL_SHUTDOWN_ENABLED = parse_bool(
+    os.getenv("GRACEFUL_SHUTDOWN_ENABLED"),
+    default=False,
+)
+GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = parse_positive_float(
+    os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS"),
+    25,
+    "GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS",
+)
+RUNTIME_LIFECYCLE_HISTORY_RETENTION_DAYS = parse_positive_int(
+    os.getenv("RUNTIME_LIFECYCLE_HISTORY_RETENTION_DAYS"),
+    30,
+    "RUNTIME_LIFECYCLE_HISTORY_RETENTION_DAYS",
+)
+
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
