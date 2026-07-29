@@ -69,7 +69,7 @@ MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
 MAX_SYMBOLS_PER_USER = parse_positive_int(
-    os.getenv("MAX_SYMBOLS_PER_USER"), 20, "MAX_SYMBOLS_PER_USER"
+    os.getenv("MAX_SYMBOLS_PER_USER"), 10, "MAX_SYMBOLS_PER_USER"
 )
 FVG_DELIVERY_QUEUE_SIZE = parse_positive_int(
     os.getenv("FVG_DELIVERY_QUEUE_SIZE"), 1000, "FVG_DELIVERY_QUEUE_SIZE"
