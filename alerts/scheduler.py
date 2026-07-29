@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from alerts.funding_alerts import FundingAlertService
 from alerts.funding_quarter_hour import next_quarter_hour
+from alerts.fvg_multi_exchange import MultiExchangeFvgPoller
 from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
 from alerts.health_monitor import HealthAlertMonitor
@@ -16,6 +17,7 @@ from config import (
     HEALTH_ALERT_OUTBOX_THRESHOLD,
     HEALTH_ALERT_STALE_WS_SECONDS,
 )
+from exchanges.fvg_candles import timeframe_due
 from handlers.funding import CACHE_KEY as FUNDING_CACHE_KEY
 
 
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 _FVG_SERVICE = None
 _FVG_STREAM = None
 _FVG_TASK = None
+_FVG_POLLER = None
 _FUNDING_SERVICE = None
 
 
@@ -35,6 +38,13 @@ def get_fvg_service():
     return _FVG_SERVICE
 
 
+def get_fvg_poller():
+    global _FVG_POLLER
+    if _FVG_POLLER is None:
+        _FVG_POLLER = MultiExchangeFvgPoller()
+    return _FVG_POLLER
+
+
 def get_funding_service():
     global _FUNDING_SERVICE
     if _FUNDING_SERVICE is None:
@@ -43,7 +53,7 @@ def get_funding_service():
 
 
 async def run_fvg_recovery(context):
-    """Periodic REST safety net; WebSocket remains the primary source."""
+    """Periodic Bitunix REST safety net; the shared WebSocket remains primary."""
     service = context.job.data["fvg_service"]
     for symbol in sorted(service.settings.active_symbols()):
         try:
@@ -58,20 +68,62 @@ async def run_fvg_recovery(context):
 
 
 async def run_fvg_control_point(context):
-    """Evaluate cached candles around boundaries without another REST request."""
+    """Evaluate one shared market calculation per exchange, symbol and timeframe."""
     service = context.job.data["fvg_service"]
+    poller = context.job.data.get("fvg_poller") or get_fvg_poller()
+    mode = context.job.data.get("mode", "confirmed")
     now = context.job.data.get("clock", None)
     if callable(now):
         now = now()
     if now is None:
         now = datetime.now(timezone.utc)
-    for symbol in sorted(service.settings.active_symbols()):
+
+    if mode == "pre":
+        markets = service.settings.pre_active_markets()
+        for exchange, symbol in markets:
+            try:
+                events = await asyncio.to_thread(
+                    poller.preliminary,
+                    exchange,
+                    symbol,
+                    now,
+                )
+                await service.deliver(context.bot, events)
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning(
+                    "Pre-FVG control point failed for %s %s: %s",
+                    exchange,
+                    symbol,
+                    error,
+                )
+                service.event_store.update_health(last_error=str(error))
+                service.event_store.increment_health("pre_control_point_failures")
+        return
+
+    for exchange, symbol, timeframe in service.settings.active_markets():
+        if not timeframe_due(timeframe, now):
+            continue
         try:
-            await service.deliver(context.bot, service.evaluate(symbol, now))
+            events = await asyncio.to_thread(
+                poller.confirmed,
+                exchange,
+                symbol,
+                timeframe,
+                now,
+            )
+            await service.deliver(context.bot, events)
         except asyncio.CancelledError:
             raise
         except Exception as error:
-            logger.exception("FVG control point failed for %s", symbol)
+            logger.warning(
+                "Confirmed FVG control point failed for %s %s %s: %s",
+                exchange,
+                symbol,
+                timeframe,
+                error,
+            )
             service.event_store.update_health(last_error=str(error))
             service.event_store.increment_health("control_point_failures")
 
@@ -95,10 +147,10 @@ async def run_operational_health(context):
     monitor = context.job.data["health_monitor"]
     try:
         health = await asyncio.to_thread(service.event_store.health)
-        active_symbols = await asyncio.to_thread(service.settings.active_symbols)
+        active_markets = await asyncio.to_thread(service.settings.active_markets)
         alerts = monitor.evaluate(
             health,
-            has_active_symbols=bool(active_symbols),
+            has_active_symbols=bool(active_markets),
         )
     except asyncio.CancelledError:
         raise
@@ -139,7 +191,6 @@ async def run_funding_alerts(context):
         logger.exception("Quarter-hour funding alert job failed")
         return
     if rates is not None:
-        # One shared cache instead of one full rates list per Telegram user.
         context.bot_data[FUNDING_CACHE_KEY] = rates
 
 
@@ -148,6 +199,7 @@ def schedule_fvg_alerts(application):
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()
+    poller = get_fvg_poller()
     seconds = datetime.now(timezone.utc).timestamp() % 900
     confirmed_delay = 900 - seconds + 5
     pre_delay = (725 - seconds) % 900
@@ -159,14 +211,22 @@ def schedule_fvg_alerts(application):
         interval=900,
         first=confirmed_delay,
         name="fvg-confirmed-control",
-        data={"fvg_service": service},
+        data={
+            "fvg_service": service,
+            "fvg_poller": poller,
+            "mode": "confirmed",
+        },
     )
     application.job_queue.run_repeating(
         run_fvg_control_point,
         interval=900,
         first=pre_delay,
         name="fvg-pre-control-t-minus-3",
-        data={"fvg_service": service},
+        data={
+            "fvg_service": service,
+            "fvg_poller": poller,
+            "mode": "pre",
+        },
     )
     application.job_queue.run_repeating(
         run_fvg_delivery_retry,
