@@ -12,6 +12,12 @@ from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType, even
 UTC = timezone.utc
 FIFTEEN_MINUTES = timedelta(minutes=15)
 ONE_MINUTE = timedelta(minutes=1)
+TIMEFRAME_STEPS = {
+    "15m": FIFTEEN_MINUTES,
+    "1h": timedelta(hours=1),
+    "4h": timedelta(hours=4),
+    "1d": timedelta(days=1),
+}
 
 
 def are_consecutive(candles: Iterable[Candle], step: timedelta) -> bool:
@@ -67,11 +73,20 @@ class FvgDetector:
         items = sorted(candles, key=lambda candle: candle.open_time)
         if len(items) != 3:
             return None
-        if not all(c.is_closed and c.is_complete and c.timeframe == "15m" for c in items):
+        timeframes = {c.timeframe for c in items}
+        if len(timeframes) != 1:
             return None
-        if len({c.symbol for c in items}) != 1 or not are_consecutive(items, FIFTEEN_MINUTES):
+        timeframe = next(iter(timeframes))
+        step = TIMEFRAME_STEPS.get(timeframe)
+        if step is None:
             return None
-        return self._event(items[0], items[1], items[2], FvgEventType.CONFIRMED_FVG, detected_at)
+        if not all(c.is_closed and c.is_complete for c in items):
+            return None
+        if len({c.symbol for c in items}) != 1 or not are_consecutive(items, step):
+            return None
+        return self._event(
+            items[0], items[1], items[2], FvgEventType.CONFIRMED_FVG, detected_at
+        )
 
     def detect_pre(
         self,
@@ -88,6 +103,8 @@ class FvgDetector:
         if current_c.is_closed:
             return None
         if not all(c.is_complete for c in (candle_a, candle_b, current_c)):
+            return None
+        if not all(c.timeframe == "15m" for c in (candle_a, candle_b, current_c)):
             return None
         if len({c.symbol for c in (candle_a, candle_b, current_c)}) != 1:
             return None
@@ -114,11 +131,15 @@ class FvgDetector:
         detected_at = (detected_at or datetime.now(UTC)).astimezone(UTC)
         return FvgEvent(
             event_id=event_id(
-                candle_c.symbol, "15m", direction, candle_c.open_time, event_type
+                candle_c.symbol,
+                candle_c.timeframe,
+                direction,
+                candle_c.open_time,
+                event_type,
             ),
             event_type=event_type,
             symbol=candle_c.symbol,
-            timeframe="15m",
+            timeframe=candle_c.timeframe,
             direction=direction,
             candle_a_open_time=candle_a.open_time,
             candle_b_open_time=candle_b.open_time,
