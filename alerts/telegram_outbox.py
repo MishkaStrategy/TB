@@ -75,7 +75,7 @@ class TelegramOutboxWorker:
         *,
         limit: int = 500,
         now: datetime | None = None,
-    ) -> int:
+    ) -> int | None:
         if self.compatibility is None:
             return 0
         try:
@@ -89,17 +89,33 @@ class TelegramOutboxWorker:
         except Exception:
             LOGGER.exception("Outbox domain finalization failed")
             self._increment("outbox_domain_finalization_failures")
-            return 0
+            return None
 
     async def drain(self, bot, *, limit: int = 100, now: datetime | None = None) -> int:
         async with self._lock:
-            await self._sync_domain_finalizations(limit=max(limit, 500), now=now)
+            sync_limit = max(limit, 500)
+            if await self._sync_domain_finalizations(
+                limit=sync_limit,
+                now=now,
+            ) is None:
+                # Fail closed: retention must never delete a terminal item that
+                # has not been synchronized with the legacy FVG domain tables.
+                self.last_claimed_count = 0
+                return 0
+
             await asyncio.to_thread(
                 self.store.maintenance,
                 terminal_retention_days=self.policy.terminal_retention_days,
                 now=now,
             )
-            await self._sync_domain_finalizations(limit=max(limit, 500), now=now)
+
+            if await self._sync_domain_finalizations(
+                limit=sync_limit,
+                now=now,
+            ) is None:
+                self.last_claimed_count = 0
+                return 0
+
             items = await asyncio.to_thread(
                 self.store.claim_due,
                 worker_id=self.worker_id,
@@ -111,7 +127,7 @@ class TelegramOutboxWorker:
             delivered = 0
             for item in items:
                 delivered += await self._deliver_item(bot, item, now=now)
-            await self._sync_domain_finalizations(limit=max(limit, 500), now=now)
+            await self._sync_domain_finalizations(limit=sync_limit, now=now)
             return delivered
 
     async def _deliver_item(self, bot, item: dict, *, now: datetime | None = None) -> int:
