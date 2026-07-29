@@ -156,6 +156,42 @@ DATABASE_OBSERVABILITY_INTEGRITY_CHECK_ENABLED = parse_bool(
     default=False,
 )
 
+# Cross-process background job leases and a read-only stale-job watchdog.
+# Both remain disabled until explicitly rolled out.
+BACKGROUND_TASK_REGISTRY_ENABLED = parse_bool(
+    os.getenv("BACKGROUND_TASK_REGISTRY_ENABLED"),
+    default=False,
+)
+BACKGROUND_TASK_WATCHDOG_ENABLED = parse_bool(
+    os.getenv("BACKGROUND_TASK_WATCHDOG_ENABLED"),
+    default=False,
+)
+BACKGROUND_TASK_HISTORY_RETENTION_DAYS = parse_positive_int(
+    os.getenv("BACKGROUND_TASK_HISTORY_RETENTION_DAYS"),
+    30,
+    "BACKGROUND_TASK_HISTORY_RETENTION_DAYS",
+)
+BACKGROUND_TASK_HEARTBEAT_SECONDS = parse_positive_float(
+    os.getenv("BACKGROUND_TASK_HEARTBEAT_SECONDS"),
+    30,
+    "BACKGROUND_TASK_HEARTBEAT_SECONDS",
+)
+BACKGROUND_TASK_MIN_LEASE_SECONDS = parse_positive_float(
+    os.getenv("BACKGROUND_TASK_MIN_LEASE_SECONDS"),
+    120,
+    "BACKGROUND_TASK_MIN_LEASE_SECONDS",
+)
+BACKGROUND_TASK_WATCHDOG_INTERVAL_SECONDS = parse_positive_float(
+    os.getenv("BACKGROUND_TASK_WATCHDOG_INTERVAL_SECONDS"),
+    60,
+    "BACKGROUND_TASK_WATCHDOG_INTERVAL_SECONDS",
+)
+BACKGROUND_TASK_STALE_MULTIPLIER = parse_positive_float(
+    os.getenv("BACKGROUND_TASK_STALE_MULTIPLIER"),
+    3,
+    "BACKGROUND_TASK_STALE_MULTIPLIER",
+)
+
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
