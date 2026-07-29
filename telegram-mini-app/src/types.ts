@@ -2,6 +2,8 @@ export type Language = "ru" | "en";
 export type MessageMode = "compact" | "detailed";
 export type FvgSizeUnit = "USD" | "PERCENT";
 export type Exchange = "bitunix" | "binance" | "bybit" | "bingx" | "bitget" | "gate";
+export type HealthStatus = "ok" | "warning" | "unknown";
+export type WebsocketStatus = "connected" | "disconnected" | "unknown";
 
 export interface FilterScope {
   preFvg: boolean;
@@ -62,17 +64,37 @@ export interface AllowedUser {
   source: "env" | "runtime";
 }
 
+export interface AdminDiagnostics {
+  websocket: WebsocketStatus;
+  lastWebsocketMessage: string | null;
+  lastRestRecovery: string | null;
+  lastError: string | null;
+  outbox: number;
+  deliveries: number;
+  deliveryFailures: number;
+  deliveryRetries: number;
+  deliveryPermanentFailures: number;
+  databases: HealthStatus;
+  fvgDatabaseStatus: HealthStatus;
+  fvgDatabaseBytes: number;
+  fundingDatabaseStatus: HealthStatus;
+  fundingDatabaseBytes: number;
+  jsonSettingsBytes: number;
+  processMemoryBytes: number;
+  loadAverage: number[] | null;
+  diskFreeBytes: number;
+  diskTotalBytes: number;
+  pid: number;
+  release: string;
+  gitCommit: string;
+  pythonVersion: string;
+}
+
 export interface AdminSettings {
   available: boolean;
   publicAccessEnabled: boolean;
   allowedUsers: AllowedUser[];
-  diagnostics: {
-    websocket: "connected" | "disconnected" | "unknown";
-    outbox: number;
-    deliveryFailures: number;
-    databases: "ok" | "warning" | "unknown";
-    release: string;
-  };
+  diagnostics: AdminDiagnostics;
 }
 
 export interface AppSettings {
