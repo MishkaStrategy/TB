@@ -65,6 +65,17 @@ ADMIN_TELEGRAM_IDS = parse_telegram_ids(
 # Production defaults are intentionally restrictive. Public mode must be
 # enabled explicitly in the environment.
 PUBLIC_ACCESS_ENABLED = parse_bool(os.getenv("PUBLIC_ACCESS_ENABLED"), default=False)
+
+# Delivery changes are additive and remain disabled until explicitly enabled.
+DELIVERY_STATUS_TRACKING_ENABLED = parse_bool(
+    os.getenv("DELIVERY_STATUS_TRACKING_ENABLED"),
+    default=False,
+)
+USER_BLOCK_STATUS_ENABLED = parse_bool(
+    os.getenv("USER_BLOCK_STATUS_ENABLED"),
+    default=False,
+)
+
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
