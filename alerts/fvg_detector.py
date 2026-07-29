@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType, event_id
+from exchanges.fvg_candles import is_bitcoin_symbol
 
 
 UTC = timezone.utc
@@ -34,7 +35,9 @@ def aggregate_current_15m(
     interval_open: datetime,
     now: datetime,
 ) -> Candle | None:
-    """Build the forming 15m candle from consecutive, closed 1m candles."""
+    """Build a forming BTC 15m candle from consecutive, closed 1m candles."""
+    if not is_bitcoin_symbol(symbol):
+        return None
     expected_count = int((now - interval_open).total_seconds() // 60)
     minutes = sorted(
         (
@@ -95,6 +98,8 @@ class FvgDetector:
         current_c: Candle,
         now: datetime,
     ) -> FvgEvent | None:
+        if not is_bitcoin_symbol(current_c.symbol):
+            return None
         control_start = current_c.open_time + timedelta(minutes=12)
         if not (control_start <= now < control_start + ONE_MINUTE):
             return None
