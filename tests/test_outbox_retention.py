@@ -15,8 +15,17 @@ UTC = timezone.utc
 
 
 class SuccessfulBot:
+    def __init__(self):
+        self.calls = 0
+
     async def send_message(self, **kwargs):
+        self.calls += 1
         return SimpleNamespace(message_id=1)
+
+
+class FailingCompatibility:
+    def sync_terminal(self, *args, **kwargs):
+        raise sqlite3.OperationalError("simulated domain sync failure")
 
 
 class LegacyDeliveryMetrics:
@@ -96,6 +105,51 @@ class OutboxCompatibilityRetentionTests(unittest.IsolatedAsyncioTestCase):
                     ).fetchone()[0],
                     0,
                 )
+
+    async def test_sync_failure_blocks_retention_and_new_claims(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "outbox.sqlite3"
+            started = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+            store = TelegramOutboxStore(path)
+            item = store.enqueue(
+                notification_type="fvg",
+                event_id="e1",
+                chat_id=42,
+                payload={"text": "hello"},
+                idempotency_key="fvg:e1:42",
+                now=started,
+            )
+            claimed = store.claim_due(worker_id="seed", now=started)
+            self.assertEqual(len(claimed), 1)
+            store.mark_delivered(
+                item["id"],
+                "seed",
+                telegram_message_id=1,
+                now=started,
+            )
+            pending = store.enqueue(
+                notification_type="fvg",
+                event_id="e2",
+                chat_id=42,
+                payload={"text": "new"},
+                idempotency_key="fvg:e2:42",
+                now=started + timedelta(days=2),
+            )
+            worker = TelegramOutboxWorker(
+                store,
+                compatibility=FailingCompatibility(),
+                policy=OutboxRetryPolicy(terminal_retention_days=1),
+            )
+            bot = SuccessfulBot()
+
+            self.assertEqual(
+                await worker.drain(bot, now=started + timedelta(days=2)),
+                0,
+            )
+            self.assertEqual(bot.calls, 0)
+            self.assertIsNotNone(store.get(item["id"]))
+            self.assertEqual(store.get(pending["id"])["status"], "pending")
+            self.assertEqual(worker.last_claimed_count, 0)
 
 
 if __name__ == "__main__":
