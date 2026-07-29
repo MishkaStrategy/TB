@@ -1,16 +1,23 @@
+import { setUiLanguage } from "./i18n";
 import { mockSettings } from "./mock";
 import { getInitData, getTelegramUser } from "./telegram";
 import type { AppSettings, SaveSettingsRequest, SettingsEnvelope } from "./types";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
+function announceLanguage(envelope: SettingsEnvelope): SettingsEnvelope {
+  setUiLanguage(envelope.settings.general.language);
+  return envelope;
+}
+
 function mockEnvelope(settings: AppSettings = mockSettings): SettingsEnvelope {
-  return {
+  return announceLanguage({
     settings: structuredClone(settings),
     user: getTelegramUser(),
+    limits: { maxFvgSymbols: 20 },
     source: "mock",
     updatedAt: new Date().toISOString(),
-  };
+  });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -38,7 +45,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadSettings(): Promise<SettingsEnvelope> {
   if (!API_BASE_URL) return mockEnvelope();
-  return request<SettingsEnvelope>("/api/mini-app/settings");
+  return announceLanguage(await request<SettingsEnvelope>("/api/mini-app/settings"));
 }
 
 export async function saveSettings(settings: AppSettings): Promise<SettingsEnvelope> {
@@ -48,8 +55,8 @@ export async function saveSettings(settings: AppSettings): Promise<SettingsEnvel
   }
 
   const payload: SaveSettingsRequest = { settings };
-  return request<SettingsEnvelope>("/api/mini-app/settings", {
+  return announceLanguage(await request<SettingsEnvelope>("/api/mini-app/settings", {
     method: "PUT",
     body: JSON.stringify(payload),
-  });
+  }));
 }
