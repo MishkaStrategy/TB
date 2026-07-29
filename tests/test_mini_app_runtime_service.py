@@ -18,24 +18,27 @@ from mini_app_backend.runtime_service import MiniAppSettingsService
 class MiniAppRuntimeServiceTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
-        root = Path(self.temporary.name)
-        funding = FundingAlertStore(root / "funding.sqlite3")
-        self.exchanges = FundingExchangeStore(funding.path)
-        self.service = MiniAppSettingsService(
-            preferences=UserPreferences(root / "preferences.json"),
-            fvg_settings=FvgAlertSettings(root / "fvg.json"),
-            funding_settings=funding,
-            funding_exchanges=self.exchanges,
-            runtime_settings=RuntimeSettings(root / "runtime.json"),
-            access_registry=AccessRegistry(root / "access.json"),
-            activity_registry=UserActivityRegistry(root / "activity.json"),
-            admin_checker=lambda _telegram_id: False,
-            env_allowed_ids={42},
-            env_admin_ids=set(),
-            public_access_default=False,
-            diagnostics_provider=lambda: {},
-        )
+        self.root = Path(self.temporary.name)
+        self.funding = FundingAlertStore(self.root / "funding.sqlite3")
+        self.exchanges = FundingExchangeStore(self.funding.path)
+        self.service = self._service()
         self.user = TelegramUser(id=42, first_name="Михаил")
+
+    def _service(self, *, admin=False, diagnostics_provider=lambda: {}):
+        return MiniAppSettingsService(
+            preferences=UserPreferences(self.root / "preferences.json"),
+            fvg_settings=FvgAlertSettings(self.root / "fvg.json"),
+            funding_settings=self.funding,
+            funding_exchanges=self.exchanges,
+            runtime_settings=RuntimeSettings(self.root / "runtime.json"),
+            access_registry=AccessRegistry(self.root / "access.json"),
+            activity_registry=UserActivityRegistry(self.root / "activity.json"),
+            admin_checker=(lambda telegram_id: admin and telegram_id == 42),
+            env_allowed_ids={42},
+            env_admin_ids={42} if admin else set(),
+            public_access_default=False,
+            diagnostics_provider=diagnostics_provider,
+        )
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -70,6 +73,32 @@ class MiniAppRuntimeServiceTests(unittest.TestCase):
         settings["general"]["messageMode"] = "compact"
         self.service.save_settings(self.user, settings)
         self.assertTrue(self.exchanges.crossing_values(42))
+
+    def test_non_admin_receives_stable_empty_diagnostics(self):
+        diagnostics = self.service.read_settings(self.user)["settings"]["admin"][
+            "diagnostics"
+        ]
+        self.assertEqual(diagnostics["websocket"], "unknown")
+        self.assertIsNone(diagnostics["lastWebsocketMessage"])
+        self.assertEqual(diagnostics["deliveries"], 0)
+        self.assertIn("pythonVersion", diagnostics)
+        self.assertIn("diskTotalBytes", diagnostics)
+
+    def test_admin_partial_provider_is_normalized(self):
+        service = self._service(
+            admin=True,
+            diagnostics_provider=lambda: {
+                "websocket": "connected",
+                "outbox": 7,
+                "release": "test",
+            },
+        )
+        admin = service.read_settings(self.user)["settings"]["admin"]
+        self.assertTrue(admin["available"])
+        self.assertEqual(admin["diagnostics"]["websocket"], "connected")
+        self.assertEqual(admin["diagnostics"]["outbox"], 7)
+        self.assertEqual(admin["diagnostics"]["deliveryFailures"], 0)
+        self.assertEqual(admin["diagnostics"]["gitCommit"], "unknown")
 
 
 if __name__ == "__main__":
