@@ -120,6 +120,16 @@ fvg:{event_id}:{chat_id}
 
 Unique constraint не позволяет повторной обработке свечи, recovery, scheduler или restart создать вторую логическую доставку.
 
+## Blocked-user policy
+
+Outbox V2 сохраняет разделение feature flags из delivery-status этапа:
+
+- при включённом только `DELIVERY_STATUS_TRACKING_ENABLED` профиль пользователя обновляется, но queued item не отменяется из-за сохранённого статуса;
+- переход queued item в `cancelled` и очистка rollback-зеркала выполняются только при `USER_BLOCK_STATUS_ENABLED=true`;
+- permanent ошибка текущей попытки всё равно завершает именно этот outbox item как `failed_permanent` и не создаёт retry.
+
+Это позволяет сначала включить наблюдение за реальными Telegram-ошибками без скрытого изменения доставки.
+
 ## Rollback compatibility
 
 При включённом V2 новая FVG-доставка записывается:
