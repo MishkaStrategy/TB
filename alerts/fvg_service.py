@@ -16,6 +16,7 @@ from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType
 from alerts.fvg_store import FvgAlertSettings, FvgEventStore
 from config import HEALTH_WRITE_INTERVAL_SECONDS
 from exchanges.bitunix import BitunixClient
+from exchanges.funding import exchange_label
 
 
 logger = logging.getLogger(__name__)
@@ -263,7 +264,7 @@ class FvgAlertService:
         completed = 0
         for item in items:
             chat_id = item["chat_id"]
-            event_id = item["event_id"]
+            current_event_id = item["event_id"]
             attempts = int(item.get("attempts", 0))
             try:
                 await bot.send_message(
@@ -274,10 +275,10 @@ class FvgAlertService:
                 logger.warning(
                     "Telegram permanently rejected chat=%s event=%s: %s",
                     chat_id,
-                    event_id,
+                    current_event_id,
                     error,
                 )
-                self.event_store.abandon_delivery(chat_id, event_id)
+                self.event_store.abandon_delivery(chat_id, current_event_id)
                 self.event_store.increment_health("delivery_permanent_failures")
                 self.event_store.update_health(last_error=str(error))
             except RetryAfter as error:
@@ -288,7 +289,7 @@ class FvgAlertService:
                     delay = float(retry_after)
                 self.event_store.mark_delivery_failed(
                     chat_id,
-                    event_id,
+                    current_event_id,
                     str(error),
                     retry_after_seconds=max(1, delay),
                 )
@@ -299,13 +300,13 @@ class FvgAlertService:
                 logger.warning(
                     "FVG delivery failed chat=%s event=%s attempt=%s: %s",
                     chat_id,
-                    event_id,
+                    current_event_id,
                     attempts + 1,
                     error,
                 )
                 self.event_store.mark_delivery_failed(
                     chat_id,
-                    event_id,
+                    current_event_id,
                     str(error),
                     retry_after_seconds=delay,
                 )
@@ -313,7 +314,7 @@ class FvgAlertService:
                 self.event_store.increment_health("delivery_retries")
                 self.event_store.update_health(last_error=str(error))
             else:
-                self.event_store.mark_delivered(chat_id, event_id)
+                self.event_store.mark_delivered(chat_id, current_event_id)
                 self.event_store.increment_health("notifications_sent")
                 completed += 1
         return completed
@@ -378,6 +379,7 @@ def format_fvg_message(event: FvgEvent) -> str:
     return (
         f"{title}\n"
         f"Инструмент: {event.symbol}\n"
+        f"Биржа: {exchange_label(event.exchange)}\n"
         f"Таймфрейм: {event.timeframe}\n"
         f"Направление: {direction}\n"
         f"Зона FVG: {_price(event.zone_low)} — {_price(event.zone_high)}\n"
