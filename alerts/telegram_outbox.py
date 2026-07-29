@@ -94,12 +94,15 @@ class TelegramOutboxWorker:
     async def drain(self, bot, *, limit: int = 100, now: datetime | None = None) -> int:
         async with self._lock:
             sync_limit = max(limit, 500)
-            if await self._sync_domain_finalizations(
+            synced = await self._sync_domain_finalizations(
                 limit=sync_limit,
                 now=now,
-            ) is None:
+            )
+            if synced is None or synced >= sync_limit:
                 # Fail closed: retention must never delete a terminal item that
                 # has not been synchronized with the legacy FVG domain tables.
+                # A full batch is treated as possible remaining backlog and is
+                # drained on the next worker pass before maintenance resumes.
                 self.last_claimed_count = 0
                 return 0
 
@@ -109,10 +112,11 @@ class TelegramOutboxWorker:
                 now=now,
             )
 
-            if await self._sync_domain_finalizations(
+            synced = await self._sync_domain_finalizations(
                 limit=sync_limit,
                 now=now,
-            ) is None:
+            )
+            if synced is None or synced >= sync_limit:
                 self.last_claimed_count = 0
                 return 0
 
