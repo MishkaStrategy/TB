@@ -20,16 +20,18 @@ def maintenance_enabled():
 def authorized(handler):
     @wraps(handler)
     async def wrapped(update, context):
-        user = update.effective_user
-        if maintenance_enabled() and (user is None or not is_admin(user.id)):
-            await update.effective_message.reply_text(
-                "🛠 Бот временно находится на обслуживании. Попробуйте позже."
-            )
-            return
+        if maintenance_enabled():
+            user = getattr(update, "effective_user", None)
+            if user is None or not is_admin(user.id):
+                await update.effective_message.reply_text(
+                    "🛠 Бот временно находится на обслуживании. Попробуйте позже."
+                )
+                return
 
         if public_access_enabled():
             return await handler(update, context)
 
+        user = getattr(update, "effective_user", None)
         if user is None or not (
             is_authorized(user.id) or AccessRegistry().is_allowed(user.id)
         ):
