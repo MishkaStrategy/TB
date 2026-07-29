@@ -10,6 +10,10 @@ RETENTION_DAYS="${RETENTION_DAYS:-14}"
 HISTORY_RETENTION_DAYS="${HISTORY_RETENTION_DAYS:-180}"
 PYTHON="${PYTHON:-${INSTALL_DIR}/.venv/bin/python}"
 RELEASE_REF="${RELEASE_REF:-}"
+FVG_HISTORY_ARCHIVE_PATH="${FVG_HISTORY_ARCHIVE_PATH:-${DATA_DIR}/archive/fvg_history.sqlite3}"
+if [[ "${FVG_HISTORY_ARCHIVE_PATH}" != /* ]]; then
+  FVG_HISTORY_ARCHIVE_PATH="${INSTALL_DIR}/${FVG_HISTORY_ARCHIVE_PATH}"
+fi
 
 for value_name in RETENTION_DAYS HISTORY_RETENTION_DAYS; do
   value="${!value_name}"
@@ -95,6 +99,20 @@ run_id="$(PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" -m database.backup_audit \
   --archive "${archive}" \
   --started-at "${started_at}")"
 
+archive_rsync_excludes=()
+archive_snapshot_relative="archive/fvg_history.sqlite3"
+case "${FVG_HISTORY_ARCHIVE_PATH}" in
+  "${DATA_DIR}"/*)
+    archive_relative="${FVG_HISTORY_ARCHIVE_PATH#${DATA_DIR}/}"
+    archive_snapshot_relative="${archive_relative}"
+    archive_rsync_excludes=(
+      --exclude "${archive_relative}"
+      --exclude "${archive_relative}-wal"
+      --exclude "${archive_relative}-shm"
+    )
+    ;;
+esac
+
 current_step="copy_runtime_files"
 rsync -a \
   --exclude '.manual_backups' \
@@ -104,6 +122,7 @@ rsync -a \
   --exclude 'funding_alerts.sqlite3' \
   --exclude 'funding_alerts.sqlite3-wal' \
   --exclude 'funding_alerts.sqlite3-shm' \
+  "${archive_rsync_excludes[@]}" \
   "${DATA_DIR}/" "${snapshot}/"
 
 event_database="${DATA_DIR}/fvg_event_store.sqlite3"
@@ -168,8 +187,46 @@ temporary.replace(destination)
 PY
 fi
 
+if [[ -f "${FVG_HISTORY_ARCHIVE_PATH}" ]]; then
+  current_step="snapshot_fvg_history_archive"
+  archive_destination="${snapshot}/${archive_snapshot_relative}"
+  mkdir -p "$(dirname "${archive_destination}")"
+  "${PYTHON}" - \
+    "${FVG_HISTORY_ARCHIVE_PATH}" "${archive_destination}" <<'PY'
+import os
+import sqlite3
+import sys
+from contextlib import closing
+from pathlib import Path
+
+source = Path(sys.argv[1]).resolve()
+destination = Path(sys.argv[2])
+temporary = destination.with_suffix(destination.suffix + ".tmp")
+temporary.unlink(missing_ok=True)
+uri = f"{source.as_uri()}?mode=ro"
+with closing(sqlite3.connect(uri, uri=True, timeout=30)) as source_connection:
+    checks = [row[0] for row in source_connection.execute("PRAGMA quick_check")]
+    if checks != ["ok"]:
+        raise RuntimeError(f"Source SQLite quick_check failed: {checks}")
+    with closing(sqlite3.connect(temporary, timeout=30)) as target:
+        source_connection.backup(target)
+        target.commit()
+        mode = str(target.execute("PRAGMA journal_mode=DELETE").fetchone()[0]).lower()
+        if mode != "delete":
+            raise RuntimeError(f"Snapshot journal mode is not portable: {mode}")
+os.chmod(temporary, 0o600)
+temporary.replace(destination)
+PY
+fi
+
 current_step="validate_snapshot_sidecars"
-rm -f "${snapshot}"/*.sqlite3-wal "${snapshot}"/*.sqlite3-shm
+rm -f \
+  "${snapshot}/fvg_event_store.sqlite3-wal" \
+  "${snapshot}/fvg_event_store.sqlite3-shm" \
+  "${snapshot}/funding_alerts.sqlite3-wal" \
+  "${snapshot}/funding_alerts.sqlite3-shm" \
+  "${snapshot}/${archive_snapshot_relative}-wal" \
+  "${snapshot}/${archive_snapshot_relative}-shm"
 if find "${snapshot}" -type f \( -name '*.sqlite3-wal' -o -name '*.sqlite3-shm' \) \
   -print -quit | grep -q .; then
   echo "SQLite snapshot contains unexpected WAL/SHM sidecars" >&2

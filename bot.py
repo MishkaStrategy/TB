@@ -37,6 +37,7 @@ from handlers.settings import build_settings_handlers
 from handlers.start import start
 from localization import set_current_chat_id
 from localized_bot import LocalizedExtBot
+from operations.fvg_history_retention import configure_fvg_history_retention
 from operations.runtime_lifecycle import RuntimeLifecycleCoordinator
 
 
@@ -118,6 +119,7 @@ async def post_init(application):
         )
     try:
         await configure_bot_interface(application)
+        configure_fvg_history_retention(get_fvg_service().event_store)
         schedule_fvg_alerts(application)
         await start_fvg_stream(application)
         await start_process_watchdog(application)

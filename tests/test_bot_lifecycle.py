@@ -53,10 +53,15 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_post_init_marks_running_after_all_components_start(self):
         coordinator = MagicMock()
         application = SimpleNamespace()
+        event_store = object()
+        service = SimpleNamespace(event_store=event_store)
         calls = []
 
         async def configure(app):
             calls.append(("configure", app))
+
+        def configure_archive(store):
+            calls.append(("archive", store))
 
         def schedule(app):
             calls.append(("schedule", app))
@@ -69,7 +74,9 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch("bot.get_runtime_coordinator", return_value=coordinator),
+            patch("bot.get_fvg_service", return_value=service),
             patch("bot.configure_bot_interface", configure),
+            patch("bot.configure_fvg_history_retention", configure_archive),
             patch("bot.schedule_fvg_alerts", schedule),
             patch("bot.start_fvg_stream", start_stream),
             patch("bot.start_process_watchdog", start_watchdog),
@@ -78,8 +85,9 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             [name for name, _ in calls],
-            ["configure", "schedule", "stream", "watchdog"],
+            ["configure", "archive", "schedule", "stream", "watchdog"],
         )
+        self.assertIs(calls[1][1], event_store)
         coordinator.begin_start.assert_called_once()
         coordinator.mark_running.assert_called_once()
         coordinator.mark_startup_failed.assert_not_called()
@@ -92,6 +100,22 @@ class BotLifecycleTests(unittest.IsolatedAsyncioTestCase):
             patch("bot.configure_bot_interface", AsyncMock(side_effect=failure)),
         ):
             with self.assertRaisesRegex(RuntimeError, "interface failed"):
+                await bot.post_init(SimpleNamespace())
+
+        coordinator.mark_startup_failed.assert_called_once_with(failure)
+        coordinator.mark_running.assert_not_called()
+
+    async def test_archive_configuration_failure_is_startup_failure(self):
+        coordinator = MagicMock()
+        service = SimpleNamespace(event_store=object())
+        failure = ValueError("archive path invalid")
+        with (
+            patch("bot.get_runtime_coordinator", return_value=coordinator),
+            patch("bot.get_fvg_service", return_value=service),
+            patch("bot.configure_bot_interface", AsyncMock()),
+            patch("bot.configure_fvg_history_retention", side_effect=failure),
+        ):
+            with self.assertRaisesRegex(ValueError, "archive path invalid"):
                 await bot.post_init(SimpleNamespace())
 
         coordinator.mark_startup_failed.assert_called_once_with(failure)

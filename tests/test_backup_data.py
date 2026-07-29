@@ -33,6 +33,9 @@ def backup_environment(data_dir: Path, backup_dir: Path) -> dict:
         "HISTORY_RETENTION_DAYS": "180",
         "PYTHON": sys.executable,
         "RELEASE_REF": "test-release",
+        "FVG_HISTORY_ARCHIVE_PATH": str(
+            data_dir / "archive" / "fvg_history.sqlite3"
+        ),
     }
 
 
@@ -43,15 +46,19 @@ class RuntimeBackupTests(unittest.TestCase):
             data_dir = root / "data"
             backup_dir = root / "backups"
             data_dir.mkdir()
+            (data_dir / "archive").mkdir()
 
             event_path = data_dir / "fvg_event_store.sqlite3"
             funding_path = data_dir / "funding_alerts.sqlite3"
+            archive_path = data_dir / "archive" / "fvg_history.sqlite3"
             event_connection = sqlite3.connect(event_path)
             funding_connection = sqlite3.connect(funding_path)
+            archive_connection = sqlite3.connect(archive_path)
 
             for connection, table, value in (
                 (event_connection, "backup_probe", "event-row"),
                 (funding_connection, "backup_probe", "funding-row"),
+                (archive_connection, "backup_probe", "archive-row"),
             ):
                 connection.execute("PRAGMA journal_mode = WAL")
                 connection.execute(f"CREATE TABLE {table}(value TEXT NOT NULL)")
@@ -78,6 +85,7 @@ class RuntimeBackupTests(unittest.TestCase):
             finally:
                 event_connection.close()
                 funding_connection.close()
+                archive_connection.close()
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("created and verified", result.stdout)
 
@@ -98,17 +106,21 @@ class RuntimeBackupTests(unittest.TestCase):
             self.assertFalse((extract_dir / ".manual_backups").exists())
             self.assertFalse((extract_dir / "fvg_event_store.sqlite3-wal").exists())
             self.assertFalse((extract_dir / "funding_alerts.sqlite3-wal").exists())
+            self.assertFalse(
+                (extract_dir / "archive" / "fvg_history.sqlite3-wal").exists()
+            )
 
             manifest = json.loads(
                 (extract_dir / MANIFEST_NAME).read_text(encoding="utf-8")
             )
             self.assertEqual(manifest["schema_version"], 1)
             self.assertEqual(manifest["release_ref"], "test-release")
-            self.assertEqual(manifest["file_count"], 3)
+            self.assertEqual(manifest["file_count"], 4)
             manifest_files = {item["path"]: item for item in manifest["files"]}
             self.assertEqual(
                 set(manifest_files),
                 {
+                    "archive/fvg_history.sqlite3",
                     "fvg_event_store.sqlite3",
                     "funding_alerts.sqlite3",
                     "runtime_settings.json",
@@ -123,6 +135,7 @@ class RuntimeBackupTests(unittest.TestCase):
             for database, expected in (
                 ("fvg_event_store.sqlite3", "event-row"),
                 ("funding_alerts.sqlite3", "funding-row"),
+                ("archive/fvg_history.sqlite3", "archive-row"),
             ):
                 path = extract_dir / database
                 self.assertTrue(path.is_file())
@@ -146,8 +159,11 @@ class RuntimeBackupTests(unittest.TestCase):
             history = dict(rows[0])
             self.assertEqual(history["status"], "success")
             self.assertEqual(history["archive_sha256"], expected_checksum)
-            self.assertEqual(history["manifest_sha256"], sha256_file(extract_dir / MANIFEST_NAME))
-            self.assertEqual(history["file_count"], 3)
+            self.assertEqual(
+                history["manifest_sha256"],
+                sha256_file(extract_dir / MANIFEST_NAME),
+            )
+            self.assertEqual(history["file_count"], 4)
             self.assertIsNone(history["error_message"])
 
     def test_corrupt_source_database_is_not_published_and_records_failure(self):
