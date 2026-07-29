@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="810" viewBox="0 0 960 810">
+  <rect width="960" height="810" rx="32" fill="#0e1621"/>
+  <rect x="30" y="28" width="900" height="754" rx="28" fill="#17212b"/>
+  <rect x="30" y="28" width="900" height="82" rx="28" fill="#202b36"/>
+  <circle cx="84" cy="69" r="26" fill="#2aabee"/>
+  <text x="84" y="77" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">F</text>
+  <text x="126" y="63" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">FVG Alert Bot</text>
+  <text x="126" y="88" font-family="Arial, sans-serif" font-size="14" fill="#7f91a4">бот · интерфейс Telegram</text>
+
+  <rect x="75" y="145" width="590" height="104" rx="18" fill="#182533"/>
+  <text x="100" y="182" font-family="Arial, sans-serif" font-size="20" fill="#ffffff">Главное меню закреплено на клавиатуре ниже.</text>
+  <text x="100" y="218" font-family="Arial, sans-serif" font-size="14" fill="#7f91a4">16:42</text>
+
+  <rect x="75" y="275" width="640" height="286" rx="18" fill="#182533"/>
+  <text x="100" y="315" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#ffffff">Панель управления:</text>
+
+  <g font-family="Arial, sans-serif" font-size="18" fill="#ffffff" text-anchor="middle">
+    <rect x="100" y="342" width="590" height="46" rx="10" fill="#2b5278"/>
+    <text x="395" y="372">Настройки FVG 15м</text>
+    <rect x="100" y="398" width="590" height="46" rx="10" fill="#2b5278"/>
+    <text x="395" y="428">Статистика FVG</text>
+    <rect x="100" y="454" width="590" height="46" rx="10" fill="#2b5278"/>
+    <text x="395" y="484">Фандинг</text>
+    <rect x="100" y="510" width="590" height="36" rx="10" fill="#2b5278"/>
+    <text x="395" y="535">Настройки</text>
+  </g>
+  <text x="685" y="543" font-family="Arial, sans-serif" font-size="14" fill="#7f91a4">16:42</text>
+
+  <rect x="54" y="592" width="852" height="160" rx="18" fill="#202b36"/>
+  <g font-family="Arial, sans-serif" font-size="17" fill="#ffffff" text-anchor="middle">
+    <rect x="70" y="606" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="272" y="631">FVG</text>
+    <rect x="485" y="606" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="687" y="631">Фандинг</text>
+
+    <rect x="70" y="650" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="272" y="675">Уведомления</text>
+    <rect x="485" y="650" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="687" y="675">Статистика</text>
+    <rect x="70" y="694" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="272" y="719">Настройки</text>
+    <rect x="485" y="694" width="405" height="38" rx="9" fill="#2b3947"/>
+    <text x="687" y="719">Донат</text>
+  </g>
+  <text x="480" y="780" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#7f91a4">Точные тексты и кнопки версии 1.2.0</text>
+</svg>
