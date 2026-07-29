@@ -25,33 +25,38 @@ UTC = timezone.utc
 BASE = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
 
 
-def make_event(*, event_type=FvgEventType.CONFIRMED_FVG, direction=FvgDirection.BULLISH):
-    if direction is FvgDirection.BULLISH:
+def make_event(
+    *,
+    event_type=FvgEventType.CONFIRMED_FVG,
+    direction=FvgDirection.BULLISH,
+    base=BASE,
+):
+    if direction == FvgDirection.BULLISH:
         lower, upper, signal = Decimal("100"), Decimal("105"), Decimal("110")
     else:
         lower, upper, signal = Decimal("100"), Decimal("105"), Decimal("95")
     return FvgEvent(
-        event_id=event_id("BTCUSDT", "15m", direction, BASE, event_type),
+        event_id=event_id("BTCUSDT", "15m", direction, base, event_type),
         event_type=event_type,
         symbol="BTCUSDT",
         timeframe="15m",
         direction=direction,
-        candle_a_open_time=BASE - timedelta(minutes=30),
-        candle_b_open_time=BASE - timedelta(minutes=15),
-        candle_c_open_time=BASE,
-        candle_c_close_time=BASE + timedelta(minutes=15),
+        candle_a_open_time=base - timedelta(minutes=30),
+        candle_b_open_time=base - timedelta(minutes=15),
+        candle_c_open_time=base,
+        candle_c_close_time=base + timedelta(minutes=15),
         zone_low=lower,
         zone_high=upper,
         zone_size=upper - lower,
         signal_price=signal,
-        detected_at=BASE + timedelta(minutes=15),
-        is_confirmed=event_type is FvgEventType.CONFIRMED_FVG,
+        detected_at=base + timedelta(minutes=15),
+        is_confirmed=event_type == FvgEventType.CONFIRMED_FVG,
         data_complete=True,
     )
 
 
-def minute(index, *, high, low, close, symbol="BTCUSDT"):
-    opened = BASE + timedelta(minutes=15 + index)
+def minute(index, *, high, low, close, symbol="BTCUSDT", base=BASE):
+    opened = base + timedelta(minutes=15 + index)
     return Candle(
         symbol=symbol,
         timeframe="1m",
@@ -168,6 +173,12 @@ class BullishLifecycleTests(unittest.TestCase):
             [event.event_type for event in wick_fill.events],
         )
 
+        close_on_far_edge = advance_zone(
+            self.zone,
+            minute(1, high=108, low=99, close=100),
+        )
+        self.assertEqual(close_on_far_edge.zone.status, FvgLifecycleStatus.FILLED)
+
         close_through = advance_zone(
             self.zone,
             minute(1, high=108, low=99, close=99),
@@ -179,20 +190,24 @@ class BullishLifecycleTests(unittest.TestCase):
         self.assertIn(FvgLifecycleEventType.INVALIDATED, event_types)
         self.assertNotIn(FvgLifecycleEventType.FILLED, event_types)
 
-    def test_expiration_uses_processed_closed_bars(self):
+    def test_expiration_uses_zone_timeframe_bars_not_one_minute_updates(self):
         config = FvgLifecycleConfig(max_age_bars=2)
-        first = advance_zone(
+        early = advance_zone(
             self.zone,
             minute(1, high=120, low=115, close=117),
             config,
         )
-        second = advance_zone(
-            first.zone,
-            minute(2, high=121, low=116, close=118),
+        self.assertEqual(early.zone.processed_bars, 0)
+        self.assertEqual(early.zone.status, FvgLifecycleStatus.DETECTED)
+
+        expired = advance_zone(
+            early.zone,
+            minute(30, high=121, low=116, close=118),
             config,
         )
-        self.assertEqual(second.zone.status, FvgLifecycleStatus.EXPIRED)
-        self.assertEqual(second.zone.expiration_reason, "max_age_bars")
+        self.assertEqual(expired.zone.processed_bars, 2)
+        self.assertEqual(expired.zone.status, FvgLifecycleStatus.EXPIRED)
+        self.assertEqual(expired.zone.expiration_reason, "max_age_bars")
 
 
 class BearishLifecycleTests(unittest.TestCase):
@@ -225,7 +240,10 @@ class LifecycleStoreTests(unittest.TestCase):
             store = FvgLifecycleStore(path)
             self.assertEqual(store.sync_confirmed_events(), 1)
             self.assertEqual(store.sync_confirmed_events(), 0)
-            self.assertEqual(store.counts(), {"zones": 1, "active_zones": 1, "zone_events": 1})
+            self.assertEqual(
+                store.counts(),
+                {"zones": 1, "active_zones": 1, "zone_events": 1},
+            )
 
             zone = store.active_zones("BTCUSDT")[0]
             candle = minute(1, high=108, low=102, close=104)
@@ -251,11 +269,14 @@ class LifecycleStoreTests(unittest.TestCase):
             self.assertTrue({"events", "deliveries", "outbox"}.issubset(tables))
             self.assertTrue({"fvg_zones", "fvg_zone_events"}.issubset(tables))
 
-    def test_tracker_replays_only_unprocessed_cache_candles(self):
+    def test_tracker_replays_only_recent_unprocessed_cache_candles(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "events.sqlite3"
+            recent_base = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(
+                minutes=30
+            )
             event_store = FvgEventStore(path)
-            event_store.record_event(make_event())
+            event_store.record_event(make_event(base=recent_base))
             tracker = FvgLifecycleTracker(
                 store=FvgLifecycleStore(path),
                 health_store=event_store,
@@ -263,8 +284,8 @@ class LifecycleStoreTests(unittest.TestCase):
             self.assertEqual(tracker.sync_detected_events(), 1)
 
             candles = [
-                minute(1, high=112, low=108, close=110),
-                minute(2, high=108, low=104, close=104),
+                minute(1, high=112, low=108, close=110, base=recent_base),
+                minute(2, high=108, low=104, close=104, base=recent_base),
             ]
             first_events = tracker.observe_many(candles)
             second_events = tracker.observe_many(candles)
