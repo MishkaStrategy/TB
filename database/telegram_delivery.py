@@ -11,6 +11,7 @@ from alerts.telegram_errors import TelegramDeliveryStatus, TelegramErrorDecision
 
 
 UTC = timezone.utc
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FINAL_UNAVAILABLE_STATUSES = frozenset(
     {
         TelegramDeliveryStatus.BLOCKED,
@@ -32,14 +33,28 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _environment_flag(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in _TRUE_VALUES
+
+
 class TelegramDeliveryRegistry:
     """Store chat-level Telegram reachability separately from access settings."""
 
     DEFAULT_PATH = Path("data/fvg_event_store.sqlite3")
 
-    def __init__(self, path: str | os.PathLike | None = None):
+    def __init__(
+        self,
+        path: str | os.PathLike | None = None,
+        *,
+        discard_outbox_by_default: bool | None = None,
+    ):
         self.path = Path(path) if path is not None else self.DEFAULT_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.discard_outbox_by_default = (
+            _environment_flag("USER_BLOCK_STATUS_ENABLED")
+            if discard_outbox_by_default is None
+            else bool(discard_outbox_by_default)
+        )
         self._prepare()
 
     def _connect(self) -> sqlite3.Connection:
@@ -202,8 +217,13 @@ class TelegramDeliveryRegistry:
         *,
         user_id: int | str | None = None,
         now: datetime | None = None,
-        discard_outbox: bool = True,
+        discard_outbox: bool | None = None,
     ) -> dict:
+        should_discard = (
+            self.discard_outbox_by_default
+            if discard_outbox is None
+            else bool(discard_outbox)
+        )
         timestamp = (now or _now()).astimezone(UTC).isoformat()
         previous = self.profile(chat_id)
         previous_status = previous["status"]
@@ -271,7 +291,7 @@ class TelegramDeliveryRegistry:
                 ),
             )
             if (
-                discard_outbox
+                should_discard
                 and decision.delivery_status in FINAL_UNAVAILABLE_STATUSES
             ):
                 discarded = self._discard_outbox(connection, chat_id)
@@ -287,14 +307,19 @@ class TelegramDeliveryRegistry:
         chat_id: int | str,
         *,
         now: datetime | None = None,
-        discard_outbox: bool = True,
+        discard_outbox: bool | None = None,
     ) -> dict:
+        should_discard = (
+            self.discard_outbox_by_default
+            if discard_outbox is None
+            else bool(discard_outbox)
+        )
         timestamp = (now or _now()).astimezone(UTC).isoformat()
         previous = self.profile(chat_id)
         previous_status = previous["status"]
         recovered = previous_status != TelegramDeliveryStatus.ACTIVE.value
         discard_backlog = (
-            discard_outbox
+            should_discard
             and previous_status in {
                 status.value for status in FINAL_UNAVAILABLE_STATUSES
             }
