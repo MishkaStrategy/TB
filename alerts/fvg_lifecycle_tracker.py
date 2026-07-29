@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from alerts.fvg_lifecycle import FvgLifecycleConfig, FvgLifecycleEventType
 from alerts.fvg_lifecycle_store import FvgLifecycleStore
 from alerts.fvg_models import Candle
@@ -10,9 +12,9 @@ from alerts.fvg_models import Candle
 class FvgLifecycleTracker:
     """Track confirmed FVG zones without changing user-visible notifications.
 
-    The tracker is deliberately synchronous.  Scheduler callers run its methods
+    The tracker is deliberately synchronous. Scheduler callers run its methods
     through ``asyncio.to_thread`` so SQLite work never blocks the Telegram event
-    loop.  All persistence is idempotent and survives process restarts.
+    loop. All persistence is idempotent and survives process restarts.
     """
 
     def __init__(
@@ -64,9 +66,24 @@ class FvgLifecycleTracker:
         return event_count
 
     def observe_many(self, candles) -> int:
+        """Replay only candles newer than the oldest active-zone cursor."""
+        grouped = defaultdict(list)
+        for candle in candles:
+            if candle.timeframe == "1m" and candle.is_closed and candle.is_complete:
+                grouped[candle.symbol.upper()].append(candle)
+
         total = 0
-        for candle in sorted(candles, key=lambda item: item.open_time):
-            total += self.observe(candle)
+        for symbol, items in grouped.items():
+            zones = self.store.active_zones(symbol)
+            if not zones:
+                continue
+            cutoff = min(
+                zone.last_processed_candle or zone.formation_close_time
+                for zone in zones
+            )
+            for candle in sorted(items, key=lambda item: item.open_time):
+                if candle.open_time > cutoff:
+                    total += self.observe(candle)
         return total
 
     def active_symbols(self) -> frozenset[str]:
