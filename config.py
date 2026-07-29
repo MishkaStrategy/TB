@@ -131,6 +131,31 @@ OUTBOX_DEFAULT_TTL_SECONDS = parse_positive_int(
     "OUTBOX_DEFAULT_TTL_SECONDS",
 )
 
+# Read-only SQLite growth snapshots. Expensive row counts and integrity checks
+# are independently opt-in and disabled for the scheduled collector by default.
+DATABASE_OBSERVABILITY_ENABLED = parse_bool(
+    os.getenv("DATABASE_OBSERVABILITY_ENABLED"),
+    default=False,
+)
+DATABASE_OBSERVABILITY_INTERVAL_SECONDS = parse_positive_float(
+    os.getenv("DATABASE_OBSERVABILITY_INTERVAL_SECONDS"),
+    3600,
+    "DATABASE_OBSERVABILITY_INTERVAL_SECONDS",
+)
+DATABASE_OBSERVABILITY_RETENTION_DAYS = parse_positive_int(
+    os.getenv("DATABASE_OBSERVABILITY_RETENTION_DAYS"),
+    90,
+    "DATABASE_OBSERVABILITY_RETENTION_DAYS",
+)
+DATABASE_OBSERVABILITY_ROW_COUNTS_ENABLED = parse_bool(
+    os.getenv("DATABASE_OBSERVABILITY_ROW_COUNTS_ENABLED"),
+    default=False,
+)
+DATABASE_OBSERVABILITY_INTEGRITY_CHECK_ENABLED = parse_bool(
+    os.getenv("DATABASE_OBSERVABILITY_INTEGRITY_CHECK_ENABLED"),
+    default=False,
+)
+
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
