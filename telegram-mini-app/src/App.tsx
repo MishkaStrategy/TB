@@ -27,7 +27,7 @@ const defaultScope: FilterScope = {
   bearish: true,
 };
 
-type Tab = "overview" | "general" | "fvg" | "funding" | "admin";
+type Tab = "overview" | "general" | "notifications" | "fvg" | "funding" | "admin";
 
 type ToggleProps = {
   checked: boolean;
@@ -59,7 +59,10 @@ function Card({ title, description, children, accent }: {
   accent?: string;
 }) {
   return (
-    <section className="card" style={accent ? { "--card-accent": accent } as React.CSSProperties : undefined}>
+    <section
+      className="card"
+      style={accent ? { "--card-accent": accent } as React.CSSProperties : undefined}
+    >
       <div className="card-heading">
         <div>
           <h2>{title}</h2>
@@ -203,12 +206,17 @@ function App() {
     }));
   };
 
-  const updateSymbol = (symbol: string, updater: (item: FvgSymbolSettings) => FvgSymbolSettings) => {
+  const updateSymbol = (
+    symbol: string,
+    updater: (item: FvgSymbolSettings) => FvgSymbolSettings,
+  ) => {
     updateSettings((current) => ({
       ...current,
       fvg: {
         ...current.fvg,
-        symbols: current.fvg.symbols.map((item) => item.symbol === symbol ? updater(item) : item),
+        symbols: current.fvg.symbols.map((item) => (
+          item.symbol === symbol ? updater(item) : item
+        )),
       },
     }));
   };
@@ -225,7 +233,9 @@ function App() {
       setToast("Настройки сохранены");
       notify("success");
     } catch (saveError: unknown) {
-      const message = saveError instanceof Error ? saveError.message : "Не удалось сохранить настройки";
+      const message = saveError instanceof Error
+        ? saveError.message
+        : "Не удалось сохранить настройки";
       setError(message);
       notify("error");
     } finally {
@@ -253,12 +263,13 @@ function App() {
     );
   }
 
+  const maxSymbols = envelope.limits?.maxFvgSymbols ?? 20;
   const selected = settings.fvg.symbols.find((item) => item.symbol === selectedSymbol)
     ?? settings.fvg.symbols[0];
 
   const addSymbol = () => {
-    const normalized = newSymbol.trim().toUpperCase();
-    if (!/^[A-Z0-9]{3,20}$/.test(normalized)) {
+    const normalized = newSymbol.trim().toUpperCase().replace("/", "");
+    if (!/^[A-Z0-9]{5,20}$/.test(normalized)) {
       setToast("Введите корректный инструмент, например ETHUSDT");
       notify("warning");
       return;
@@ -268,16 +279,26 @@ function App() {
       setNewSymbol("");
       return;
     }
-    if (settings.fvg.symbols.length >= 20) {
-      setToast("Достигнут лимит: 20 инструментов");
+    if (settings.fvg.symbols.length >= maxSymbols) {
+      setToast(`Достигнут лимит: ${maxSymbols} инструментов`);
       notify("warning");
       return;
     }
     const symbol: FvgSymbolSettings = {
       symbol: normalized,
       enabled: true,
-      priceFilter: { enabled: false, min: null, max: null, scope: { ...defaultScope } },
-      sizeFilter: { enabled: false, unit: "USD", min: null, scope: { ...defaultScope } },
+      priceFilter: {
+        enabled: false,
+        min: null,
+        max: null,
+        scope: { ...defaultScope },
+      },
+      sizeFilter: {
+        enabled: false,
+        unit: "USD",
+        min: null,
+        scope: { ...defaultScope },
+      },
     };
     updateFvg({ symbols: [...settings.fvg.symbols, symbol] });
     setSelectedSymbol(normalized);
@@ -314,7 +335,9 @@ function App() {
     } else {
       selectedExchanges.add(exchange);
     }
-    updateFunding({ exchanges: exchangeOrder.filter((item) => selectedExchanges.has(item)) });
+    updateFunding({
+      exchanges: exchangeOrder.filter((item) => selectedExchanges.has(item)),
+    });
     impact("light");
   };
 
@@ -326,7 +349,10 @@ function App() {
         <div className="hero-content">
           <span className="eyebrow">Центр управления</span>
           <h1>Настройки торговых сигналов</h1>
-          <p>Все персональные фильтры собраны в одном месте. Бот продолжает отвечать за сигналы, статистику и рыночные данные.</p>
+          <p>
+            Все персональные фильтры собраны в одном месте. Бот продолжает
+            отвечать за сигналы, статистику и рыночные данные.
+          </p>
           <div className="hero-stats">
             <div><strong>{settings.fvg.symbols.length}</strong><span>инструментов</span></div>
             <div><strong>{settings.funding.exchanges.length}</strong><span>бирж</span></div>
@@ -337,13 +363,26 @@ function App() {
 
       <div className="module-grid">
         <button type="button" className="module-card fvg" onClick={() => setTab("fvg")}>
-          <div className="module-top"><span>◫</span><StatusPill active={settings.fvg.enabled}>{settings.fvg.enabled ? "Активен" : "Пауза"}</StatusPill></div>
+          <div className="module-top">
+            <span>◫</span>
+            <StatusPill active={settings.fvg.enabled}>
+              {settings.fvg.enabled ? "Активен" : "Пауза"}
+            </StatusPill>
+          </div>
           <h3>Fair Value Gap</h3>
           <p>15-минутные зоны, направления, инструменты и персональные фильтры.</p>
-          <div className="module-footer"><span>{settings.fvg.notifyPreFvg ? "T−3 включён" : "Только подтверждённые"}</span><b>→</b></div>
+          <div className="module-footer">
+            <span>{settings.fvg.notifyPreFvg ? "T−3 включён" : "Только подтверждённые"}</span>
+            <b>→</b>
+          </div>
         </button>
         <button type="button" className="module-card funding" onClick={() => setTab("funding")}>
-          <div className="module-top"><span>≋</span><StatusPill active={settings.funding.enabled}>{settings.funding.enabled ? "Активен" : "Пауза"}</StatusPill></div>
+          <div className="module-top">
+            <span>≋</span>
+            <StatusPill active={settings.funding.enabled}>
+              {settings.funding.enabled ? "Активен" : "Пауза"}
+            </StatusPill>
+          </div>
           <h3>Фандинг</h3>
           <p>Порог, направления, периодичность и шесть фьючерсных бирж.</p>
           <div className="module-footer"><span>Порог {settings.funding.threshold}%</span><b>→</b></div>
@@ -354,13 +393,23 @@ function App() {
         <SettingRow icon="🔔" title="FVG-уведомления" description="Главный переключатель модуля">
           <Toggle checked={settings.fvg.enabled} onChange={(enabled) => updateFvg({ enabled })} />
         </SettingRow>
-        <SettingRow icon="💸" title="Funding alerts" description={`Каждые ${formatInterval(settings.funding.intervalMinutes)}`}>
-          <Toggle checked={settings.funding.enabled} onChange={(enabled) => updateFunding({ enabled })} />
+        <SettingRow
+          icon="💸"
+          title="Funding alerts"
+          description={`Каждые ${formatInterval(settings.funding.intervalMinutes)}`}
+        >
+          <Toggle
+            checked={settings.funding.enabled}
+            onChange={(enabled) => updateFunding({ enabled })}
+          />
         </SettingRow>
         <SettingRow icon="📱" title="Формат сообщений" description="Компактный или со всеми полями">
           <Segmented
             value={settings.general.messageMode}
-            options={[{ value: "compact", label: "Кратко" }, { value: "detailed", label: "Подробно" }]}
+            options={[
+              { value: "compact", label: "Кратко" },
+              { value: "detailed", label: "Подробно" },
+            ]}
             onChange={(messageMode) => updateGeneral({ messageMode })}
           />
         </SettingRow>
@@ -370,26 +419,124 @@ function App() {
 
   const renderGeneral = () => (
     <div className="screen-stack">
-      <div className="page-title"><span>Персонализация</span><h1>Общие настройки</h1><p>Интерфейс и формат уведомлений сохраняются отдельно для вашего Telegram ID.</p></div>
+      <div className="page-title">
+        <span>Персонализация</span>
+        <h1>Общие настройки</h1>
+        <p>Интерфейс и формат уведомлений сохраняются отдельно для вашего Telegram ID.</p>
+      </div>
       <Card title="Язык интерфейса" description="Применяется к меню и сообщениям бота">
         <Segmented
           value={settings.general.language}
-          options={[{ value: "ru", label: "Русский" }, { value: "en", label: "English" }]}
+          options={[
+            { value: "ru", label: "Русский" },
+            { value: "en", label: "English" },
+          ]}
           onChange={(language) => updateGeneral({ language })}
         />
       </Card>
       <Card title="Формат уведомлений" description="Выберите объём информации в каждом сигнале">
         <div className="choice-cards">
-          <button type="button" className={settings.general.messageMode === "compact" ? "choice active" : "choice"} onClick={() => updateGeneral({ messageMode: "compact" })}>
-            <span className="choice-icon">⚡</span><strong>Компактный</strong><small>Инструмент, значение и статус. Быстро читается в потоке сообщений.</small>
+          <button
+            type="button"
+            className={settings.general.messageMode === "compact" ? "choice active" : "choice"}
+            onClick={() => updateGeneral({ messageMode: "compact" })}
+          >
+            <span className="choice-icon">⚡</span>
+            <strong>Компактный</strong>
+            <small>Инструмент, значение и статус. Быстро читается в потоке сообщений.</small>
           </button>
-          <button type="button" className={settings.general.messageMode === "detailed" ? "choice active" : "choice"} onClick={() => updateGeneral({ messageMode: "detailed" })}>
-            <span className="choice-icon">▤</span><strong>Подробный</strong><small>Все доступные поля сигнала, фильтров и рыночного состояния.</small>
+          <button
+            type="button"
+            className={settings.general.messageMode === "detailed" ? "choice active" : "choice"}
+            onClick={() => updateGeneral({ messageMode: "detailed" })}
+          >
+            <span className="choice-icon">▤</span>
+            <strong>Подробный</strong>
+            <small>Все доступные поля сигнала, фильтров и рыночного состояния.</small>
           </button>
         </div>
       </Card>
     </div>
   );
+
+  const renderNotifications = () => {
+    const fvgEventTypes = [
+      settings.fvg.notifyConfirmedFvg ? "подтверждённые" : null,
+      settings.fvg.notifyPreFvg ? "пред-FVG T−3" : null,
+    ].filter(Boolean).join(", ") || "типы не выбраны";
+    const fvgDirections = [
+      settings.fvg.bullishEnabled ? "бычьи" : null,
+      settings.fvg.bearishEnabled ? "медвежьи" : null,
+    ].filter(Boolean).join(", ") || "направления не выбраны";
+    const fundingDirections = [
+      settings.funding.notifyPositive ? "положительный" : null,
+      settings.funding.notifyNegative ? "отрицательный" : null,
+    ].filter(Boolean).join(" и ");
+
+    return (
+      <div className="screen-stack">
+        <div className="page-title">
+          <span>Сводный обзор</span>
+          <h1>Активные уведомления</h1>
+          <p>Проверьте все каналы и быстро перейдите к нужному разделу настройки.</p>
+        </div>
+
+        <Card title="Формат сообщений" description="Общий формат для FVG и фандинга">
+          <SettingRow
+            icon="📱"
+            title={settings.general.messageMode === "compact" ? "Компактные" : "Подробные"}
+            description={settings.general.language === "ru" ? "Интерфейс на русском" : "Interface in English"}
+          >
+            <button type="button" className="danger-button" onClick={() => setTab("general")}>
+              Изменить
+            </button>
+          </SettingRow>
+        </Card>
+
+        <Card title="Fair Value Gap" description="Итоговая конфигурация сигналов" accent="#23d5ab">
+          <SettingRow
+            icon="◫"
+            title={settings.fvg.enabled ? "FVG включён" : "FVG приостановлен"}
+            description={`${fvgEventTypes}; ${fvgDirections}`}
+          >
+            <StatusPill active={settings.fvg.enabled}>
+              {settings.fvg.symbols.filter((item) => item.enabled).length} инструментов
+            </StatusPill>
+          </SettingRow>
+          <SettingRow
+            icon="🎯"
+            title="Фильтры инструментов"
+            description={`${settings.fvg.symbols.filter((item) => item.priceFilter.enabled).length} ценовых · ${settings.fvg.symbols.filter((item) => item.sizeFilter.enabled).length} размерных`}
+          >
+            <button type="button" className="danger-button" onClick={() => setTab("fvg")}>
+              Настроить
+            </button>
+          </SettingRow>
+        </Card>
+
+        <Card title="Фандинг" description="Итоговая конфигурация funding alerts" accent="#ffb545">
+          <SettingRow
+            icon="💸"
+            title={settings.funding.enabled ? "Уведомления включены" : "Уведомления приостановлены"}
+            description={`Каждые ${formatInterval(settings.funding.intervalMinutes)} · порог ${settings.funding.threshold}%`}
+          >
+            <StatusPill active={settings.funding.enabled}>
+              {fundingDirections}
+            </StatusPill>
+          </SettingRow>
+          <SettingRow
+            icon="🏦"
+            title={settings.funding.exchanges.map((item) => exchangeLabels[item]).join(", ")}
+            description={`${settings.funding.exchanges.length} выбранных бирж`}
+          >
+            <button type="button" className="danger-button" onClick={() => setTab("funding")}>
+              Настроить
+            </button>
+          </SettingRow>
+        </Card>
+      </div>
+    );
+  };
 
   const renderScope = (
     scope: FilterScope,
@@ -416,37 +563,70 @@ function App() {
 
   const renderFvg = () => (
     <div className="screen-stack">
-      <div className="page-title"><span>Модуль сигналов</span><h1>Fair Value Gap</h1><p>Управляйте типами сигналов и точными фильтрами отдельно для каждого инструмента.</p></div>
+      <div className="page-title">
+        <span>Модуль сигналов</span>
+        <h1>Fair Value Gap</h1>
+        <p>Управляйте типами сигналов и точными фильтрами отдельно для каждого инструмента.</p>
+      </div>
       <Card title="Основные параметры" description="Главный статус и типы событий" accent="#23d5ab">
         <SettingRow icon="◉" title="Модуль FVG" description="Отключает все FVG-уведомления">
           <Toggle checked={settings.fvg.enabled} onChange={(enabled) => updateFvg({ enabled })} />
         </SettingRow>
         <SettingRow icon="✓" title="Подтверждённые FVG" description="Сигнал после закрытия 15-минутной свечи">
-          <Toggle checked={settings.fvg.notifyConfirmedFvg} onChange={(notifyConfirmedFvg) => updateFvg({ notifyConfirmedFvg })} />
+          <Toggle
+            checked={settings.fvg.notifyConfirmedFvg}
+            onChange={(notifyConfirmedFvg) => updateFvg({ notifyConfirmedFvg })}
+          />
         </SettingRow>
         <SettingRow icon="−3" title="Пред-FVG T−3" description="Предварительный сигнал до подтверждения зоны">
-          <Toggle checked={settings.fvg.notifyPreFvg} onChange={(notifyPreFvg) => updateFvg({ notifyPreFvg })} />
+          <Toggle
+            checked={settings.fvg.notifyPreFvg}
+            onChange={(notifyPreFvg) => updateFvg({ notifyPreFvg })}
+          />
         </SettingRow>
       </Card>
       <Card title="Направления" description="Можно оставить одно или оба направления">
         <div className="direction-grid">
-          <button type="button" className={settings.fvg.bullishEnabled ? "direction-card active" : "direction-card"} onClick={() => updateFvg({ bullishEnabled: !settings.fvg.bullishEnabled })}>
-            <span>🐮</span><div><strong>Бычьи зоны</strong><small>Импульс вверх</small></div><i>{settings.fvg.bullishEnabled ? "Вкл" : "Выкл"}</i>
+          <button
+            type="button"
+            className={settings.fvg.bullishEnabled ? "direction-card active" : "direction-card"}
+            onClick={() => updateFvg({ bullishEnabled: !settings.fvg.bullishEnabled })}
+          >
+            <span>🐮</span>
+            <div><strong>Бычьи зоны</strong><small>Импульс вверх</small></div>
+            <i>{settings.fvg.bullishEnabled ? "Вкл" : "Выкл"}</i>
           </button>
-          <button type="button" className={settings.fvg.bearishEnabled ? "direction-card active" : "direction-card"} onClick={() => updateFvg({ bearishEnabled: !settings.fvg.bearishEnabled })}>
-            <span>🐻</span><div><strong>Медвежьи зоны</strong><small>Импульс вниз</small></div><i>{settings.fvg.bearishEnabled ? "Вкл" : "Выкл"}</i>
+          <button
+            type="button"
+            className={settings.fvg.bearishEnabled ? "direction-card active" : "direction-card"}
+            onClick={() => updateFvg({ bearishEnabled: !settings.fvg.bearishEnabled })}
+          >
+            <span>🐻</span>
+            <div><strong>Медвежьи зоны</strong><small>Импульс вниз</small></div>
+            <i>{settings.fvg.bearishEnabled ? "Вкл" : "Выкл"}</i>
           </button>
         </div>
       </Card>
-      <Card title="Инструменты" description={`Добавлено ${settings.fvg.symbols.length} из 20`}>
+      <Card title="Инструменты" description={`Добавлено ${settings.fvg.symbols.length} из ${maxSymbols}`}>
         <div className="symbol-add">
-          <input value={newSymbol} onChange={(event) => setNewSymbol(event.target.value.toUpperCase())} onKeyDown={(event) => event.key === "Enter" && addSymbol()} placeholder="Например, ETHUSDT" maxLength={20} />
+          <input
+            value={newSymbol}
+            onChange={(event) => setNewSymbol(event.target.value.toUpperCase())}
+            onKeyDown={(event) => event.key === "Enter" && addSymbol()}
+            placeholder="Например, ETHUSDT"
+            maxLength={20}
+          />
           <button type="button" onClick={addSymbol}>Добавить</button>
         </div>
         {settings.fvg.symbols.length ? (
           <div className="symbol-tabs">
             {settings.fvg.symbols.map((item) => (
-              <button type="button" key={item.symbol} className={selected?.symbol === item.symbol ? "active" : ""} onClick={() => setSelectedSymbol(item.symbol)}>
+              <button
+                type="button"
+                key={item.symbol}
+                className={selected?.symbol === item.symbol ? "active" : ""}
+                onClick={() => setSelectedSymbol(item.symbol)}
+              >
                 <span className={item.enabled ? "dot active" : "dot"} />{item.symbol}
               </button>
             ))}
@@ -457,30 +637,151 @@ function App() {
       {selected ? (
         <Card title={selected.symbol} description="Персональные фильтры инструмента" accent="#5d7cff">
           <SettingRow icon="◫" title="Инструмент активен" description="Учитывается при поиске FVG">
-            <Toggle checked={selected.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, enabled }))} />
+            <Toggle
+              checked={selected.enabled}
+              onChange={(enabled) => updateSymbol(
+                selected.symbol,
+                (item) => ({ ...item, enabled }),
+              )}
+            />
           </SettingRow>
 
           <div className="filter-panel">
-            <div className="filter-header"><div><strong>💰 Фильтр цены</strong><small>Диапазон цены сигнала</small></div><Toggle checked={selected.priceFilter.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, enabled } }))} /></div>
+            <div className="filter-header">
+              <div><strong>💰 Фильтр цены</strong><small>Диапазон цены сигнала</small></div>
+              <Toggle
+                checked={selected.priceFilter.enabled}
+                onChange={(enabled) => updateSymbol(
+                  selected.symbol,
+                  (item) => ({
+                    ...item,
+                    priceFilter: { ...item.priceFilter, enabled },
+                  }),
+                )}
+              />
+            </div>
             <div className="field-grid two">
-              <label><span>Минимальная цена</span><input inputMode="decimal" value={selected.priceFilter.min ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, min: event.target.value || null } }))} placeholder="Без минимума" /></label>
-              <label><span>Максимальная цена</span><input inputMode="decimal" value={selected.priceFilter.max ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, max: event.target.value || null } }))} placeholder="Без максимума" /></label>
+              <label>
+                <span>Минимальная цена</span>
+                <input
+                  inputMode="decimal"
+                  value={selected.priceFilter.min ?? ""}
+                  onChange={(event) => updateSymbol(
+                    selected.symbol,
+                    (item) => ({
+                      ...item,
+                      priceFilter: {
+                        ...item.priceFilter,
+                        min: event.target.value || null,
+                      },
+                    }),
+                  )}
+                  placeholder="Без минимума"
+                />
+              </label>
+              <label>
+                <span>Максимальная цена</span>
+                <input
+                  inputMode="decimal"
+                  value={selected.priceFilter.max ?? ""}
+                  onChange={(event) => updateSymbol(
+                    selected.symbol,
+                    (item) => ({
+                      ...item,
+                      priceFilter: {
+                        ...item.priceFilter,
+                        max: event.target.value || null,
+                      },
+                    }),
+                  )}
+                  placeholder="Без максимума"
+                />
+              </label>
             </div>
             <span className="sub-label">Применять к сигналам</span>
-            {renderScope(selected.priceFilter.scope, (scope) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, scope } })))}
+            {renderScope(
+              selected.priceFilter.scope,
+              (scope) => updateSymbol(
+                selected.symbol,
+                (item) => ({
+                  ...item,
+                  priceFilter: { ...item.priceFilter, scope },
+                }),
+              ),
+            )}
           </div>
 
           <div className="filter-panel">
-            <div className="filter-header"><div><strong>📏 Фильтр размера FVG</strong><small>Минимальная ширина зоны</small></div><Toggle checked={selected.sizeFilter.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, enabled } }))} /></div>
+            <div className="filter-header">
+              <div><strong>📏 Фильтр размера FVG</strong><small>Минимальная ширина зоны</small></div>
+              <Toggle
+                checked={selected.sizeFilter.enabled}
+                onChange={(enabled) => updateSymbol(
+                  selected.symbol,
+                  (item) => ({
+                    ...item,
+                    sizeFilter: { ...item.sizeFilter, enabled },
+                  }),
+                )}
+              />
+            </div>
             <div className="field-grid size-fields">
-              <label><span>Минимальный размер</span><input inputMode="decimal" value={selected.sizeFilter.min ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, min: event.target.value || null } }))} placeholder="0" /></label>
-              <label><span>Единица</span><Segmented<FvgSizeUnit> value={selected.sizeFilter.unit} options={[{ value: "USD", label: "$" }, { value: "PERCENT", label: "%" }]} onChange={(unit) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, unit } }))} /></label>
+              <label>
+                <span>Минимальный размер</span>
+                <input
+                  inputMode="decimal"
+                  value={selected.sizeFilter.min ?? ""}
+                  onChange={(event) => updateSymbol(
+                    selected.symbol,
+                    (item) => ({
+                      ...item,
+                      sizeFilter: {
+                        ...item.sizeFilter,
+                        min: event.target.value || null,
+                      },
+                    }),
+                  )}
+                  placeholder="0"
+                />
+              </label>
+              <label>
+                <span>Единица</span>
+                <Segmented<FvgSizeUnit>
+                  value={selected.sizeFilter.unit}
+                  options={[
+                    { value: "USD", label: "$" },
+                    { value: "PERCENT", label: "%" },
+                  ]}
+                  onChange={(unit) => updateSymbol(
+                    selected.symbol,
+                    (item) => ({
+                      ...item,
+                      sizeFilter: { ...item.sizeFilter, unit },
+                    }),
+                  )}
+                />
+              </label>
             </div>
             <span className="sub-label">Применять к сигналам</span>
-            {renderScope(selected.sizeFilter.scope, (scope) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, scope } })))}
+            {renderScope(
+              selected.sizeFilter.scope,
+              (scope) => updateSymbol(
+                selected.symbol,
+                (item) => ({
+                  ...item,
+                  sizeFilter: { ...item.sizeFilter, scope },
+                }),
+              ),
+            )}
           </div>
 
-          <button type="button" className="danger-button" onClick={() => removeSymbol(selected.symbol)}>Удалить {selected.symbol}</button>
+          <button
+            type="button"
+            className="danger-button"
+            onClick={() => removeSymbol(selected.symbol)}
+          >
+            Удалить {selected.symbol}
+          </button>
         </Card>
       ) : null}
     </div>
@@ -488,29 +789,98 @@ function App() {
 
   const renderFunding = () => (
     <div className="screen-stack">
-      <div className="page-title"><span>Мультибиржевой модуль</span><h1>Уведомления о фандинге</h1><p>Настройте момент отправки, порог ставки и рынки, которые нужно отслеживать.</p></div>
+      <div className="page-title">
+        <span>Мультибиржевой модуль</span>
+        <h1>Уведомления о фандинге</h1>
+        <p>Настройте момент отправки, порог ставки и рынки, которые нужно отслеживать.</p>
+      </div>
       <Card title="Рассылка" description="Общий снимок бирж обновляется каждые 15 минут" accent="#ffb545">
-        <SettingRow icon="🔔" title="Funding alerts" description={settings.funding.enabled ? `Следующая проверка: ${settings.funding.nextCheckAt ? new Date(settings.funding.nextCheckAt).toLocaleString("ru-RU") : "ближайшая четверть часа"}` : "Уведомления приостановлены"}>
-          <Toggle checked={settings.funding.enabled} onChange={(enabled) => updateFunding({ enabled })} />
+        <SettingRow
+          icon="🔔"
+          title="Funding alerts"
+          description={settings.funding.enabled
+            ? `Следующая проверка: ${settings.funding.nextCheckAt
+              ? new Date(settings.funding.nextCheckAt).toLocaleString("ru-RU")
+              : "ближайшая четверть часа"}`
+            : "Уведомления приостановлены"}
+        >
+          <Toggle
+            checked={settings.funding.enabled}
+            onChange={(enabled) => updateFunding({ enabled })}
+          />
         </SettingRow>
         <div className="range-block">
-          <div className="range-copy"><strong>Частота уведомлений</strong><span>{formatInterval(settings.funding.intervalMinutes)}</span></div>
-          <input type="range" min={15} max={2880} step={15} value={settings.funding.intervalMinutes} onChange={(event) => updateFunding({ intervalMinutes: Number(event.target.value) })} />
+          <div className="range-copy">
+            <strong>Частота уведомлений</strong>
+            <span>{formatInterval(settings.funding.intervalMinutes)}</span>
+          </div>
+          <input
+            type="range"
+            min={15}
+            max={2880}
+            step={15}
+            value={settings.funding.intervalMinutes}
+            onChange={(event) => updateFunding({ intervalMinutes: Number(event.target.value) })}
+          />
           <div className="range-labels"><span>15 мин</span><span>24 ч</span><span>48 ч</span></div>
         </div>
-        <label className="single-field"><span>Минимальный абсолютный процент</span><div className="input-suffix"><input inputMode="decimal" value={settings.funding.threshold} onChange={(event) => updateFunding({ threshold: event.target.value.replace(",", ".") })} /><b>%</b></div><small>Например, 0.3 — уведомлять при ставке ≥ 0.3% или ≤ −0.3%</small></label>
+        <label className="single-field">
+          <span>Минимальный абсолютный процент</span>
+          <div className="input-suffix">
+            <input
+              inputMode="decimal"
+              value={settings.funding.threshold}
+              onChange={(event) => updateFunding({
+                threshold: event.target.value.replace(",", "."),
+              })}
+            />
+            <b>%</b>
+          </div>
+          <small>Например, 0.3 — уведомлять при ставке ≥ 0.3% или ≤ −0.3%</small>
+        </label>
       </Card>
       <Card title="Направление ставки" description="Должно быть выбрано хотя бы одно направление">
         <div className="direction-grid">
-          <button type="button" className={settings.funding.notifyPositive ? "direction-card positive active" : "direction-card positive"} onClick={() => toggleFundingDirection("notifyPositive")}><span>↗</span><div><strong>Положительный</strong><small>Ставка выше нуля</small></div><i>{settings.funding.notifyPositive ? "Вкл" : "Выкл"}</i></button>
-          <button type="button" className={settings.funding.notifyNegative ? "direction-card negative active" : "direction-card negative"} onClick={() => toggleFundingDirection("notifyNegative")}><span>↘</span><div><strong>Отрицательный</strong><small>Ставка ниже нуля</small></div><i>{settings.funding.notifyNegative ? "Вкл" : "Выкл"}</i></button>
+          <button
+            type="button"
+            className={settings.funding.notifyPositive
+              ? "direction-card positive active"
+              : "direction-card positive"}
+            onClick={() => toggleFundingDirection("notifyPositive")}
+          >
+            <span>↗</span>
+            <div><strong>Положительный</strong><small>Ставка выше нуля</small></div>
+            <i>{settings.funding.notifyPositive ? "Вкл" : "Выкл"}</i>
+          </button>
+          <button
+            type="button"
+            className={settings.funding.notifyNegative
+              ? "direction-card negative active"
+              : "direction-card negative"}
+            onClick={() => toggleFundingDirection("notifyNegative")}
+          >
+            <span>↘</span>
+            <div><strong>Отрицательный</strong><small>Ставка ниже нуля</small></div>
+            <i>{settings.funding.notifyNegative ? "Вкл" : "Выкл"}</i>
+          </button>
         </div>
       </Card>
       <Card title="Биржи" description="Можно выбрать одну или несколько площадок">
         <div className="exchange-grid">
           {exchangeOrder.map((exchange) => {
             const active = settings.funding.exchanges.includes(exchange);
-            return <button type="button" key={exchange} className={active ? "exchange-card active" : "exchange-card"} onClick={() => toggleExchange(exchange)}><span>{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><i>{active ? "✓" : ""}</i></button>;
+            return (
+              <button
+                type="button"
+                key={exchange}
+                className={active ? "exchange-card active" : "exchange-card"}
+                onClick={() => toggleExchange(exchange)}
+              >
+                <span>{exchangeLabels[exchange].slice(0, 1)}</span>
+                <strong>{exchangeLabels[exchange]}</strong>
+                <i>{active ? "✓" : ""}</i>
+              </button>
+            );
           })}
         </div>
       </Card>
@@ -519,18 +889,53 @@ function App() {
 
   const renderAdmin = () => (
     <div className="screen-stack">
-      <div className="page-title"><span>Защищённый раздел</span><h1>Администрирование</h1><p>Раздел отображается только Telegram ID из ADMIN_TELEGRAM_IDS. Все опасные действия должны подтверждаться сервером повторно.</p></div>
+      <div className="page-title">
+        <span>Защищённый раздел</span>
+        <h1>Администрирование</h1>
+        <p>
+          Раздел отображается только Telegram ID из ADMIN_TELEGRAM_IDS.
+          Все опасные действия должны подтверждаться сервером повторно.
+        </p>
+      </div>
       {!settings.admin.available ? (
-        <Card title="Нет доступа"><div className="empty-state">Эта панель доступна только администраторам проекта.</div></Card>
+        <Card title="Нет доступа">
+          <div className="empty-state">Эта панель доступна только администраторам проекта.</div>
+        </Card>
       ) : (
         <>
           <Card title="Режим доступа" description="Определяет, кто может пользоваться ботом" accent="#b881ff">
-            <SettingRow icon={settings.admin.publicAccessEnabled ? "🌐" : "🔐"} title={settings.admin.publicAccessEnabled ? "Публичный доступ" : "Приватный доступ"} description={settings.admin.publicAccessEnabled ? "Команды доступны всем Telegram-пользователям" : "Только allowlist и одобренные заявки"}>
-              <Toggle checked={settings.admin.publicAccessEnabled} onChange={(publicAccessEnabled) => updateAdmin({ publicAccessEnabled })} />
+            <SettingRow
+              icon={settings.admin.publicAccessEnabled ? "🌐" : "🔐"}
+              title={settings.admin.publicAccessEnabled ? "Публичный доступ" : "Приватный доступ"}
+              description={settings.admin.publicAccessEnabled
+                ? "Команды доступны всем Telegram-пользователям"
+                : "Только allowlist и одобренные заявки"}
+            >
+              <Toggle
+                checked={settings.admin.publicAccessEnabled}
+                onChange={(publicAccessEnabled) => updateAdmin({ publicAccessEnabled })}
+              />
             </SettingRow>
           </Card>
           <Card title="Allowlist" description={`${settings.admin.allowedUsers.length} разрешённых пользователей`}>
-            {settings.admin.allowedUsers.length ? <div className="user-list">{settings.admin.allowedUsers.map((user) => <div className="user-row" key={user.telegramId}><span>{user.name.slice(0, 1).toUpperCase()}</span><div><strong>{user.name}</strong><small>{user.telegramId}{user.username ? ` · @${user.username}` : ""}</small></div><i>{user.source}</i></div>)}</div> : <div className="empty-state">Runtime allowlist пока пуст. Пользователи из ENV будут добавлены backend-адаптером.</div>}
+            {settings.admin.allowedUsers.length ? (
+              <div className="user-list">
+                {settings.admin.allowedUsers.map((user) => (
+                  <div className="user-row" key={user.telegramId}>
+                    <span>{user.name.slice(0, 1).toUpperCase()}</span>
+                    <div>
+                      <strong>{user.name}</strong>
+                      <small>{user.telegramId}{user.username ? ` · @${user.username}` : ""}</small>
+                    </div>
+                    <i>{user.source}</i>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                Runtime allowlist пока пуст. Пользователи из ENV будут добавлены backend-адаптером.
+              </div>
+            )}
           </Card>
           <Card title="Состояние системы" description="Операционные показатели только для чтения">
             <div className="diagnostic-grid">
@@ -540,8 +945,14 @@ function App() {
               <div><span>Базы данных</span><strong>{settings.admin.diagnostics.databases}</strong></div>
               <div><span>Релиз</span><strong>{settings.admin.diagnostics.release}</strong></div>
             </div>
-            <div className="admin-actions"><button type="button" disabled>Создать backup</button><button type="button" className="danger" disabled>Перезапустить бота</button></div>
-            <p className="integration-note">Кнопки операций намеренно заблокированы до реализации серверных endpoint с повторной проверкой прав и подтверждением действия.</p>
+            <div className="admin-actions">
+              <button type="button" disabled>Создать backup</button>
+              <button type="button" className="danger" disabled>Перезапустить бота</button>
+            </div>
+            <p className="integration-note">
+              Кнопки операций намеренно заблокированы до реализации серверных endpoint
+              с повторной проверкой прав и подтверждением действия.
+            </p>
           </Card>
         </>
       )}
@@ -550,36 +961,72 @@ function App() {
 
   const content = tab === "overview" ? renderOverview()
     : tab === "general" ? renderGeneral()
-      : tab === "fvg" ? renderFvg()
-        : tab === "funding" ? renderFunding()
-          : renderAdmin();
+      : tab === "notifications" ? renderNotifications()
+        : tab === "fvg" ? renderFvg()
+          : tab === "funding" ? renderFunding()
+            : renderAdmin();
+
+  const navigation: Array<[Tab, string, string]> = [
+    ["overview", "⌂", "Главная"],
+    ["general", "⚙", "Общие"],
+    ["notifications", "🔔", "Сводка"],
+    ["fvg", "◫", "FVG"],
+    ["funding", "≋", "Фандинг"],
+  ];
+  if (settings.admin.available) navigation.push(["admin", "◇", "Админ"]);
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand"><span className="brand-mark">T</span><div><strong>TB Settings</strong><small>{envelope.source === "mock" ? "Демо-режим" : "Подключено к боту"}</small></div></div>
-        <div className="profile"><span>{envelope.user.firstName.slice(0, 1).toUpperCase()}</span><div><strong>{envelope.user.firstName}</strong>{envelope.user.username ? <small>@{envelope.user.username}</small> : null}</div></div>
+        <div className="brand">
+          <span className="brand-mark">T</span>
+          <div>
+            <strong>TB Settings</strong>
+            <small>{envelope.source === "mock" ? "Демо-режим" : "Подключено к боту"}</small>
+          </div>
+        </div>
+        <div className="profile">
+          <span>{envelope.user.firstName.slice(0, 1).toUpperCase()}</span>
+          <div>
+            <strong>{envelope.user.firstName}</strong>
+            {envelope.user.username ? <small>@{envelope.user.username}</small> : null}
+          </div>
+        </div>
       </header>
 
       <main className="content">{content}</main>
 
-      {error ? <div className="error-banner">{error}<button type="button" onClick={() => setError("")}>×</button></div> : null}
+      {error ? (
+        <div className="error-banner">
+          {error}<button type="button" onClick={() => setError("")}>×</button>
+        </div>
+      ) : null}
       {toast ? <div className="toast">{toast}</div> : null}
 
       <div className={`save-bar ${dirty ? "visible" : ""}`}>
-        <div><span className="save-dot" /><div><strong>Есть несохранённые изменения</strong><small>Они применятся ко всем следующим уведомлениям</small></div></div>
-        <button type="button" onClick={save} disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button>
+        <div>
+          <span className="save-dot" />
+          <div>
+            <strong>Есть несохранённые изменения</strong>
+            <small>Они применятся ко всем следующим уведомлениям</small>
+          </div>
+        </div>
+        <button type="button" onClick={save} disabled={saving}>
+          {saving ? "Сохраняем…" : "Сохранить"}
+        </button>
       </div>
 
       <nav className="bottom-nav">
-        {([
-          ["overview", "⌂", "Главная"],
-          ["general", "⚙", "Общие"],
-          ["fvg", "◫", "FVG"],
-          ["funding", "≋", "Фандинг"],
-          ["admin", "◇", "Админ"],
-        ] as Array<[Tab, string, string]>).map(([value, icon, label]) => (
-          <button type="button" key={value} className={tab === value ? "active" : ""} onClick={() => { setTab(value); impact("light"); }}>
+        {navigation.map(([value, icon, label]) => (
+          <button
+            type="button"
+            key={value}
+            className={tab === value ? "active" : ""}
+            onClick={() => {
+              setTab(value);
+              impact("light");
+            }}
+          >
             <span>{icon}</span><small>{label}</small>
           </button>
         ))}
