@@ -88,9 +88,14 @@ export interface TelegramUserSummary {
   username?: string;
 }
 
+export interface SettingsLimits {
+  maxFvgSymbols: number;
+}
+
 export interface SettingsEnvelope {
   settings: AppSettings;
   user: TelegramUserSummary;
+  limits?: SettingsLimits;
   source: "api" | "mock";
   updatedAt: string;
 }
