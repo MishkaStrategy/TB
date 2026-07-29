@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from decimal import Decimal, InvalidOperation
 from html import escape
 
@@ -12,11 +13,29 @@ from alerts.funding_alerts import parse_threshold, utc_now
 from alerts.funding_exchange_store import FundingExchangeStore
 from alerts.funding_snapshot_store import FundingSnapshotStore
 from alerts.telegram_errors import TelegramErrorKind, classify_telegram_error
-from config import DELIVERY_STATUS_TRACKING_ENABLED, USER_BLOCK_STATUS_ENABLED
 from database.telegram_delivery import TelegramDeliveryRegistry
 from exchanges.funding import EXCHANGE_LABELS, exchange_label, normalize_exchange
 
 LOGGER = logging.getLogger(__name__)
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def _delivery_tracking_enabled() -> bool:
+    """Read additive delivery flags without importing optional dotenv.
+
+    The funding storage stdlib verification intentionally imports this module
+    before third-party dependencies are installed. Production ``bot.py`` loads
+    ``config`` before creating the service, so values from a local .env are
+    already present in ``os.environ`` when this helper is evaluated.
+    """
+
+    return any(
+        str(os.getenv(name, "")).strip().lower() in _TRUE_VALUES
+        for name in (
+            "DELIVERY_STATUS_TRACKING_ENABLED",
+            "USER_BLOCK_STATUS_ENABLED",
+        )
+    )
 
 
 def _rate(item: dict) -> Decimal | None:
@@ -107,9 +126,7 @@ class MultiFundingAlertService:
         self.snapshot_store = snapshot_store or FundingSnapshotStore(path)
         self.loader = loader
         self.delivery_registry = delivery_registry
-        if self.delivery_registry is None and (
-            DELIVERY_STATUS_TRACKING_ENABLED or USER_BLOCK_STATUS_ENABLED
-        ):
+        if self.delivery_registry is None and _delivery_tracking_enabled():
             self.delivery_registry = TelegramDeliveryRegistry()
 
     async def _load(self):
