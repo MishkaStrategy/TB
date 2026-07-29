@@ -111,6 +111,9 @@ with closing(sqlite3.connect(uri, uri=True, timeout=30)) as source_connection:
     with closing(sqlite3.connect(temporary, timeout=30)) as target:
         source_connection.backup(target)
         target.commit()
+        mode = str(target.execute("PRAGMA journal_mode=DELETE").fetchone()[0]).lower()
+        if mode != "delete":
+            raise RuntimeError(f"Snapshot journal mode is not portable: {mode}")
 os.chmod(temporary, 0o600)
 temporary.replace(destination)
 PY
@@ -139,9 +142,20 @@ with closing(sqlite3.connect(uri, uri=True, timeout=30)) as source_connection:
     with closing(sqlite3.connect(temporary, timeout=30)) as target:
         source_connection.backup(target)
         target.commit()
+        mode = str(target.execute("PRAGMA journal_mode=DELETE").fetchone()[0]).lower()
+        if mode != "delete":
+            raise RuntimeError(f"Snapshot journal mode is not portable: {mode}")
 os.chmod(temporary, 0o600)
 temporary.replace(destination)
 PY
+fi
+
+current_step="validate_snapshot_sidecars"
+rm -f "${snapshot}"/*.sqlite3-wal "${snapshot}"/*.sqlite3-shm
+if find "${snapshot}" -type f \( -name '*.sqlite3-wal' -o -name '*.sqlite3-shm' \) \
+  -print -quit | grep -q .; then
+  echo "SQLite snapshot contains unexpected WAL/SHM sidecars" >&2
+  exit 1
 fi
 
 if [[ -z "${RELEASE_REF}" ]] && command -v git >/dev/null 2>&1; then
