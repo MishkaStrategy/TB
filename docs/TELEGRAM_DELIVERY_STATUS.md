@@ -30,7 +30,9 @@
 - недостаточные права;
 - окончательно недоступное для редактирования сообщение.
 
-Для permanent ошибки retry не создаётся. Для `blocked`, `deactivated` и `suspended` существующий FVG backlog этого чата удаляется атомарно из старой таблицы `outbox`.
+Retry для текущей permanent-ошибки не создаётся. Полное подавление будущих уведомлений и атомарная очистка существующего FVG backlog выполняются только при `USER_BLOCK_STATUS_ENABLED=true`.
+
+При включённом только `DELIVERY_STATUS_TRACKING_ENABLED` профиль и причина ошибки сохраняются, но текущая логика выбора будущих получателей и funding schedule не изменяется. Это позволяет сначала наблюдать реальные статусы без влияния на доставку.
 
 ## Temporary errors
 
@@ -56,20 +58,20 @@
 2. сбрасывается `consecutive_failures`;
 3. очищается последняя ошибка;
 4. записываются `last_interaction_at` и `recovered_at`;
-5. старый backlog после permanent-состояния не восстанавливается.
+5. при включённом suppression старый backlog после permanent-состояния не восстанавливается.
 
 Новые уведомления после восстановления доставляются штатно.
 
 ## Funding
 
-Funding пока не переведён в общий outbox. При permanent-состоянии:
+Funding пока не переведён в общий outbox. При `USER_BLOCK_STATUS_ENABLED=true` и permanent-состоянии:
 
 - сообщение не отправляется;
 - текущий crossing-state сохраняется;
 - расписание продвигается дальше;
 - после восстановления crossing, возникший во время блокировки, не отправляется задним числом.
 
-Временная funding-ошибка не продвигает расписание и будет повторно обработана текущим scheduler.
+При tracking-only permanent funding error записывается в профиль, но schedule остаётся due, как в прежнем поведении. Временная funding-ошибка также не продвигает расписание и будет повторно обработана текущим scheduler.
 
 ## Feature flags
 
@@ -77,6 +79,11 @@ Funding пока не переведён в общий outbox. При permanent-
 DELIVERY_STATUS_TRACKING_ENABLED=false
 USER_BLOCK_STATUS_ENABLED=false
 ```
+
+Флаги независимы:
+
+- `DELIVERY_STATUS_TRACKING_ENABLED` включает только запись профиля, ошибок, успехов и восстановления;
+- `USER_BLOCK_STATUS_ENABLED` дополнительно включает suppression, очистку backlog и consumption funding crossing без последующей массовой отправки.
 
 Рекомендуемый rollout:
 
