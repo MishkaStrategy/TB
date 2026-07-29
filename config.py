@@ -193,13 +193,21 @@ BACKGROUND_TASK_STALE_MULTIPLIER = parse_positive_float(
 )
 
 # Application lifecycle tracking and bounded delivery drain during PTB post_stop.
+# A graceful stale-process restart implies the same bounded shutdown path.
 RUNTIME_LIFECYCLE_ENABLED = parse_bool(
     os.getenv("RUNTIME_LIFECYCLE_ENABLED"),
     default=False,
 )
-GRACEFUL_SHUTDOWN_ENABLED = parse_bool(
-    os.getenv("GRACEFUL_SHUTDOWN_ENABLED"),
+FVG_PROCESS_GRACEFUL_RESTART_ENABLED = parse_bool(
+    os.getenv("FVG_PROCESS_GRACEFUL_RESTART_ENABLED"),
     default=False,
+)
+GRACEFUL_SHUTDOWN_ENABLED = (
+    parse_bool(
+        os.getenv("GRACEFUL_SHUTDOWN_ENABLED"),
+        default=False,
+    )
+    or FVG_PROCESS_GRACEFUL_RESTART_ENABLED
 )
 GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS = parse_positive_float(
     os.getenv("GRACEFUL_SHUTDOWN_TIMEOUT_SECONDS"),

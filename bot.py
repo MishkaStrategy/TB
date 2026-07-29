@@ -38,6 +38,7 @@ from handlers.start import start
 from localization import set_current_chat_id
 from localized_bot import LocalizedExtBot
 from operations.fvg_history_retention import configure_fvg_history_retention
+from operations.process_restart import graceful_restart_requested
 from operations.runtime_lifecycle import RuntimeLifecycleCoordinator
 
 
@@ -248,6 +249,8 @@ def main():
 
         print("Trading Assistant запущен 🚀")
         app.run_polling()
+        if graceful_restart_requested():
+            raise SystemExit(1)
     except Exception as error:
         if coordinator is not None:
             coordinator.mark_process_failed(error)

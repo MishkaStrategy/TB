@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Callable
 
 from config import FVG_PROCESS_RESTART_STALE_SECONDS
+from operations.process_restart import default_restart_process
 
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def candle_silence_seconds(
 
 
 class FvgProcessWatchdog:
-    """Exit with failure so systemd restarts a process that stopped receiving candles."""
+    """Request one systemd restart when active-symbol candles remain stale."""
 
     def __init__(
         self,
@@ -58,6 +58,7 @@ class FvgProcessWatchdog:
         stale_seconds: float = FVG_PROCESS_RESTART_STALE_SECONDS,
         check_interval_seconds: float = DEFAULT_CHECK_INTERVAL_SECONDS,
         restart_process: Callable[[int], object] | None = None,
+        restart_mode: str | None = None,
         clock: Callable[[], datetime] | None = None,
     ):
         if settings is None or event_store is None:
@@ -73,13 +74,23 @@ class FvgProcessWatchdog:
             raise ValueError("stale_seconds must be greater than zero")
         if self.check_interval_seconds <= 0:
             raise ValueError("check_interval_seconds must be greater than zero")
-        self.restart_process = restart_process or os._exit
+        if restart_process is None:
+            restart_process, selected_mode = default_restart_process()
+        else:
+            selected_mode = "custom"
+        self.restart_process = restart_process
+        self.restart_mode = str(restart_mode or selected_mode)
         self.clock = clock or (lambda: datetime.now(UTC))
         self._stopping = False
+        self._restart_requested = False
         self._watch_since = _as_utc(self.clock())
 
+    @property
+    def restart_requested(self) -> bool:
+        return self._restart_requested
+
     def evaluate_once(self) -> float | None:
-        """Evaluate current health and request one process restart when stale."""
+        """Evaluate current health and request at most one process restart."""
         now = _as_utc(self.clock())
         active_symbols = self.settings.active_symbols()
         if not active_symbols:
@@ -92,7 +103,7 @@ class FvgProcessWatchdog:
             watch_since=self._watch_since,
             now=now,
         )
-        if age < self.stale_seconds:
+        if age < self.stale_seconds or self._restart_requested:
             return age
 
         message = (
@@ -100,9 +111,28 @@ class FvgProcessWatchdog:
             f"{int(age)} seconds"
         )
         logger.critical(message)
-        self.event_store.update_health(last_error=message)
+        self.event_store.update_health(
+            last_error=message,
+            process_restart_requested_at=now.isoformat(),
+            process_restart_mode=self.restart_mode,
+            process_restart_silence_seconds=age,
+            process_restart_request_error=None,
+        )
         self.event_store.increment_health("stale_process_restarts")
-        self.restart_process(1)
+        self.event_store.increment_health("stale_process_restart_requests")
+        self._restart_requested = True
+        try:
+            self.restart_process(1)
+        except Exception as error:
+            self._restart_requested = False
+            self.event_store.increment_health("process_restart_request_failures")
+            self.event_store.update_health(
+                process_restart_request_error=(
+                    f"{type(error).__name__}: {error}"
+                )[:2000]
+            )
+            raise
+        self._stopping = True
         return age
 
     async def run(self) -> None:
@@ -124,6 +154,8 @@ class FvgProcessWatchdog:
                     )
                 except Exception:
                     logger.exception("Failed to persist process watchdog failure")
+            if self._stopping:
+                break
             await asyncio.sleep(self.check_interval_seconds)
 
     def stop(self) -> None:
