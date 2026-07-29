@@ -5,7 +5,12 @@ from telegram.ext import Application, CallbackQueryHandler, CommandHandler, Type
 
 from alerts.process_watchdog import start_process_watchdog, stop_process_watchdog
 from alerts.scheduler_multi import schedule_fvg_alerts, start_fvg_stream, stop_fvg_stream
-from config import TELEGRAM_TOKEN
+from config import (
+    DELIVERY_STATUS_TRACKING_ENABLED,
+    TELEGRAM_TOKEN,
+    USER_BLOCK_STATUS_ENABLED,
+)
+from database.telegram_delivery import TelegramDeliveryRegistry
 from database.user_activity import UserActivityRegistry
 from database.user_preferences import UserPreferences
 from handlers.admin_settings import admin, admin_callback
@@ -23,6 +28,11 @@ from localized_bot import LocalizedExtBot
 
 
 USER_PREFERENCES = UserPreferences()
+DELIVERY_REGISTRY = (
+    TelegramDeliveryRegistry()
+    if DELIVERY_STATUS_TRACKING_ENABLED or USER_BLOCK_STATUS_ENABLED
+    else None
+)
 
 BOT_COMMANDS = (
     BotCommand("menu", "Открыть главное меню"),
@@ -90,8 +100,15 @@ async def prepare_user_context(update, context):
 
 async def track_user_activity(update, context):
     user = update.effective_user
+    chat = update.effective_chat
     if user is not None:
         await asyncio.to_thread(UserActivityRegistry().touch, user)
+    if DELIVERY_REGISTRY is not None and user is not None and chat is not None:
+        await asyncio.to_thread(
+            DELIVERY_REGISTRY.record_interaction,
+            user.id,
+            chat.id,
+        )
 
 
 def main():
