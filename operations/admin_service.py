@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 
 
@@ -21,7 +22,7 @@ def process_memory_bytes() -> int:
             import resource
 
             usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-            return int(usage) * (1024 if os.name != "darwin" else 1)
+            return int(usage) if sys.platform == "darwin" else int(usage) * 1024
         except (ImportError, OSError, ValueError):
             return 0
 
