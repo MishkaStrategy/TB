@@ -11,6 +11,9 @@ from alerts.funding_quarter_hour import FundingAlertStore
 from alerts.funding_alerts import parse_threshold, utc_now
 from alerts.funding_exchange_store import FundingExchangeStore
 from alerts.funding_snapshot_store import FundingSnapshotStore
+from alerts.telegram_errors import TelegramErrorKind, classify_telegram_error
+from config import DELIVERY_STATUS_TRACKING_ENABLED, USER_BLOCK_STATUS_ENABLED
+from database.telegram_delivery import TelegramDeliveryRegistry
 from exchanges.funding import EXCHANGE_LABELS, exchange_label, normalize_exchange
 
 LOGGER = logging.getLogger(__name__)
@@ -96,18 +99,43 @@ class MultiFundingAlertService:
         exchange_store=None,
         snapshot_store=None,
         loader=None,
+        delivery_registry=None,
     ):
         self.settings_store = settings_store or FundingAlertStore()
         path = getattr(self.settings_store, "path", None)
         self.exchange_store = exchange_store or FundingExchangeStore(path)
         self.snapshot_store = snapshot_store or FundingSnapshotStore(path)
         self.loader = loader
+        self.delivery_registry = delivery_registry
+        if self.delivery_registry is None and (
+            DELIVERY_STATUS_TRACKING_ENABLED or USER_BLOCK_STATUS_ENABLED
+        ):
+            self.delivery_registry = TelegramDeliveryRegistry()
 
     async def _load(self):
         if self.loader is not None:
             return await self.loader()
         from handlers.multi_funding import load_funding_snapshot
         return await load_funding_snapshot()
+
+    async def _consume_without_delivery(
+        self,
+        chat_id,
+        current,
+        current_time,
+    ) -> None:
+        """Advance state without creating a backlog for a permanently unavailable chat."""
+        await asyncio.to_thread(
+            self.exchange_store.replace_crossings,
+            chat_id,
+            current,
+            now=current_time,
+        )
+        await asyncio.to_thread(
+            self.settings_store.advance,
+            chat_id,
+            current_time,
+        )
 
     async def run(self, bot, *, now=None):
         current_time = now or utc_now()
@@ -172,12 +200,79 @@ class MultiFundingAlertService:
                     for key, value in current.items()
                     if key not in previous and key[0] in working
                 }
-                for text in format_alert(settings, selected, fresh) if fresh else ():
-                    await bot.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        parse_mode="HTML",
-                    )
+
+                if self.delivery_registry is not None:
+                    if not await asyncio.to_thread(
+                        self.delivery_registry.can_deliver,
+                        chat_id,
+                    ):
+                        LOGGER.info(
+                            "Funding delivery suppressed for unavailable chat_id=%s",
+                            chat_id,
+                        )
+                        await self._consume_without_delivery(
+                            chat_id,
+                            current,
+                            current_time,
+                        )
+                        continue
+
+                    delivery_failed = False
+                    for text in format_alert(settings, selected, fresh) if fresh else ():
+                        try:
+                            await bot.send_message(
+                                chat_id=chat_id,
+                                text=text,
+                                parse_mode="HTML",
+                            )
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as error:
+                            decision = classify_telegram_error(error)
+                            log = getattr(LOGGER, decision.log_level, LOGGER.warning)
+                            log(
+                                "Funding delivery failed chat_id=%s code=%s: %s",
+                                chat_id,
+                                decision.code,
+                                error,
+                            )
+                            if decision.kind is TelegramErrorKind.IGNORABLE:
+                                await asyncio.to_thread(
+                                    self.delivery_registry.record_success,
+                                    chat_id,
+                                )
+                                continue
+                            await asyncio.to_thread(
+                                self.delivery_registry.record_failure,
+                                chat_id,
+                                decision,
+                                error,
+                            )
+                            if decision.retryable:
+                                delivery_failed = True
+                                break
+                            await self._consume_without_delivery(
+                                chat_id,
+                                current,
+                                current_time,
+                            )
+                            delivery_failed = True
+                            break
+                        else:
+                            await asyncio.to_thread(
+                                self.delivery_registry.record_success,
+                                chat_id,
+                            )
+                    if delivery_failed:
+                        continue
+                else:
+                    for text in format_alert(settings, selected, fresh) if fresh else ():
+                        await bot.send_message(
+                            chat_id=chat_id,
+                            text=text,
+                            parse_mode="HTML",
+                        )
+
                 await asyncio.to_thread(
                     self.exchange_store.replace_crossings,
                     chat_id,
