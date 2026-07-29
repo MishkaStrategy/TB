@@ -44,6 +44,18 @@ def parse_positive_float(value, default, name):
     return parsed
 
 
+def parse_ratio(value, default, name):
+    if value is None or not value.strip():
+        return float(default)
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} должно быть числом от 0 до 1") from error
+    if not 0 <= parsed <= 1:
+        raise ValueError(f"{name} должно быть числом от 0 до 1")
+    return parsed
+
+
 def parse_telegram_ids(value):
     if not value:
         return frozenset()
@@ -74,6 +86,49 @@ DELIVERY_STATUS_TRACKING_ENABLED = parse_bool(
 USER_BLOCK_STATUS_ENABLED = parse_bool(
     os.getenv("USER_BLOCK_STATUS_ENABLED"),
     default=False,
+)
+OUTBOX_RETRY_POLICY_ENABLED = parse_bool(
+    os.getenv("OUTBOX_RETRY_POLICY_ENABLED"),
+    default=False,
+)
+OUTBOX_EXPIRATION_ENABLED = parse_bool(
+    os.getenv("OUTBOX_EXPIRATION_ENABLED"),
+    default=False,
+)
+OUTBOX_MAX_ATTEMPTS = parse_positive_int(
+    os.getenv("OUTBOX_MAX_ATTEMPTS"),
+    8,
+    "OUTBOX_MAX_ATTEMPTS",
+)
+OUTBOX_BASE_BACKOFF_SECONDS = parse_positive_float(
+    os.getenv("OUTBOX_BASE_BACKOFF_SECONDS"),
+    5,
+    "OUTBOX_BASE_BACKOFF_SECONDS",
+)
+OUTBOX_MAX_BACKOFF_SECONDS = parse_positive_float(
+    os.getenv("OUTBOX_MAX_BACKOFF_SECONDS"),
+    900,
+    "OUTBOX_MAX_BACKOFF_SECONDS",
+)
+OUTBOX_JITTER_RATIO = parse_ratio(
+    os.getenv("OUTBOX_JITTER_RATIO"),
+    0.2,
+    "OUTBOX_JITTER_RATIO",
+)
+OUTBOX_PROCESSING_LEASE_SECONDS = parse_positive_float(
+    os.getenv("OUTBOX_PROCESSING_LEASE_SECONDS"),
+    120,
+    "OUTBOX_PROCESSING_LEASE_SECONDS",
+)
+OUTBOX_TERMINAL_RETENTION_DAYS = parse_positive_int(
+    os.getenv("OUTBOX_TERMINAL_RETENTION_DAYS"),
+    30,
+    "OUTBOX_TERMINAL_RETENTION_DAYS",
+)
+OUTBOX_DEFAULT_TTL_SECONDS = parse_positive_int(
+    os.getenv("OUTBOX_DEFAULT_TTL_SECONDS"),
+    3600,
+    "OUTBOX_DEFAULT_TTL_SECONDS",
 )
 
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
