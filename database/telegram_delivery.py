@@ -202,6 +202,7 @@ class TelegramDeliveryRegistry:
         *,
         user_id: int | str | None = None,
         now: datetime | None = None,
+        discard_outbox: bool = True,
     ) -> dict:
         timestamp = (now or _now()).astimezone(UTC).isoformat()
         previous = self.profile(chat_id)
@@ -269,7 +270,10 @@ class TelegramDeliveryRegistry:
                     timestamp,
                 ),
             )
-            if decision.delivery_status in FINAL_UNAVAILABLE_STATUSES:
+            if (
+                discard_outbox
+                and decision.delivery_status in FINAL_UNAVAILABLE_STATUSES
+            ):
                 discarded = self._discard_outbox(connection, chat_id)
             connection.commit()
 
@@ -283,14 +287,18 @@ class TelegramDeliveryRegistry:
         chat_id: int | str,
         *,
         now: datetime | None = None,
+        discard_outbox: bool = True,
     ) -> dict:
         timestamp = (now or _now()).astimezone(UTC).isoformat()
         previous = self.profile(chat_id)
         previous_status = previous["status"]
         recovered = previous_status != TelegramDeliveryStatus.ACTIVE.value
-        discard_backlog = previous_status in {
-            status.value for status in FINAL_UNAVAILABLE_STATUSES
-        }
+        discard_backlog = (
+            discard_outbox
+            and previous_status in {
+                status.value for status in FINAL_UNAVAILABLE_STATUSES
+            }
+        )
         discarded = 0
 
         with self._connect() as connection:
