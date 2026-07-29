@@ -20,6 +20,7 @@ from handlers.settings import build_settings_handlers
 from handlers.start import start
 from localization import set_current_chat_id
 from localized_bot import LocalizedExtBot
+from mini_app_backend.lifecycle import start_mini_app_backend, stop_mini_app_backend
 
 
 USER_PREFERENCES = UserPreferences()
@@ -62,9 +63,11 @@ async def post_init(application):
     schedule_fvg_alerts(application)
     await start_fvg_stream(application)
     await start_process_watchdog(application)
+    await start_mini_app_backend(application)
 
 
 async def post_shutdown(application):
+    await stop_mini_app_backend(application)
     await stop_process_watchdog(application)
     await stop_fvg_stream(application)
 
