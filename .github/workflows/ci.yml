@@ -42,6 +42,32 @@ jobs:
       - name: Verify migration, scheduled saves and three-snapshot bound
         run: python3 -m unittest -v tests.test_funding_storage_stdlib
 
+  mini-app-frontend:
+    name: Telegram Mini App frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: telegram-mini-app
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
   tests:
     name: Python tests
     runs-on:
@@ -85,7 +111,7 @@ jobs:
           python -m compileall -q
           bot.py config.py restart_bot.py run_fvg_soak.py
           run_fvg_quality_backtest.py download_bitunix_history.py
-          alerts database exchanges handlers operations research scripts tests
+          alerts database exchanges handlers mini_app_backend operations research scripts tests
 
       - name: Run unit tests
         env:
