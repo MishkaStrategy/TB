@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from alerts.fvg_lifecycle import FvgLifecycleConfig, FvgLifecycleEventType
 from alerts.fvg_lifecycle_store import FvgLifecycleStore
 from alerts.fvg_models import Candle
+
+
+UTC = timezone.utc
 
 
 class FvgLifecycleTracker:
@@ -34,7 +38,16 @@ class FvgLifecycleTracker:
         self.health_store.increment_health(key, amount)
 
     def sync_detected_events(self, limit: int = 500) -> int:
-        created = self.store.sync_confirmed_events(limit=limit)
+        # FVG production zones are currently 15m. Importing the entire 90-day
+        # immutable event history would incorrectly resurrect already stale
+        # zones, so bootstrap only the configured active-age window.
+        detected_after = datetime.now(UTC) - timedelta(
+            minutes=15 * (self.config.max_age_bars + 1)
+        )
+        created = self.store.sync_confirmed_events(
+            limit=limit,
+            detected_after=detected_after,
+        )
         if created:
             self._increment("lifecycle_zones_created", created)
             self._active_symbols = set(self.store.active_symbols())
@@ -54,11 +67,11 @@ class FvgLifecycleTracker:
 
         for transition in transitions:
             for event in transition.events:
-                if event.event_type is FvgLifecycleEventType.FILLED:
+                if event.event_type == FvgLifecycleEventType.FILLED:
                     self._increment("lifecycle_filled")
-                elif event.event_type is FvgLifecycleEventType.INVALIDATED:
+                elif event.event_type == FvgLifecycleEventType.INVALIDATED:
                     self._increment("lifecycle_invalidated")
-                elif event.event_type is FvgLifecycleEventType.EXPIRED:
+                elif event.event_type == FvgLifecycleEventType.EXPIRED:
                     self._increment("lifecycle_expired")
 
         if any(transition.zone.is_terminal for transition in transitions):
