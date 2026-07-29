@@ -44,6 +44,18 @@ def parse_positive_float(value, default, name):
     return parsed
 
 
+def parse_nonnegative_float(value, default, name):
+    if value is None or not value.strip():
+        return float(default)
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ValueError(f"{name} должно быть числом") from error
+    if parsed < 0:
+        raise ValueError(f"{name} не должно быть отрицательным")
+    return parsed
+
+
 def parse_telegram_ids(value):
     if not value:
         return frozenset()
@@ -108,6 +120,39 @@ HEALTH_ALERT_COOLDOWN_SECONDS = parse_positive_float(
     os.getenv("HEALTH_ALERT_COOLDOWN_SECONDS"),
     1800,
     "HEALTH_ALERT_COOLDOWN_SECONDS",
+)
+
+# FVG lifecycle is disabled by default.  Enabling it creates only additive
+# SQLite tables and runs in shadow mode, so the existing Telegram delivery path
+# remains unchanged.  Rollback requires only setting FVG_LIFECYCLE_ENABLED=false
+# or deploying the previous application version.
+FVG_LIFECYCLE_ENABLED = parse_bool(
+    os.getenv("FVG_LIFECYCLE_ENABLED"),
+    default=False,
+)
+FVG_LIFECYCLE_SHADOW_MODE = parse_bool(
+    os.getenv("FVG_LIFECYCLE_SHADOW_MODE"),
+    default=True,
+)
+FVG_LIFECYCLE_SYNC_INTERVAL_SECONDS = parse_positive_float(
+    os.getenv("FVG_LIFECYCLE_SYNC_INTERVAL_SECONDS"),
+    30,
+    "FVG_LIFECYCLE_SYNC_INTERVAL_SECONDS",
+)
+FVG_LIFECYCLE_MAX_AGE_BARS = parse_positive_int(
+    os.getenv("FVG_LIFECYCLE_MAX_AGE_BARS"),
+    96,
+    "FVG_LIFECYCLE_MAX_AGE_BARS",
+)
+FVG_LIFECYCLE_APPROACHING_ZONE_WIDTHS = parse_positive_float(
+    os.getenv("FVG_LIFECYCLE_APPROACHING_ZONE_WIDTHS"),
+    1,
+    "FVG_LIFECYCLE_APPROACHING_ZONE_WIDTHS",
+)
+FVG_LIFECYCLE_INVALIDATION_BUFFER_RATIO = parse_nonnegative_float(
+    os.getenv("FVG_LIFECYCLE_INVALIDATION_BUFFER_RATIO"),
+    0,
+    "FVG_LIFECYCLE_INVALIDATION_BUFFER_RATIO",
 )
 
 
