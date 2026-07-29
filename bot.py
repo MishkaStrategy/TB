@@ -12,6 +12,7 @@ from handlers.admin_settings import admin, admin_callback
 from handlers.donate import donate
 from handlers.fvg_alert import fvg_alert, fvg_pre_alert, fvg_stats
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
+from handlers.fvg_instruments import build_fvg_instrument_handlers
 from handlers.menu import menu, menu_callback
 from handlers.multi_funding import funding, funding_menu_callback
 from handlers.multi_funding_alert_ui import build_handlers as build_funding_alert_handlers
@@ -120,6 +121,10 @@ def main():
         app.add_handler(handler)
     for handler in build_fvg_filter_handlers():
         app.add_handler(handler)
+    # The instrument text receiver uses its own group so existing filter input
+    # handlers can safely ignore messages that do not belong to them.
+    for handler in build_fvg_instrument_handlers():
+        app.add_handler(handler, group=2)
     for handler in build_funding_alert_handlers():
         app.add_handler(handler, group=1)
 
