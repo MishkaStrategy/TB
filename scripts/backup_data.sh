@@ -26,7 +26,7 @@ if [[ ! -x "${PYTHON}" ]]; then
   echo "Python executable does not exist: ${PYTHON}" >&2
   exit 1
 fi
-for command_name in flock rsync tar; do
+for command_name in rsync tar; do
   if ! command -v "${command_name}" >/dev/null 2>&1; then
     echo "Required command is unavailable: ${command_name}" >&2
     exit 1
@@ -36,10 +36,28 @@ done
 mkdir -p "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}"
 
+# Bash keeps fd 9 open for the life of this process. Python locks the inherited
+# open-file description, so the advisory lock remains held after Python exits.
 exec 9>"${BACKUP_DIR}/.backup.lock"
-if ! flock -n 9; then
+set +e
+"${PYTHON}" - 9 <<'PY'
+import fcntl
+import sys
+
+try:
+    fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError:
+    raise SystemExit(75)
+PY
+lock_status=$?
+set -e
+if [[ "${lock_status}" -eq 75 ]]; then
   echo "Another backup process is already running" >&2
   exit 75
+fi
+if [[ "${lock_status}" -ne 0 ]]; then
+  echo "Unable to acquire backup advisory lock" >&2
+  exit "${lock_status}"
 fi
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
