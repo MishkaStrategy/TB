@@ -1,9 +1,11 @@
 """User-facing boundary and button entrypoint for FVG instruments."""
 
+from handlers.auth import authorized
 from handlers.fvg_alert import fvg_symbol as _legacy_fvg_symbol
 from handlers.fvg_instruments import show_fvg_instruments
 
 
+@authorized
 async def fvg_symbol(update, context):
     """Open the new UI, while retaining legacy add/remove command arguments."""
     if not context.args:
