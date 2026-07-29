@@ -69,13 +69,19 @@ def _sha256_stream(source) -> tuple[str, int]:
 def sqlite_quick_check(path: str | os.PathLike) -> str:
     path = Path(path).resolve()
     uri = f"{path.as_uri()}?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=30) as connection:
+    connection = sqlite3.connect(
+        uri,
+        uri=True,
+        timeout=30,
+        factory=_ClosingConnection,
+    )
+    with connection:
         rows = [str(row[0]) for row in connection.execute("PRAGMA quick_check")]
     return "; ".join(rows)
 
 
 def _safe_relative_path(value: str) -> str:
-    normalized = value.replace("\\", "/")
+    normalized = str(value).replace("\\", "/")
     while normalized.startswith("./"):
         normalized = normalized[2:]
     if normalized in {"", "."}:
@@ -90,7 +96,7 @@ def _snapshot_files(snapshot_dir: Path) -> list[Path]:
     files = []
     for root, dirnames, filenames in os.walk(snapshot_dir, followlinks=False):
         root_path = Path(root)
-        for name in list(dirnames):
+        for name in dirnames:
             path = root_path / name
             if path.is_symlink():
                 raise ValueError(f"Snapshot symlink is not allowed: {path}")
@@ -176,6 +182,51 @@ def _archive_members(archive: tarfile.TarFile) -> dict[str, tarfile.TarInfo]:
     return members
 
 
+def _validated_manifest(manifest: dict) -> tuple[dict[str, dict], int]:
+    if int(manifest.get("schema_version", 0)) != MANIFEST_SCHEMA_VERSION:
+        raise RuntimeError("Unsupported backup manifest schema")
+    items = manifest.get("files")
+    if not isinstance(items, list):
+        raise RuntimeError("Backup manifest files must be a list")
+
+    expected: dict[str, dict] = {}
+    total_bytes = 0
+    for item in items:
+        if not isinstance(item, dict):
+            raise RuntimeError("Backup manifest file entry must be an object")
+        original = str(item.get("path", ""))
+        relative = _safe_relative_path(original)
+        if not relative or relative != original:
+            raise RuntimeError(f"Backup manifest path is not canonical: {original}")
+        if relative == MANIFEST_NAME:
+            raise RuntimeError("Backup manifest cannot list itself")
+        if relative in expected:
+            raise RuntimeError(f"Duplicate backup manifest path: {relative}")
+        size = int(item.get("size", -1))
+        if size < 0:
+            raise RuntimeError(f"Invalid backup manifest size: {relative}")
+        digest = str(item.get("sha256", "")).lower()
+        if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+            raise RuntimeError(f"Invalid backup manifest SHA-256: {relative}")
+        kind = str(item.get("kind", ""))
+        if kind not in {"file", "sqlite"}:
+            raise RuntimeError(f"Invalid backup manifest file kind: {relative}")
+        if kind == "sqlite" and item.get("quick_check") != "ok":
+            raise RuntimeError(f"SQLite manifest entry is not verified: {relative}")
+        expected[relative] = item
+        total_bytes += size
+
+    if int(manifest.get("file_count", -1)) != len(expected):
+        raise RuntimeError("Backup manifest file_count does not match entries")
+    if int(manifest.get("total_uncompressed_bytes", -1)) != total_bytes:
+        raise RuntimeError("Backup manifest total_uncompressed_bytes does not match")
+    if not str(manifest.get("run_id", "")):
+        raise RuntimeError("Backup manifest run_id is missing")
+    if not str(manifest.get("archive_name", "")):
+        raise RuntimeError("Backup manifest archive_name is missing")
+    return expected, total_bytes
+
+
 def verify_archive(
     archive_path: str | os.PathLike,
     *,
@@ -188,6 +239,8 @@ def verify_archive(
         parts = line.split()
         if not parts or parts[0].lower() != archive_sha256:
             raise RuntimeError("Archive checksum sidecar does not match")
+        if len(parts) < 2 or Path(parts[-1].lstrip("*")).name != archive_path.name:
+            raise RuntimeError("Archive checksum sidecar filename does not match")
 
     with tarfile.open(archive_path, "r:gz") as archive:
         members = _archive_members(archive)
@@ -199,13 +252,8 @@ def verify_archive(
             raise RuntimeError("Manifest cannot be read from archive")
         manifest_bytes = source.read()
         manifest = json.loads(manifest_bytes.decode("utf-8"))
-        if int(manifest.get("schema_version", 0)) != MANIFEST_SCHEMA_VERSION:
-            raise RuntimeError("Unsupported backup manifest schema")
+        expected_files, total_bytes = _validated_manifest(manifest)
 
-        expected_files = {
-            str(item["path"]): item
-            for item in manifest.get("files", [])
-        }
         expected_names = set(expected_files) | {MANIFEST_NAME}
         if set(members) != expected_names:
             missing = sorted(expected_names - set(members))
@@ -214,41 +262,41 @@ def verify_archive(
                 f"Archive members differ from manifest missing={missing} extra={extra}"
             )
 
-        with tempfile.TemporaryDirectory(prefix="backup-verify-") as tempdir:
-            tempdir = Path(tempdir)
+        with tempfile.TemporaryDirectory(prefix="backup-verify-") as tempdir_value:
+            tempdir = Path(tempdir_value)
             for relative, item in sorted(expected_files.items()):
-                safe_relative = _safe_relative_path(relative)
-                member = members[safe_relative]
+                member = members[relative]
                 source = archive.extractfile(member)
                 if source is None:
-                    raise RuntimeError(f"Archive member cannot be read: {safe_relative}")
+                    raise RuntimeError(f"Archive member cannot be read: {relative}")
                 digest, size = _sha256_stream(source)
                 if digest != str(item["sha256"]).lower():
-                    raise RuntimeError(f"SHA-256 mismatch for {safe_relative}")
+                    raise RuntimeError(f"SHA-256 mismatch for {relative}")
                 if size != int(item["size"]):
-                    raise RuntimeError(f"Size mismatch for {safe_relative}")
-                if item.get("kind") == "sqlite":
-                    destination = tempdir / safe_relative
+                    raise RuntimeError(f"Size mismatch for {relative}")
+                if item["kind"] == "sqlite":
+                    destination = tempdir / relative
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     source = archive.extractfile(member)
                     if source is None:
                         raise RuntimeError(
-                            f"SQLite archive member cannot be read: {safe_relative}"
+                            f"SQLite archive member cannot be read: {relative}"
                         )
                     with destination.open("wb") as target:
                         shutil.copyfileobj(source, target)
                     check = sqlite_quick_check(destination)
-                    if check != "ok" or item.get("quick_check") != "ok":
+                    if check != "ok":
                         raise RuntimeError(
-                            f"Archived SQLite quick_check failed for {safe_relative}: {check}"
+                            f"Archived SQLite quick_check failed for {relative}: {check}"
                         )
 
     return {
         "archive_sha256": archive_sha256,
         "archive_bytes": int(archive_path.stat().st_size),
+        "archive_name": str(manifest["archive_name"]),
         "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
-        "file_count": int(manifest["file_count"]),
-        "total_uncompressed_bytes": int(manifest["total_uncompressed_bytes"]),
+        "file_count": len(expected_files),
+        "total_uncompressed_bytes": total_bytes,
         "run_id": str(manifest["run_id"]),
     }
 
@@ -378,9 +426,12 @@ class BackupHistoryStore:
         *,
         completed_at: datetime | str | None = None,
     ) -> dict:
+        archive_path = Path(archive_path)
         summary = verify_archive(archive_path, checksum_path=checksum_path)
         if summary["run_id"] != str(run_id):
             raise RuntimeError("Archive manifest run ID does not match history run")
+        if summary["archive_name"] != archive_path.name:
+            raise RuntimeError("Archive manifest filename does not match final archive")
         timestamp = _iso(completed_at)
         with self._connect() as connection:
             cursor = connection.execute(
@@ -395,7 +446,7 @@ class BackupHistoryStore:
                 (
                     SUCCESS,
                     timestamp,
-                    str(Path(archive_path)),
+                    str(archive_path),
                     summary["archive_bytes"],
                     summary["archive_sha256"],
                     summary["manifest_sha256"],
@@ -462,7 +513,7 @@ class BackupHistoryStore:
         batch_size: int = 500,
         now: datetime | str | None = None,
     ) -> int:
-        cutoff = (_utc(now) - timedelta(days=max(1, int(retention_days)))).isoformat()
+        cutoff = (_utc(now) - timedelta(days=max(0, int(retention_days)))).isoformat()
         placeholders = ",".join("?" for _ in FINAL_STATUSES)
         with self._connect() as connection:
             rows = connection.execute(
@@ -484,12 +535,7 @@ class BackupHistoryStore:
 
 def _command_begin(args) -> None:
     store = BackupHistoryStore(args.history)
-    print(
-        store.begin(
-            args.archive,
-            started_at=args.started_at,
-        )
-    )
+    print(store.begin(args.archive, started_at=args.started_at))
 
 
 def _command_build_manifest(args) -> None:
