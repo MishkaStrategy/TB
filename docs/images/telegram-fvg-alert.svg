@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="860" viewBox="0 0 960 860">
+  <rect width="960" height="860" rx="32" fill="#0e1621"/>
+  <rect x="30" y="28" width="900" height="804" rx="28" fill="#17212b"/>
+  <rect x="30" y="28" width="900" height="82" rx="28" fill="#202b36"/>
+  <circle cx="84" cy="69" r="26" fill="#2aabee"/>
+  <text x="84" y="77" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#ffffff">F</text>
+  <text x="126" y="63" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">FVG Alert Bot</text>
+  <text x="126" y="88" font-family="Arial, sans-serif" font-size="14" fill="#7f91a4">уведомление и персональные настройки</text>
+
+  <rect x="68" y="140" width="824" height="334" rx="18" fill="#182533"/>
+  <g font-family="Arial, sans-serif" fill="#ffffff">
+    <circle cx="104" cy="172" r="9" fill="#35c759"/><rect x="122" y="154" width="54" height="26" rx="8" fill="#2b5278"/><text x="149" y="173" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#ffffff">BULL</text><text x="190" y="180" font-size="21" font-weight="700">Подтверждённый бычий FVG</text>
+    <text x="94" y="220" font-size="17">Инструмент: BTCUSDT</text>
+    <text x="94" y="251" font-size="17">Таймфрейм: 15m</text>
+    <text x="94" y="282" font-size="17">Направление: Бычий</text>
+    <text x="94" y="313" font-size="17">Зона FVG: 67420.5 — 67860</text>
+    <text x="94" y="344" font-size="17">Размер зоны: 439.5</text>
+    <text x="94" y="375" font-size="17">Цена сигнала: 68012.3</text>
+    <text x="94" y="406" font-size="17">Время C: 2026-07-29 09:45 UTC</text>
+    <text x="94" y="437" font-size="17">Статус: Подтверждён закрытием свечи C</text>
+  </g>
+  <text x="846" y="454" font-family="Arial, sans-serif" font-size="14" fill="#7f91a4">16:45</text>
+
+  <rect x="68" y="506" width="824" height="170" rx="18" fill="#182533"/>
+  <text x="94" y="546" font-family="Arial, sans-serif" font-size="21" font-weight="700" fill="#ffffff">Пользовательские настройки</text>
+  <text x="94" y="584" font-family="Arial, sans-serif" font-size="17" fill="#ffffff">Язык: Русский</text>
+  <text x="94" y="616" font-family="Arial, sans-serif" font-size="17" fill="#ffffff">Формат уведомлений: Подробные</text>
+  <text x="94" y="650" font-family="Arial, sans-serif" font-size="15" fill="#aebdca">Подробные уведомления показывают все доступные поля.</text>
+
+  <g font-family="Arial, sans-serif" font-size="16" fill="#ffffff" text-anchor="middle">
+    <rect x="68" y="700" width="402" height="42" rx="9" fill="#2b5278"/><text x="269" y="727">SELECTED · Русский</text>
+    <rect x="490" y="700" width="402" height="42" rx="9" fill="#2b5278"/><text x="691" y="727">English</text>
+    <rect x="68" y="752" width="402" height="42" rx="9" fill="#2b5278"/><text x="269" y="779">Компактные</text>
+    <rect x="490" y="752" width="402" height="42" rx="9" fill="#2b5278"/><text x="691" y="779">SELECTED · Подробные</text>
+  </g>
+  <text x="480" y="824" text-anchor="middle" font-family="Arial, sans-serif" font-size="13" fill="#7f91a4">Формат сообщения и названия кнопок взяты из текущего кода</text>
+</svg>
