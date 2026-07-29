@@ -20,6 +20,10 @@ LOGGER = logging.getLogger(__name__)
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
+def _flag_enabled(name: str) -> bool:
+    return str(os.getenv(name, "")).strip().lower() in _TRUE_VALUES
+
+
 def _delivery_tracking_enabled() -> bool:
     """Read additive delivery flags without importing optional dotenv.
 
@@ -29,12 +33,8 @@ def _delivery_tracking_enabled() -> bool:
     already present in ``os.environ`` when this helper is evaluated.
     """
 
-    return any(
-        str(os.getenv(name, "")).strip().lower() in _TRUE_VALUES
-        for name in (
-            "DELIVERY_STATUS_TRACKING_ENABLED",
-            "USER_BLOCK_STATUS_ENABLED",
-        )
+    return _flag_enabled("DELIVERY_STATUS_TRACKING_ENABLED") or _flag_enabled(
+        "USER_BLOCK_STATUS_ENABLED"
     )
 
 
@@ -119,6 +119,7 @@ class MultiFundingAlertService:
         snapshot_store=None,
         loader=None,
         delivery_registry=None,
+        suppress_unavailable_users=None,
     ):
         self.settings_store = settings_store or FundingAlertStore()
         path = getattr(self.settings_store, "path", None)
@@ -126,8 +127,15 @@ class MultiFundingAlertService:
         self.snapshot_store = snapshot_store or FundingSnapshotStore(path)
         self.loader = loader
         self.delivery_registry = delivery_registry
+        self.suppress_unavailable_users = (
+            _flag_enabled("USER_BLOCK_STATUS_ENABLED")
+            if suppress_unavailable_users is None
+            else bool(suppress_unavailable_users)
+        )
         if self.delivery_registry is None and _delivery_tracking_enabled():
-            self.delivery_registry = TelegramDeliveryRegistry()
+            self.delivery_registry = TelegramDeliveryRegistry(
+                discard_outbox_by_default=self.suppress_unavailable_users
+            )
 
     async def _load(self):
         if self.loader is not None:
@@ -219,9 +227,12 @@ class MultiFundingAlertService:
                 }
 
                 if self.delivery_registry is not None:
-                    if not await asyncio.to_thread(
-                        self.delivery_registry.can_deliver,
-                        chat_id,
+                    if (
+                        self.suppress_unavailable_users
+                        and not await asyncio.to_thread(
+                            self.delivery_registry.can_deliver,
+                            chat_id,
+                        )
                     ):
                         LOGGER.info(
                             "Funding delivery suppressed for unavailable chat_id=%s",
@@ -264,15 +275,17 @@ class MultiFundingAlertService:
                                 chat_id,
                                 decision,
                                 error,
+                                discard_outbox=self.suppress_unavailable_users,
                             )
                             if decision.retryable:
                                 delivery_failed = True
                                 break
-                            await self._consume_without_delivery(
-                                chat_id,
-                                current,
-                                current_time,
-                            )
+                            if self.suppress_unavailable_users:
+                                await self._consume_without_delivery(
+                                    chat_id,
+                                    current,
+                                    current_time,
+                                )
                             delivery_failed = True
                             break
                         else:
