@@ -78,15 +78,40 @@ class SuccessfulBot:
 
 
 class ForbiddenDeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_tracking_only_records_block_without_suppressing_future_fvg(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            registry = TelegramDeliveryRegistry(
+                path,
+                discard_outbox_by_default=False,
+            )
+            service = FvgAlertService(
+                settings=RecipientSettings(),
+                event_store=FvgEventStore(path),
+                delivery_registry=registry,
+                suppress_unavailable_users=False,
+            )
+            bot = BlockedBot()
+
+            await service.deliver(bot, [make_event(0)])
+            await service.deliver(bot, [make_event(1)])
+
+            self.assertEqual(bot.calls, 2)
+            self.assertEqual(registry.profile(42)["status"], "blocked")
+
     async def test_fvg_block_stops_future_outbox_and_interaction_recovers(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "events.sqlite3"
             store = FvgEventStore(path)
-            registry = TelegramDeliveryRegistry(path)
+            registry = TelegramDeliveryRegistry(
+                path,
+                discard_outbox_by_default=True,
+            )
             service = FvgAlertService(
                 settings=RecipientSettings(),
                 event_store=store,
                 delivery_registry=registry,
+                suppress_unavailable_users=True,
             )
             blocked_bot = BlockedBot()
 
@@ -108,6 +133,40 @@ class ForbiddenDeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(registry.profile(42)["status"], "active")
             self.assertEqual(store.health()["deliveries"], 1)
 
+    async def test_tracking_only_keeps_blocked_funding_due(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            funding_path = root / "funding.sqlite3"
+            delivery_path = root / "events.sqlite3"
+            settings = FundingAlertStore(funding_path)
+            registry = TelegramDeliveryRegistry(
+                delivery_path,
+                discard_outbox_by_default=False,
+            )
+            start = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+            due = start + timedelta(minutes=15)
+            settings.set_enabled(42, True, now=start)
+
+            async def loader():
+                return {
+                    "bitunix": [
+                        {"symbol": "BTCUSDT", "fundingRate": "0.25"}
+                    ]
+                }
+
+            service = MultiFundingAlertService(
+                settings_store=settings,
+                exchange_store=FundingExchangeStore(funding_path),
+                snapshot_store=FundingSnapshotStore(funding_path),
+                loader=loader,
+                delivery_registry=registry,
+                suppress_unavailable_users=False,
+            )
+            await service.run(BlockedBot(), now=due)
+
+            self.assertEqual(registry.profile(42)["status"], "blocked")
+            self.assertEqual(settings.user(42)["next_check_at"], due)
+
     async def test_blocked_funding_is_consumed_without_backlog(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -116,7 +175,10 @@ class ForbiddenDeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             settings = FundingAlertStore(funding_path)
             exchanges = FundingExchangeStore(funding_path)
             snapshots = FundingSnapshotStore(funding_path)
-            registry = TelegramDeliveryRegistry(delivery_path)
+            registry = TelegramDeliveryRegistry(
+                delivery_path,
+                discard_outbox_by_default=True,
+            )
             start = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
             due = start + timedelta(minutes=15)
             settings.set_enabled(42, True, now=start)
@@ -141,6 +203,7 @@ class ForbiddenDeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 snapshot_store=snapshots,
                 loader=loader,
                 delivery_registry=registry,
+                suppress_unavailable_users=True,
             )
             bot = SuccessfulBot()
             await service.run(bot, now=due)
