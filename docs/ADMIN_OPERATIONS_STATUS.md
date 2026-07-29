@@ -1,10 +1,11 @@
 # Read-only admin operations status
 
-The admin panel contains a new `⚙️ Операции` screen that summarizes process
-lifecycle, background jobs and the latest SQLite observability snapshots.
+The admin panel contains a `⚙️ Операции` screen that summarizes process
+lifecycle, the persistent restart circuit breaker, background jobs and the latest
+SQLite observability snapshots.
 
 The screen is intentionally read-only. It does not add rerun, enable, disable,
-restart, lease recovery or retention actions.
+restart, circuit reset, lease recovery or retention actions.
 
 ## Data sources
 
@@ -14,6 +15,7 @@ The reader opens the existing FVG SQLite file through a SQLite URI with
 It first inspects `sqlite_schema` and only queries tables that already exist:
 
 - `runtime_lifecycle_state` and `runtime_lifecycle_events`;
+- `process_restart_guard_state` and `process_restart_requests`;
 - `background_task_state`;
 - `database_observation_runs`.
 
@@ -34,6 +36,37 @@ When lifecycle data exists, the screen displays:
 
 This is a view of the state written by the lifecycle stage. The admin screen does
 not change or finalize that state.
+
+## Restart circuit-breaker section
+
+When persistent restart-guard tables exist, the screen displays:
+
+- whether restart requests are currently allowed or blocked;
+- allowed requests inside the configured rolling window;
+- configured request limit and window duration;
+- total circuit trips;
+- active or last stored cooldown deadline;
+- latest request status and decision reason;
+- latest request reason and signal error, when present.
+
+The values for the request limit, rolling window and cooldown are read from the
+same environment-backed configuration used by the watchdog. Request rows and
+state are read directly from SQLite.
+
+Opening the screen does not instantiate `ProcessRestartGuard` and therefore does
+not:
+
+- create or migrate guard tables;
+- run `BEGIN IMMEDIATE` guard decisions;
+- add denied request rows;
+- extend or clear cooldown;
+- reset the trip counter;
+- mark a request failed;
+- send a signal or restart the process.
+
+The reader returns at most five recent request rows. The Telegram formatter only
+shows the latest one and truncates long reason/error text so the full screen
+stays below Telegram's message-size limit.
 
 ## Background task section
 
@@ -83,11 +116,14 @@ operational data is exposed to non-admin Telegram users.
   migrations.
 - Missing optional tables: the corresponding section reports no data while the
   rest of the screen remains available.
+- Malformed guard timestamps: the reader does not treat them as an active
+  cooldown and continues showing the stored request history.
 
 ## Not included
 
 - task rerun or cancellation;
 - feature-flag changes;
+- restart circuit reset/unblock actions;
 - dead-letter actions;
 - backup-history inspection;
 - automatic remediation;

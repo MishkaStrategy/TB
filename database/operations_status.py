@@ -9,6 +9,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from database.process_restart_guard_status import read_restart_guard_status
+
 
 UTC = timezone.utc
 PROBLEM_STATUSES = frozenset({"failed", "stale"})
@@ -302,6 +304,18 @@ class OperationsStatusReader:
                 "overdue_count": 0,
                 "problems": [],
             },
+            "restart_guard": {
+                "available": False,
+                "blocked": False,
+                "blocked_until": None,
+                "trip_count": 0,
+                "requests_in_window": 0,
+                "max_requests": 0,
+                "window_seconds": 0,
+                "cooldown_seconds": 0,
+                "latest_request": None,
+                "recent_requests": [],
+            },
             "databases": {"available": False, "latest": [], "growth_24h": []},
         }
         if not self.path.exists():
@@ -317,6 +331,11 @@ class OperationsStatusReader:
                     tables,
                     now=current,
                     stale_multiplier=stale_multiplier,
+                )
+                result["restart_guard"] = read_restart_guard_status(
+                    connection,
+                    tables,
+                    now=current,
                 )
                 result["databases"] = self._database_observations(
                     connection,

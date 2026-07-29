@@ -28,7 +28,6 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_DIR / "data"
 MANUAL_BACKUP_DIR = DATA_DIR / ".manual_backups"
 
-
 _STATUS_LABELS = {
     "starting": "запускается",
     "running": "работает",
@@ -42,6 +41,13 @@ _STATUS_LABELS = {
     "cancelled": "отменено",
     "skipped": "пропущено",
     "stale": "lease истёк",
+    "requested": "запрошен",
+    "blocked": "заблокирован",
+}
+_DECISION_LABELS = {
+    "allowed": "разрешён",
+    "limit_reached": "достигнут лимит",
+    "cooldown": "активен cooldown",
 }
 _DATABASE_LABELS = {"fvg": "FVG", "funding": "Funding"}
 
@@ -92,13 +98,45 @@ def _format_signed_bytes(value) -> str:
     return f"{sign}{_format_bytes(abs(value))}"
 
 
+def _format_duration(value) -> str:
+    try:
+        seconds = max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return "—"
+    hours, remainder = divmod(seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} ч")
+    if minutes:
+        parts.append(f"{minutes} мин")
+    if seconds or not parts:
+        parts.append(f"{seconds} с")
+    return " ".join(parts)
+
+
+def _short(value, limit: int = 180) -> str:
+    text = str(value or "—").replace("\n", " ").strip() or "—"
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _format_error(error_class, error_message) -> str:
+    return _short(f"{error_class or 'Error'}: {error_message or '—'}")
+
+
 def _status_label(value) -> str:
     value = str(value or "неизвестно")
     return _STATUS_LABELS.get(value, value)
 
 
+def _decision_label(value) -> str:
+    value = str(value or "неизвестно")
+    return _DECISION_LABELS.get(value, value)
+
+
 def format_allowed_users() -> str:
-    runtime, activity = AccessRegistry().users(status="allowed"), UserActivityRegistry().users()
+    runtime = AccessRegistry().users(status="allowed")
+    activity = UserActivityRegistry().users()
     ids = sorted(set(ALLOWED_TELEGRAM_IDS) | {int(value) for value in runtime})
     lines = ["👥 Разрешённые пользователи", "", f"Всего: {len(ids)}"]
     if not ids:
@@ -109,7 +147,8 @@ def format_allowed_users() -> str:
         name = record.get("name") or tracked.get("name") or "Без имени"
         username = record.get("username") or tracked.get("username")
         suffix = f" @{username}" if username else ""
-        lines.append(f"• {user_id} · {name}{suffix} · {'env' if user_id in ALLOWED_TELEGRAM_IDS else 'runtime'}")
+        source = "env" if user_id in ALLOWED_TELEGRAM_IDS else "runtime"
+        lines.append(f"• {user_id} · {name}{suffix} · {source}")
     return "\n".join(lines)
 
 
@@ -145,10 +184,7 @@ def format_operations_status(snapshot=None) -> str:
     lines = ["⚙️ Операционное состояние", ""]
     if not snapshot.get("available"):
         error = snapshot.get("error_message") or "неизвестная ошибка"
-        lines.extend([
-            "Runtime SQLite недоступна.",
-            f"Причина: {error}",
-        ])
+        lines.extend(["Runtime SQLite недоступна.", f"Причина: {error}"])
         return "\n".join(lines)
 
     lifecycle = snapshot.get("lifecycle", {})
@@ -165,8 +201,37 @@ def format_operations_status(snapshot=None) -> str:
             f"• Результат остановки: {state.get('shutdown_outcome') or '—'}",
         ])
         if state.get("last_error_message"):
-            error_name = state.get("last_error_class") or "Error"
-            lines.append(f"• Ошибка: {error_name}: {state['last_error_message']}")
+            lines.append(
+                f"• Ошибка: {_format_error(state.get('last_error_class'), state.get('last_error_message'))}"
+            )
+
+    guard = snapshot.get("restart_guard", {})
+    lines.extend(["", "Защита перезапуска"])
+    if not guard.get("available"):
+        lines.append("• circuit breaker: нет данных")
+    else:
+        blocked = bool(guard.get("blocked"))
+        lines.extend([
+            f"• Статус: {'заблокирован' if blocked else 'разрешён'}",
+            f"• Окно: {int(guard.get('requests_in_window') or 0)}/{int(guard.get('max_requests') or 0)} за {_format_duration(guard.get('window_seconds'))}",
+            f"• Срабатываний: {int(guard.get('trip_count') or 0)}",
+        ])
+        if blocked or guard.get("blocked_until"):
+            lines.append(f"• Cooldown до: {_format_time(guard.get('blocked_until'))}")
+        latest = guard.get("latest_request")
+        if latest:
+            lines.append(
+                "• Последний запрос: "
+                f"{_status_label(latest.get('status'))} · "
+                f"{_decision_label(latest.get('decision_reason'))} · "
+                f"{_format_time(latest.get('requested_at'))}"
+            )
+            if latest.get("reason"):
+                lines.append(f"  — Причина: {_short(latest.get('reason'))}")
+            if latest.get("error_message"):
+                lines.append(
+                    f"  — Ошибка: {_format_error(latest.get('error_class'), latest.get('error_message'))}"
+                )
 
     tasks = snapshot.get("tasks", {})
     lines.extend(["", "Фоновые задачи"])
@@ -222,7 +287,7 @@ def format_operations_status(snapshot=None) -> str:
                 f"• {label}: {availability} · {_format_bytes(total)} · {_format_time(item.get('captured_at'))}"
             )
             if item.get("error_message"):
-                lines.append(f"  — {item['error_message']}")
+                lines.append(f"  — {_short(item['error_message'])}")
 
         growth = databases.get("growth_24h", [])
         if growth:
@@ -252,7 +317,16 @@ def _sqlite_status(path: Path) -> tuple[str, int]:
 def format_database_status() -> str:
     event_status, event_size = _sqlite_status(get_fvg_service().event_store.path)
     funding_status, funding_size = _sqlite_status(FundingAlertStore().path)
-    json_files = [DATA_DIR / name for name in ("fvg_alert_settings.json", "user_preferences.json", "runtime_settings.json", "access_control.json", "user_activity.json")]
+    json_files = [
+        DATA_DIR / name
+        for name in (
+            "fvg_alert_settings.json",
+            "user_preferences.json",
+            "runtime_settings.json",
+            "access_control.json",
+            "user_activity.json",
+        )
+    ]
     json_size = sum(path.stat().st_size for path in json_files if path.exists())
     return "\n".join([
         "🗄 Состояние баз данных", "",
@@ -279,7 +353,9 @@ def format_resource_status() -> str:
     disk = shutil.disk_usage(DATA_DIR if DATA_DIR.exists() else PROJECT_DIR)
     return "\n".join([
         "🖥 Память и нагрузка", "", f"Память процесса: {_format_bytes(_memory_bytes())}",
-        f"Load average 1/5/15: {load}", f"Свободно на диске: {_format_bytes(disk.free)} из {_format_bytes(disk.total)}", f"PID: {os.getpid()}",
+        f"Load average 1/5/15: {load}",
+        f"Свободно на диске: {_format_bytes(disk.free)} из {_format_bytes(disk.total)}",
+        f"PID: {os.getpid()}",
     ])
 
 
@@ -287,14 +363,31 @@ def format_version() -> str:
     version_path, commit_path = PROJECT_DIR / "VERSION", PROJECT_DIR / "BUILD_COMMIT"
     version = version_path.read_text(encoding="utf-8").strip() if version_path.exists() else "unknown"
     commit = commit_path.read_text(encoding="utf-8").strip() if commit_path.exists() else "не записан"
-    return "\n".join(["🏷 Версия установленного релиза", "", f"Версия: {version}", f"Git commit: {commit}", f"Python: {sys.version.split()[0]}"])
+    return "\n".join([
+        "🏷 Версия установленного релиза", "", f"Версия: {version}",
+        f"Git commit: {commit}", f"Python: {sys.version.split()[0]}"
+    ])
 
 
 def create_manual_backup() -> str:
     MANUAL_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
-    environment.update({"INSTALL_DIR": str(PROJECT_DIR), "DATA_DIR": str(DATA_DIR.resolve()), "BACKUP_DIR": str(MANUAL_BACKUP_DIR.resolve()), "PYTHON": sys.executable, "RETENTION_DAYS": "14"})
-    result = subprocess.run(["bash", str(PROJECT_DIR / "scripts" / "backup_data.sh")], cwd=PROJECT_DIR, env=environment, capture_output=True, text=True, timeout=120, check=False)
+    environment.update({
+        "INSTALL_DIR": str(PROJECT_DIR),
+        "DATA_DIR": str(DATA_DIR.resolve()),
+        "BACKUP_DIR": str(MANUAL_BACKUP_DIR.resolve()),
+        "PYTHON": sys.executable,
+        "RETENTION_DAYS": "14",
+    })
+    result = subprocess.run(
+        ["bash", str(PROJECT_DIR / "scripts" / "backup_data.sh")],
+        cwd=PROJECT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
     output = (result.stdout or result.stderr).strip()
     if result.returncode:
         raise RuntimeError(output or f"backup exited with code {result.returncode}")
@@ -329,8 +422,15 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if action in {"home", "open"}:
         await show_admin_panel(query.message, user.id, edit=True)
     elif action == "toggle_access":
-        enabled = await asyncio.to_thread(_RUNTIME_SETTINGS.toggle_public_access, PUBLIC_ACCESS_ENABLED)
-        text = "🌐 Публичный доступ включён.\n\nБот теперь принимает команды от всех Telegram-пользователей." if enabled else "🔐 Приватный доступ включён.\n\nБот принимает команды только от пользователей из allowlist и одобренных заявок."
+        enabled = await asyncio.to_thread(
+            _RUNTIME_SETTINGS.toggle_public_access,
+            PUBLIC_ACCESS_ENABLED,
+        )
+        text = (
+            "🌐 Публичный доступ включён.\n\nБот теперь принимает команды от всех Telegram-пользователей."
+            if enabled
+            else "🔐 Приватный доступ включён.\n\nБот принимает команды только от пользователей из allowlist и одобренных заявок."
+        )
         await query.edit_message_text(text, reply_markup=admin_keyboard(enabled))
     elif action == "allowed":
         await query.edit_message_text(await asyncio.to_thread(format_allowed_users), reply_markup=admin_keyboard())
@@ -353,7 +453,13 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             text = f"⚠️ Не удалось создать резервную копию.\n\n{error}"
         await query.edit_message_text(text, reply_markup=admin_keyboard())
     elif action == "restart":
-        await query.edit_message_text("♻️ Перезапустить бота?\n\nПроцесс завершится с ошибкой, после чего systemd запустит его снова.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Да, перезапустить", callback_data="admin:restart_confirm")], [InlineKeyboardButton("❌ Отмена", callback_data="admin:home")]]))
+        await query.edit_message_text(
+            "♻️ Перезапустить бота?\n\nПроцесс завершится с ошибкой, после чего systemd запустит его снова.",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("✅ Да, перезапустить", callback_data="admin:restart_confirm")],
+                [InlineKeyboardButton("❌ Отмена", callback_data="admin:home")],
+            ]),
+        )
     elif action == "restart_confirm":
         await query.edit_message_text("♻️ Бот перезапускается…")
         asyncio.get_running_loop().call_later(1.0, lambda: os._exit(1))
