@@ -1,5 +1,4 @@
 import io
-import json
 import os
 import sqlite3
 import tarfile
@@ -9,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from database.backup_audit import (
-    BACKUP_MANIFEST_NAME if False else MANIFEST_NAME,
+    MANIFEST_NAME,
     BackupHistoryStore,
     build_manifest,
     verify_archive,
@@ -40,7 +39,10 @@ class BackupManifestTests(unittest.TestCase):
             snapshot.mkdir()
             database = snapshot / "state.sqlite3"
             create_database(database)
-            (snapshot / "settings.json").write_text('{"enabled": true}', encoding="utf-8")
+            (snapshot / "settings.json").write_text(
+                '{"enabled": true}',
+                encoding="utf-8",
+            )
             created_at = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
 
             manifest = build_manifest(
@@ -56,6 +58,7 @@ class BackupManifestTests(unittest.TestCase):
             write_checksum(archive, checksum)
             summary = verify_archive(archive, checksum_path=checksum)
 
+            self.assertTrue((snapshot / MANIFEST_NAME).is_file())
             self.assertEqual(manifest["run_id"], "run-1")
             self.assertEqual(manifest["file_count"], 2)
             self.assertEqual(summary["run_id"], "run-1")
