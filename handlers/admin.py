@@ -187,6 +187,7 @@ def format_bot_health(event_store, now=None, registry=None):
     )
     last_ws = health.get("last_ws_message")
     ws_age = _age_seconds(last_ws, now)
+    ws_age_suffix = f" ({ws_age} сек. назад)" if ws_age is not None else ""
 
     try:
         hour_signals, day_signals = event_counts(event_store, now)
@@ -211,7 +212,7 @@ def format_bot_health(event_store, now=None, registry=None):
                 if ws_age is not None
                 else "Задержка последней свечи: —"
             ),
-            f"Последняя WS-свеча: {_format_time(last_ws)}",
+            f"Последняя WS-свеча: {_format_time(last_ws)}{ws_age_suffix}",
             f"Активных пользователей за 24ч: {active_users}",
             f"Сигналов за час / сутки: {hour_signals} / {day_signals}",
             f"Сообщений в outbox: {int(health.get('outbox') or 0)}",
