@@ -28,6 +28,10 @@ class TimedOut(Exception):
     pass
 
 
+class ConnectTimeout(Exception):
+    pass
+
+
 class BadRequest(Exception):
     pass
 
@@ -48,10 +52,19 @@ class TelegramErrorClassifierTests(unittest.TestCase):
         self.assertEqual(decision.code, "rate_limited")
         self.assertEqual(decision.retry_after_seconds, 17)
 
-    def test_timeout_is_temporary(self):
+    def test_unknown_timeout_is_ambiguous(self):
         decision = classify_telegram_error(TimedOut("request timed out"))
-        self.assertTrue(decision.retryable)
+        self.assertFalse(decision.retryable)
+        self.assertTrue(decision.ambiguous_delivery)
         self.assertEqual(decision.code, "timeout")
+
+    def test_connect_timeout_is_safe_to_retry(self):
+        error = TimedOut("connection timed out")
+        error.__cause__ = ConnectTimeout("connection not established")
+        decision = classify_telegram_error(error)
+        self.assertTrue(decision.retryable)
+        self.assertFalse(decision.ambiguous_delivery)
+        self.assertEqual(decision.code, "timeout_before_send")
 
     def test_message_not_modified_is_ignorable(self):
         decision = classify_telegram_error(BadRequest("Message is not modified"))
