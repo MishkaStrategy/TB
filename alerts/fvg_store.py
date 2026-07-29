@@ -60,7 +60,10 @@ class AtomicJsonStore:
 
 
 def instrument_key(exchange: str, symbol: str) -> str:
-    return f"{normalize_exchange(exchange)}|{normalize_fvg_symbol(symbol)}"
+    """Keep legacy Bitunix keys while namespacing every other exchange."""
+    exchange = normalize_exchange(exchange)
+    symbol = normalize_fvg_symbol(symbol)
+    return symbol if exchange == "bitunix" else f"{exchange}|{symbol}"
 
 
 def split_instrument_key(value: str) -> tuple[str, str]:
