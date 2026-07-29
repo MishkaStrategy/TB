@@ -111,9 +111,11 @@ def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
     testable and also handles wrapped/subclassed Telegram exceptions.
 
     A read/write timeout can happen after Telegram accepted ``sendMessage`` but
-    before the response reached the bot. Repeating that request can duplicate an
-    alert, so such timeouts are explicitly marked as ambiguous. Connection-pool
-    and connect timeouts are considered pre-send and remain safely retryable.
+    before the response reached the bot. Such errors remain temporary/retryable
+    for legacy delivery paths, while ``ambiguous_delivery`` lets Outbox V2 apply
+    its stricter at-most-once policy before considering the generic retry flag.
+    Connection-pool and connect timeouts are marked as unambiguous pre-send
+    failures.
     """
 
     class_name = type(error).__name__
@@ -183,7 +185,7 @@ def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
         return TelegramErrorDecision(
             kind=TelegramErrorKind.TEMPORARY,
             code="timeout_before_send" if pre_send else "timeout",
-            retryable=pre_send,
+            retryable=True,
             delivery_status=TelegramDeliveryStatus.TEMPORARILY_UNAVAILABLE,
             ambiguous_delivery=not pre_send,
         )
@@ -193,7 +195,7 @@ def classify_telegram_error(error: BaseException) -> TelegramErrorDecision:
         return TelegramErrorDecision(
             kind=TelegramErrorKind.TEMPORARY,
             code="network_error",
-            retryable=not ambiguous,
+            retryable=True,
             delivery_status=TelegramDeliveryStatus.TEMPORARILY_UNAVAILABLE,
             ambiguous_delivery=ambiguous,
         )
