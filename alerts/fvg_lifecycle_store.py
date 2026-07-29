@@ -10,14 +10,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 from alerts.fvg_lifecycle import (
     FvgLifecycleConfig,
-    FvgLifecycleEventType,
     FvgLifecycleStatus,
     FvgLifecycleTransition,
     FvgZoneEvent,
@@ -67,7 +65,20 @@ def _decimal(value: str | None) -> Decimal | None:
 
 
 def _json(value) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+
+
+def _required_datetime(payload: dict, key: str) -> datetime:
+    value = _datetime(payload[key])
+    if value is None:
+        raise ValueError(f"Missing datetime field: {key}")
+    return value
 
 
 def _event_from_payload(payload: dict) -> FvgEvent:
@@ -77,15 +88,15 @@ def _event_from_payload(payload: dict) -> FvgEvent:
         symbol=str(payload["symbol"]),
         timeframe=str(payload["timeframe"]),
         direction=FvgDirection(str(payload["direction"])),
-        candle_a_open_time=_datetime(payload["candle_a_open_time"]),
-        candle_b_open_time=_datetime(payload["candle_b_open_time"]),
-        candle_c_open_time=_datetime(payload["candle_c_open_time"]),
-        candle_c_close_time=_datetime(payload["candle_c_close_time"]),
+        candle_a_open_time=_required_datetime(payload, "candle_a_open_time"),
+        candle_b_open_time=_required_datetime(payload, "candle_b_open_time"),
+        candle_c_open_time=_required_datetime(payload, "candle_c_open_time"),
+        candle_c_close_time=_required_datetime(payload, "candle_c_close_time"),
         zone_low=Decimal(str(payload["zone_low"])),
         zone_high=Decimal(str(payload["zone_high"])),
         zone_size=Decimal(str(payload["zone_size"])),
         signal_price=Decimal(str(payload["signal_price"])),
-        detected_at=_datetime(payload["detected_at"]),
+        detected_at=_required_datetime(payload, "detected_at"),
         is_confirmed=bool(payload["is_confirmed"]),
         data_complete=bool(payload["data_complete"]),
     )
@@ -95,7 +106,6 @@ class FvgLifecycleStore:
     """Lifecycle repository that is safe to leave behind after a rollback."""
 
     DEFAULT_PATH = Path("data/fvg_event_store.sqlite3")
-
     ZONE_COLUMNS = (
         "fvg_id",
         "source_event_id",
@@ -253,14 +263,20 @@ class FvgLifecycleStore:
             "formation_close_time": _iso(zone.formation_close_time),
             "signal_price": str(zone.signal_price),
             "status": zone.status.value,
-            "current_price": str(zone.current_price) if zone.current_price is not None else None,
+            "current_price": (
+                str(zone.current_price) if zone.current_price is not None else None
+            ),
             "current_fill_percent": str(zone.current_fill_percent),
             "max_fill_percent": str(zone.max_fill_percent),
             "fill_threshold_mask": int(zone.fill_threshold_mask),
             "touch_count": int(zone.touch_count),
             "first_approach_at": _iso(zone.first_approach_at),
             "first_touch_at": _iso(zone.first_touch_at),
-            "first_touch_price": str(zone.first_touch_price) if zone.first_touch_price is not None else None,
+            "first_touch_price": (
+                str(zone.first_touch_price)
+                if zone.first_touch_price is not None
+                else None
+            ),
             "first_touch_candle_time": _iso(zone.first_touch_candle_time),
             "first_touch_depth_percent": (
                 str(zone.first_touch_depth_percent)
@@ -288,6 +304,12 @@ class FvgLifecycleStore:
 
     @staticmethod
     def _row_to_zone(row: sqlite3.Row) -> FvgZoneState:
+        formation_time = _datetime(row["formation_time"])
+        formation_close_time = _datetime(row["formation_close_time"])
+        created_at = _datetime(row["created_at"])
+        updated_at = _datetime(row["updated_at"])
+        if formation_time is None or formation_close_time is None:
+            raise ValueError("Persisted zone is missing formation time")
         return FvgZoneState(
             fvg_id=row["fvg_id"],
             source_event_id=row["source_event_id"],
@@ -297,8 +319,8 @@ class FvgLifecycleStore:
             direction=FvgDirection(row["direction"]),
             lower_bound=Decimal(row["lower_bound"]),
             upper_bound=Decimal(row["upper_bound"]),
-            formation_time=_datetime(row["formation_time"]),
-            formation_close_time=_datetime(row["formation_close_time"]),
+            formation_time=formation_time,
+            formation_close_time=formation_close_time,
             signal_price=Decimal(row["signal_price"]),
             status=FvgLifecycleStatus(row["status"]),
             current_price=_decimal(row["current_price"]),
@@ -322,8 +344,8 @@ class FvgLifecycleStore:
             processed_bars=int(row["processed_bars"]),
             state_version=int(row["state_version"]),
             lifecycle_version=row["lifecycle_version"],
-            created_at=_datetime(row["created_at"]),
-            updated_at=_datetime(row["updated_at"]),
+            created_at=created_at,
+            updated_at=updated_at,
         )
 
     @staticmethod
@@ -355,7 +377,10 @@ class FvgLifecycleStore:
         return cursor.rowcount == 1
 
     def register(self, event: FvgEvent, exchange: str = "bitunix") -> bool:
-        if not event.is_confirmed or event.event_type is not FvgEventType.CONFIRMED_FVG:
+        if (
+            not event.is_confirmed
+            or event.event_type != FvgEventType.CONFIRMED_FVG
+        ):
             return False
         zone = zone_from_event(event, exchange)
         values = self._zone_values(zone)
@@ -373,10 +398,25 @@ class FvgLifecycleStore:
             connection.commit()
         return created
 
-    def sync_confirmed_events(self, limit: int = 500) -> int:
-        """Create missing zones from the existing immutable events table."""
+    def sync_confirmed_events(
+        self,
+        limit: int = 500,
+        *,
+        detected_after: datetime | None = None,
+    ) -> int:
+        """Create missing zones from recent immutable confirmed events."""
         if not self.path.exists():
             return 0
+        where = [
+            "event.event_type = 'CONFIRMED_FVG'",
+            "zone.fvg_id IS NULL",
+        ]
+        parameters: list[object] = []
+        if detected_after is not None:
+            where.append("event.detected_at >= ?")
+            parameters.append(_iso(detected_after))
+        parameters.append(max(1, int(limit)))
+
         with self._connect() as connection:
             table = connection.execute(
                 """
@@ -387,18 +427,18 @@ class FvgLifecycleStore:
             if table is None:
                 return 0
             rows = connection.execute(
-                """
+                f"""
                 SELECT event.payload_json
                 FROM events AS event
                 LEFT JOIN fvg_zones AS zone
                     ON zone.source_event_id = event.event_id
-                WHERE event.event_type = 'CONFIRMED_FVG'
-                  AND zone.fvg_id IS NULL
+                WHERE {' AND '.join(where)}
                 ORDER BY event.detected_at, event.event_id
                 LIMIT ?
                 """,
-                (max(1, int(limit)),),
+                parameters,
             ).fetchall()
+
         created = 0
         for row in rows:
             try:
@@ -426,7 +466,11 @@ class FvgLifecycleStore:
             parameters.append(symbol.upper())
         with self._connect() as connection:
             rows = connection.execute(
-                f"SELECT * FROM fvg_zones WHERE {where} ORDER BY formation_time, fvg_id",
+                f"""
+                SELECT * FROM fvg_zones
+                WHERE {where}
+                ORDER BY formation_time, fvg_id
+                """,
                 parameters,
             ).fetchall()
         return [self._row_to_zone(row) for row in rows]
@@ -445,7 +489,11 @@ class FvgLifecycleStore:
             ).fetchall()
         return frozenset(row["symbol"] for row in rows)
 
-    def _update_zone(self, connection: sqlite3.Connection, zone: FvgZoneState) -> None:
+    def _update_zone(
+        self,
+        connection: sqlite3.Connection,
+        zone: FvgZoneState,
+    ) -> None:
         values = self._zone_values(zone)
         assignments = ", ".join(
             f"{column} = :{column}"
@@ -472,8 +520,7 @@ class FvgLifecycleStore:
             if row is None:
                 connection.rollback()
                 return None
-            current = self._row_to_zone(row)
-            transition = advance_zone(current, candle, config)
+            transition = advance_zone(self._row_to_zone(row), candle, config)
             if not transition.changed:
                 connection.rollback()
                 return None
@@ -517,13 +564,20 @@ class FvgLifecycleStore:
         ]
 
     def counts(self) -> dict:
+        placeholders = ",".join("?" for _ in ACTIVE_STATUS_VALUES)
         with self._connect() as connection:
-            zones = int(connection.execute("SELECT COUNT(*) FROM fvg_zones").fetchone()[0])
+            zones = int(
+                connection.execute("SELECT COUNT(*) FROM fvg_zones").fetchone()[0]
+            )
             active = int(
                 connection.execute(
-                    f"SELECT COUNT(*) FROM fvg_zones WHERE status IN ({','.join('?' for _ in ACTIVE_STATUS_VALUES)})",
+                    f"SELECT COUNT(*) FROM fvg_zones WHERE status IN ({placeholders})",
                     ACTIVE_STATUS_VALUES,
                 ).fetchone()[0]
             )
-            events = int(connection.execute("SELECT COUNT(*) FROM fvg_zone_events").fetchone()[0])
+            events = int(
+                connection.execute(
+                    "SELECT COUNT(*) FROM fvg_zone_events"
+                ).fetchone()[0]
+            )
         return {"zones": zones, "active_zones": active, "zone_events": events}
