@@ -6,6 +6,7 @@ import json
 import os
 import threading
 from copy import deepcopy
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -13,8 +14,15 @@ from alerts.fvg_detector import price_allowed, size_allowed
 from alerts.fvg_models import FvgDirection, FvgEvent, FvgEventType
 from alerts.sqlite_event_store import FvgEventStore
 from config import MAX_ACTIVE_SYMBOLS, MAX_SYMBOLS_PER_USER
+from exchanges.funding import normalize_exchange
+from exchanges.fvg_candles import (
+    CONFIRMED_TIMEFRAMES,
+    is_bitcoin_symbol,
+    normalize_fvg_symbol,
+)
 
 
+UTC = timezone.utc
 _STORE_LOCKS: dict[str, threading.RLock] = {}
 _STORE_LOCKS_GUARD = threading.Lock()
 
@@ -51,9 +59,43 @@ class AtomicJsonStore:
             temporary.replace(self.path)
 
 
-def _symbol_defaults() -> dict:
+def instrument_key(exchange: str, symbol: str) -> str:
+    return f"{normalize_exchange(exchange)}|{normalize_fvg_symbol(symbol)}"
+
+
+def split_instrument_key(value: str) -> tuple[str, str]:
+    if "|" not in str(value):
+        return "bitunix", normalize_fvg_symbol(value)
+    exchange, symbol = str(value).split("|", 1)
+    return normalize_exchange(exchange), normalize_fvg_symbol(symbol)
+
+
+def _normalize_timeframes(values) -> list[str]:
+    selected = {
+        str(value).strip().lower()
+        for value in (values or ())
+        if str(value).strip()
+    }
+    invalid = selected.difference(CONFIRMED_TIMEFRAMES)
+    if invalid:
+        raise ValueError(f"Неподдерживаемые таймфреймы: {', '.join(sorted(invalid))}")
+    ordered = [value for value in CONFIRMED_TIMEFRAMES if value in selected]
+    if not ordered:
+        raise ValueError("Выберите хотя бы один таймфрейм.")
+    return ordered
+
+
+def _symbol_defaults(
+    exchange: str = "bitunix",
+    symbol: str = "BTCUSDT",
+    timeframes=None,
+) -> dict:
     return {
+        "exchange": normalize_exchange(exchange),
+        "symbol": normalize_fvg_symbol(symbol),
+        "timeframes": _normalize_timeframes(timeframes or ("15m",)),
         "enabled": True,
+        "created_at": datetime.now(UTC).isoformat(),
         "price_filter": {
             "enabled": False,
             "min": None,
@@ -83,7 +125,9 @@ def _user_defaults() -> dict:
         "notify_pre_fvg": False,
         "bullish_enabled": True,
         "bearish_enabled": True,
-        "symbols": {"BTCUSDT": _symbol_defaults()},
+        "symbols": {
+            instrument_key("bitunix", "BTCUSDT"): _symbol_defaults()
+        },
     }
 
 
@@ -107,12 +151,57 @@ def _decimal(value):
     try:
         return Decimal(str(value))
     except (InvalidOperation, ValueError, TypeError):
-        # Filter helpers fail closed for non-finite values.
         return Decimal("NaN")
 
 
+def _normalize_config(key: str, value: dict | None) -> tuple[str, dict]:
+    value = deepcopy(value) if isinstance(value, dict) else {}
+    exchange = value.get("exchange")
+    symbol = value.get("symbol")
+    if exchange is None or symbol is None:
+        key_exchange, key_symbol = split_instrument_key(key)
+        exchange = exchange or key_exchange
+        symbol = symbol or key_symbol
+    normalized_key = instrument_key(exchange, symbol)
+    defaults = _symbol_defaults(exchange, symbol, value.get("timeframes") or ("15m",))
+    defaults.update(value)
+    defaults["exchange"] = normalize_exchange(exchange)
+    defaults["symbol"] = normalize_fvg_symbol(symbol)
+    defaults["timeframes"] = _normalize_timeframes(
+        defaults.get("timeframes") or ("15m",)
+    )
+    defaults["enabled"] = bool(defaults.get("enabled", True))
+    for filter_name in ("price_filter", "size_filter"):
+        merged = deepcopy(_symbol_defaults(exchange, symbol)[filter_name])
+        if isinstance(value.get(filter_name), dict):
+            merged.update(value[filter_name])
+        defaults[filter_name] = merged
+    return normalized_key, defaults
+
+
+def _normalize_user(value: dict | None) -> dict:
+    defaults = _user_defaults()
+    if isinstance(value, dict):
+        for key in (
+            "enabled",
+            "notify_confirmed_fvg",
+            "notify_pre_fvg",
+            "bullish_enabled",
+            "bearish_enabled",
+        ):
+            if key in value:
+                defaults[key] = bool(value[key])
+        raw_symbols = value.get("symbols", {})
+        if isinstance(raw_symbols, dict):
+            defaults["symbols"] = dict(
+                _normalize_config(key, config)
+                for key, config in raw_symbols.items()
+            )
+    return defaults
+
+
 class FvgAlertSettings:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(self, path: str = "data/fvg_alert_settings.json"):
         self.store = AtomicJsonStore(path)
@@ -121,7 +210,24 @@ class FvgAlertSettings:
     def _read(self) -> dict:
         raw = self.store.read()
         if raw.get("schema_version") == self.SCHEMA_VERSION:
-            return raw
+            return {
+                **raw,
+                "users": {
+                    str(chat_id): _normalize_user(user)
+                    for chat_id, user in raw.get("users", {}).items()
+                },
+            }
+
+        if raw.get("schema_version") == 2:
+            return {
+                "schema_version": self.SCHEMA_VERSION,
+                "users": {
+                    str(chat_id): _normalize_user(user)
+                    for chat_id, user in raw.get("users", {}).items()
+                },
+                "legacy_last_event_key": raw.get("legacy_last_event_key"),
+                "legacy_last_pre_event_key": raw.get("legacy_last_pre_event_key"),
+            }
 
         users = {}
         known_ids = set(raw.get("enabled_chat_ids", [])) | set(
@@ -179,7 +285,14 @@ class FvgAlertSettings:
         return frozenset(
             int(key)
             for key, value in self._read().get("users", {}).items()
-            if value.get("enabled") and value.get("notify_pre_fvg", False)
+            if value.get("enabled")
+            and value.get("notify_pre_fvg", False)
+            and any(
+                config.get("enabled", True)
+                and is_bitcoin_symbol(config.get("symbol", ""))
+                and "15m" in config.get("timeframes", ())
+                for config in value.get("symbols", {}).values()
+            )
         )
 
     def is_enabled(self, chat_id):
@@ -211,30 +324,127 @@ class FvgAlertSettings:
         )
         self.update_user(chat_id, **{key: bool(enabled)})
 
-    def add_symbol(self, chat_id: int, symbol: str) -> None:
-        symbol = symbol.upper()
+    @staticmethod
+    def _find_key(user: dict, value: str, exchange: str | None = None) -> str | None:
+        symbols = user.setdefault("symbols", {})
+        if value in symbols:
+            return value
+        if exchange is not None:
+            candidate = instrument_key(exchange, value)
+            return candidate if candidate in symbols else None
+        symbol = normalize_fvg_symbol(value)
+        bitunix = instrument_key("bitunix", symbol)
+        if bitunix in symbols:
+            return bitunix
+        matches = [
+            key
+            for key, config in symbols.items()
+            if config.get("symbol") == symbol
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    def add_instrument(
+        self,
+        chat_id: int,
+        exchange: str,
+        symbol: str,
+        timeframes,
+    ) -> str:
+        key = instrument_key(exchange, symbol)
+        normalized_timeframes = _normalize_timeframes(timeframes)
 
         def mutate(data):
             user = data.setdefault("users", {}).setdefault(
                 str(chat_id), _user_defaults()
             )
             symbols = user.setdefault("symbols", {})
-            if symbol not in symbols and len(symbols) >= MAX_SYMBOLS_PER_USER:
+            if key in symbols:
+                raise ValueError(
+                    "Этот инструмент уже добавлен. Измените его таймфреймы в настройках."
+                )
+            if len(symbols) >= MAX_SYMBOLS_PER_USER:
                 raise ValueError(
                     f"Можно добавить не более {MAX_SYMBOLS_PER_USER} инструментов."
                 )
-            symbols.setdefault(symbol, _symbol_defaults())
+            symbols[key] = _symbol_defaults(exchange, symbol, normalized_timeframes)
+            user["enabled"] = True
+            return key
 
-        self._transaction(mutate)
+        return self._transaction(mutate)
 
-    def remove_symbol(self, chat_id: int, symbol: str) -> None:
+    def add_symbol(self, chat_id: int, symbol: str) -> None:
+        key = instrument_key("bitunix", symbol)
+
         def mutate(data):
             user = data.setdefault("users", {}).setdefault(
                 str(chat_id), _user_defaults()
             )
-            user.setdefault("symbols", {}).pop(symbol.upper(), None)
+            symbols = user.setdefault("symbols", {})
+            if key not in symbols and len(symbols) >= MAX_SYMBOLS_PER_USER:
+                raise ValueError(
+                    f"Можно добавить не более {MAX_SYMBOLS_PER_USER} инструментов."
+                )
+            symbols.setdefault(key, _symbol_defaults("bitunix", symbol, ("15m",)))
 
         self._transaction(mutate)
+
+    def update_instrument_timeframes(
+        self,
+        chat_id: int,
+        key: str,
+        timeframes,
+    ) -> None:
+        normalized = _normalize_timeframes(timeframes)
+
+        def mutate(data):
+            user = data.setdefault("users", {}).setdefault(
+                str(chat_id), _user_defaults()
+            )
+            resolved = self._find_key(user, key)
+            if resolved is None:
+                raise ValueError("Инструмент уже удалён или не найден.")
+            user["symbols"][resolved]["timeframes"] = normalized
+
+        self._transaction(mutate)
+
+    def set_instrument_enabled(self, chat_id: int, key: str, enabled: bool) -> None:
+        def mutate(data):
+            user = data.setdefault("users", {}).setdefault(
+                str(chat_id), _user_defaults()
+            )
+            resolved = self._find_key(user, key)
+            if resolved is None:
+                raise ValueError("Инструмент уже удалён или не найден.")
+            user["symbols"][resolved]["enabled"] = bool(enabled)
+
+        self._transaction(mutate)
+
+    def remove_instrument(self, chat_id: int, key: str) -> None:
+        def mutate(data):
+            user = data.setdefault("users", {}).setdefault(
+                str(chat_id), _user_defaults()
+            )
+            resolved = self._find_key(user, key)
+            if resolved is not None:
+                user.setdefault("symbols", {}).pop(resolved, None)
+
+        self._transaction(mutate)
+
+    def remove_symbol(self, chat_id: int, symbol: str) -> None:
+        self.remove_instrument(chat_id, instrument_key("bitunix", symbol))
+
+    def _ensure_filter_instrument(self, user: dict, value: str) -> str:
+        resolved = self._find_key(user, value)
+        if resolved is not None:
+            return resolved
+        symbols = user.setdefault("symbols", {})
+        if len(symbols) >= MAX_SYMBOLS_PER_USER:
+            raise ValueError(
+                f"Можно добавить не более {MAX_SYMBOLS_PER_USER} инструментов."
+            )
+        key = instrument_key("bitunix", value)
+        symbols[key] = _symbol_defaults("bitunix", value, ("15m",))
+        return key
 
     def set_price_filter(
         self,
@@ -257,10 +467,8 @@ class FvgAlertSettings:
             user = data.setdefault("users", {}).setdefault(
                 str(chat_id), _user_defaults()
             )
-            symbol_data = user.setdefault("symbols", {}).setdefault(
-                symbol.upper(), _symbol_defaults()
-            )
-            symbol_data["price_filter"] = {
+            key = self._ensure_filter_instrument(user, symbol)
+            user["symbols"][key]["price_filter"] = {
                 "enabled": bool(enabled),
                 "min": str(min_value) if min_value is not None else None,
                 "max": str(max_value) if max_value is not None else None,
@@ -285,7 +493,7 @@ class FvgAlertSettings:
         apply_to_bullish: bool = True,
         apply_to_bearish: bool = True,
     ) -> None:
-        del maximum  # Size filters intentionally use a minimum only.
+        del maximum
         unit = unit.upper()
         if unit not in {"USD", "PERCENT"}:
             raise ValueError("Единица размера должна быть USD или PERCENT")
@@ -295,10 +503,8 @@ class FvgAlertSettings:
             user = data.setdefault("users", {}).setdefault(
                 str(chat_id), _user_defaults()
             )
-            symbol_data = user.setdefault("symbols", {}).setdefault(
-                symbol.upper(), _symbol_defaults()
-            )
-            symbol_data["size_filter"] = {
+            key = self._ensure_filter_instrument(user, symbol)
+            user["symbols"][key]["size_filter"] = {
                 "enabled": bool(enabled),
                 "unit": unit,
                 "min": str(min_value) if min_value is not None else None,
@@ -311,19 +517,59 @@ class FvgAlertSettings:
 
         self._transaction(mutate)
 
+    def active_markets(self) -> tuple[tuple[str, str, str], ...]:
+        markets: set[tuple[str, str, str]] = set()
+        for user in self._read().get("users", {}).values():
+            if not user.get("enabled") or not user.get("notify_confirmed_fvg", True):
+                continue
+            for config in user.get("symbols", {}).values():
+                if not config.get("enabled", True):
+                    continue
+                for timeframe in config.get("timeframes", ("15m",)):
+                    markets.add((config["exchange"], config["symbol"], timeframe))
+        return tuple(sorted(markets)[:MAX_ACTIVE_SYMBOLS])
+
+    def pre_active_markets(self) -> tuple[tuple[str, str], ...]:
+        markets: set[tuple[str, str]] = set()
+        for user in self._read().get("users", {}).values():
+            if not user.get("enabled") or not user.get("notify_pre_fvg", False):
+                continue
+            for config in user.get("symbols", {}).values():
+                if (
+                    config.get("enabled", True)
+                    and "15m" in config.get("timeframes", ())
+                    and is_bitcoin_symbol(config.get("symbol", ""))
+                ):
+                    markets.add((config["exchange"], config["symbol"]))
+        return tuple(sorted(markets)[:MAX_ACTIVE_SYMBOLS])
+
     def active_symbols(self) -> frozenset[str]:
+        """Bitunix symbols retained for the existing shared WebSocket."""
         symbols: set[str] = set()
         for user in self._read().get("users", {}).values():
-            if user.get("enabled"):
-                symbols.update(
-                    symbol
-                    for symbol, config in user.get("symbols", {}).items()
-                    if config.get("enabled", True)
+            if not user.get("enabled"):
+                continue
+            for config in user.get("symbols", {}).values():
+                if config.get("exchange") != "bitunix" or not config.get("enabled", True):
+                    continue
+                confirmed = (
+                    user.get("notify_confirmed_fvg", True)
+                    and "15m" in config.get("timeframes", ())
                 )
+                preliminary = (
+                    user.get("notify_pre_fvg", False)
+                    and is_bitcoin_symbol(config.get("symbol", ""))
+                    and "15m" in config.get("timeframes", ())
+                )
+                if confirmed or preliminary:
+                    symbols.add(config["symbol"])
         return frozenset(sorted(symbols)[:MAX_ACTIVE_SYMBOLS])
 
     def recipients(self, event: FvgEvent) -> list[int]:
         recipients = []
+        if event.event_type is FvgEventType.PRE_FVG and not is_bitcoin_symbol(event.symbol):
+            return recipients
+        event_key = instrument_key(event.exchange, event.symbol)
         for key, user in self._read().get("users", {}).items():
             if not user.get("enabled"):
                 continue
@@ -345,8 +591,10 @@ class FvgAlertSettings:
             if not user.get(direction_key, True):
                 continue
 
-            symbol_config = user.get("symbols", {}).get(event.symbol)
+            symbol_config = user.get("symbols", {}).get(event_key)
             if not symbol_config or not symbol_config.get("enabled", True):
+                continue
+            if event.timeframe not in symbol_config.get("timeframes", ("15m",)):
                 continue
 
             apply_key = (
@@ -392,7 +640,6 @@ class FvgAlertSettings:
             recipients.append(int(key))
         return recipients
 
-    # Compatibility with the old tests/API.
     def is_new(self, event_key):
         return self._read().get("legacy_last_event_key") != event_key
 
@@ -414,4 +661,6 @@ __all__ = [
     "AtomicJsonStore",
     "FvgAlertSettings",
     "FvgEventStore",
+    "instrument_key",
+    "split_instrument_key",
 ]
