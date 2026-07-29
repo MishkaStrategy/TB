@@ -7,8 +7,8 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from alerts.fvg_detector import FvgDetector
-from alerts.fvg_models import Candle, FvgEventType, event_id
+from alerts.fvg_detector import FvgDetector, aggregate_current_15m
+from alerts.fvg_models import Candle, event_id
 from alerts.fvg_multi_exchange import MultiExchangeFvgPoller
 from alerts.fvg_store import FvgAlertSettings, instrument_key
 from alerts.scheduler import run_fvg_control_point
@@ -18,12 +18,18 @@ from exchanges.fvg_candles import (
     normalize_fvg_symbol,
     timeframe_due,
 )
-from handlers.fvg_instruments import FAQ_TEXTS, format_instruments_text
+from handlers.fvg_instruments import (
+    FAQ_TEXTS,
+    build_confirmation_menu,
+    format_confirmation_text,
+    format_instruments_text,
+)
 
 
 UTC = timezone.utc
 BASE = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
 STEPS = {
+    "1m": timedelta(minutes=1),
     "15m": timedelta(minutes=15),
     "1h": timedelta(hours=1),
     "4h": timedelta(hours=4),
@@ -141,21 +147,30 @@ class InstrumentSettingsTests(unittest.TestCase):
             )
             self.assertEqual(settings.recipients(event), [1])
 
-    def test_pre_fvg_is_rejected_for_non_bitcoin(self):
+    def test_pre_fvg_is_not_calculated_or_created_for_non_bitcoin(self):
+        class MustNotIterate:
+            def __iter__(self):
+                raise AssertionError("Non-BTC minute candles must not be aggregated")
+
+        now = BASE + timedelta(minutes=12)
+        self.assertIsNone(
+            aggregate_current_15m("ETHUSDT", MustNotIterate(), BASE, now)
+        )
+
+        detector = FvgDetector()
+        a = candle(0, 100, 90, symbol="ETHUSDT")
+        b = candle(1, 108, 96, symbol="ETHUSDT")
+        c = candle(2, 112, 105, symbol="ETHUSDT", closed=False)
+        self.assertIsNone(
+            detector.detect_pre(a, b, c, c.open_time + timedelta(minutes=12))
+        )
+
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
             settings.remove_symbol(1, "BTCUSDT")
             settings.add_instrument(1, "bitunix", "ETHUSDT", ("15m",))
             settings.set_enabled(1, True)
             settings.set_pre_enabled(1, True)
-            detector = FvgDetector()
-            a = candle(0, 100, 90, symbol="ETHUSDT")
-            b = candle(1, 108, 96, symbol="ETHUSDT")
-            c = candle(2, 112, 105, symbol="ETHUSDT", closed=False)
-            event = detector.detect_pre(a, b, c, c.open_time + timedelta(minutes=12))
-
-            self.assertEqual(event.event_type, FvgEventType.PRE_FVG)
-            self.assertEqual(settings.recipients(event), [])
             self.assertEqual(settings.pre_active_markets(), ())
 
     def test_pre_fvg_works_for_bitcoin_on_selected_exchange(self):
@@ -296,7 +311,28 @@ class SharedSchedulerTests(unittest.IsolatedAsyncioTestCase):
         service.deliver.assert_awaited_once()
 
 
-class FaqTests(unittest.TestCase):
+class InterfaceAndFaqTests(unittest.TestCase):
+    def test_review_screen_requires_explicit_confirmation(self):
+        state = {
+            "action": "add",
+            "exchange": "binance",
+            "symbol": "ETHUSDT",
+            "timeframes": ["15m", "1h"],
+        }
+        text = format_confirmation_text(state)
+        buttons = [
+            button
+            for row in build_confirmation_menu().inline_keyboard
+            for button in row
+        ]
+        self.assertIn("Проверьте настройки", text)
+        self.assertIn("ETHUSDT", text)
+        self.assertIn("15м, 1ч", text)
+        self.assertEqual(
+            [button.callback_data for button in buttons],
+            ["fvg-inst:confirm", "fvg-inst:change", "fvg-inst:cancel"],
+        )
+
     def test_faq_is_separate_and_explains_core_rules(self):
         self.assertIn("FAQ", FAQ_TEXTS["main"])
         self.assertIn("закрытия свечи", FAQ_TEXTS["confirmed"])
