@@ -141,8 +141,32 @@ class FvgOutboxCompatibility:
                     )
         return {"copied": copied, "skipped_delivered": skipped_delivered}
 
+    def cleanup_orphaned_sync(self, *, limit=500):
+        """Bound compatibility metadata after terminal outbox retention cleanup."""
+        with self._connect() as connection:
+            if not self._table_exists(connection, "telegram_outbox"):
+                return 0
+            rows = connection.execute(
+                """
+                SELECT synced.outbox_id
+                FROM telegram_outbox_domain_sync AS synced
+                LEFT JOIN telegram_outbox AS item ON item.id=synced.outbox_id
+                WHERE item.id IS NULL
+                ORDER BY synced.synced_at
+                LIMIT ?
+                """,
+                (max(1, int(limit)),),
+            ).fetchall()
+            if rows:
+                connection.executemany(
+                    "DELETE FROM telegram_outbox_domain_sync WHERE outbox_id=?",
+                    [(row["outbox_id"],) for row in rows],
+                )
+        return len(rows)
+
     def sync_terminal(self, store, event_store, *, limit=500, now=None):
         del store
+        self.cleanup_orphaned_sync(limit=limit)
         if event_store is None:
             return 0
         placeholders = ",".join("?" for _ in TERMINAL_STATUSES)
