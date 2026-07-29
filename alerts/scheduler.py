@@ -147,7 +147,10 @@ async def run_operational_health(context):
     monitor = context.job.data["health_monitor"]
     try:
         health = await asyncio.to_thread(service.event_store.health)
-        active_markets = await asyncio.to_thread(service.settings.active_markets)
+        market_getter = getattr(service.settings, "active_markets", None)
+        if market_getter is None:
+            market_getter = service.settings.active_symbols
+        active_markets = await asyncio.to_thread(market_getter)
         alerts = monitor.evaluate(
             health,
             has_active_symbols=bool(active_markets),
