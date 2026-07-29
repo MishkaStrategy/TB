@@ -26,6 +26,12 @@ if [[ ! -x "${PYTHON}" ]]; then
   echo "Python executable does not exist: ${PYTHON}" >&2
   exit 1
 fi
+for command_name in flock rsync tar; do
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "Required command is unavailable: ${command_name}" >&2
+    exit 1
+  fi
+done
 
 mkdir -p "${BACKUP_DIR}"
 chmod 700 "${BACKUP_DIR}"
@@ -41,7 +47,6 @@ started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 temporary="${BACKUP_DIR}/.fvg-alert-bot-${timestamp}.tar.gz.tmp"
 archive="${BACKUP_DIR}/fvg-alert-bot-${timestamp}.tar.gz"
 checksum="${archive}.sha256"
-checksum_temporary="${checksum}.tmp"
 history="${BACKUP_DIR}/backup_history.sqlite3"
 snapshot="$(mktemp -d "${BACKUP_DIR}/.snapshot-${timestamp}.XXXXXX")"
 run_id=""
@@ -61,7 +66,7 @@ cleanup() {
       >/dev/null 2>&1 || true
   fi
   rm -rf "${snapshot}"
-  rm -f "${temporary}" "${checksum_temporary}"
+  rm -f "${temporary}" "${checksum}.tmp"
 }
 trap cleanup EXIT
 
@@ -86,13 +91,28 @@ rsync -a \
 event_database="${DATA_DIR}/fvg_event_store.sqlite3"
 if [[ -f "${event_database}" ]]; then
   current_step="snapshot_fvg_database"
-  PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" - \
+  "${PYTHON}" - \
     "${event_database}" "${snapshot}/fvg_event_store.sqlite3" <<'PY'
+import os
+import sqlite3
 import sys
-from alerts.sqlite_event_store import FvgEventStore
+from contextlib import closing
+from pathlib import Path
 
-source, destination = sys.argv[1:3]
-FvgEventStore(source).backup_to(destination)
+source = Path(sys.argv[1]).resolve()
+destination = Path(sys.argv[2])
+temporary = destination.with_suffix(destination.suffix + ".tmp")
+temporary.unlink(missing_ok=True)
+uri = f"{source.as_uri()}?mode=ro"
+with closing(sqlite3.connect(uri, uri=True, timeout=30)) as source_connection:
+    checks = [row[0] for row in source_connection.execute("PRAGMA quick_check")]
+    if checks != ["ok"]:
+        raise RuntimeError(f"Source SQLite quick_check failed: {checks}")
+    with closing(sqlite3.connect(temporary, timeout=30)) as target:
+        source_connection.backup(target)
+        target.commit()
+os.chmod(temporary, 0o600)
+temporary.replace(destination)
 PY
 fi
 
@@ -104,14 +124,21 @@ if [[ -f "${funding_database}" ]]; then
 import os
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
-source = Path(sys.argv[1])
+source = Path(sys.argv[1]).resolve()
 destination = Path(sys.argv[2])
 temporary = destination.with_suffix(destination.suffix + ".tmp")
 temporary.unlink(missing_ok=True)
-with sqlite3.connect(source) as source_connection, sqlite3.connect(temporary) as target:
-    source_connection.backup(target)
+uri = f"{source.as_uri()}?mode=ro"
+with closing(sqlite3.connect(uri, uri=True, timeout=30)) as source_connection:
+    checks = [row[0] for row in source_connection.execute("PRAGMA quick_check")]
+    if checks != ["ok"]:
+        raise RuntimeError(f"Source SQLite quick_check failed: {checks}")
+    with closing(sqlite3.connect(temporary, timeout=30)) as target:
+        source_connection.backup(target)
+        target.commit()
 os.chmod(temporary, 0o600)
 temporary.replace(destination)
 PY
