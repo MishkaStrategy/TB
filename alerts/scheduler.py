@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 
 from alerts.funding_alerts import FundingAlertService
 from alerts.funding_quarter_hour import next_quarter_hour
+from alerts.fvg_limited_service import FvgAlertService
 from alerts.fvg_multi_exchange import MultiExchangeFvgPoller
-from alerts.fvg_service import FvgAlertService
 from alerts.fvg_stream import BitunixFvgStream
 from alerts.health_monitor import HealthAlertMonitor
 from config import (
