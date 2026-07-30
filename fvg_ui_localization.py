@@ -75,7 +75,7 @@ TEXT_REPLACEMENTS = (
     ),
     (
         "Добавьте первый инструмент: выберите биржу, пару и один или несколько таймфреймов.",
-        "Add your first instrument: choose an exchange, pair, and one or more timeframes.",
+        "Add your first instrument: choose an exchange, pair, and supported timeframes.",
     ),
     (
         "Пред-FVG формируется только для BTC на 15м. Для остальных инструментов доступны только подтверждённые сигналы после закрытия свечи C.",
@@ -89,11 +89,28 @@ TEXT_REPLACEMENTS = (
         "Пред-FVG доступен только для BTC-инструмента с таймфреймом 15 минут.",
         "Pre-FVG is available only for a BTC instrument on the 15-minute timeframe.",
     ),
+    (
+        "Пред-FVG доступен только для BTC с выбранным таймфреймом 15 минут.",
+        "Pre-FVG is available only for BTC with the 15-minute timeframe selected.",
+    ),
+    ("Для BTC доступны 15м, 1ч, 4ч и 1д.", "BTC supports 15m, 1h, 4h, and 1d."),
+    (
+        "Для этого инструмента доступен только таймфрейм 15 минут.",
+        "Only the 15-minute timeframe is available for this instrument.",
+    ),
+    (
+        "Для BTC доступны 15 минут, 1 час, 4 часа и 1 день. Для остальных активов сейчас доступен только таймфрейм 15 минут.",
+        "BTC supports 15 minutes, 1 hour, 4 hours, and 1 day. Other assets currently support only the 15-minute timeframe.",
+    ),
+    (
+        "Для BTC доступны таймфреймы 15 минут, 1 час, 4 часа и 1 день. Для ETH, SOL и остальных активов доступен подтверждённый FVG на 15 минутах.",
+        "BTC supports 15 minutes, 1 hour, 4 hours, and 1 day. ETH, SOL, and other assets support confirmed FVG on 15 minutes.",
+    ),
     ("Удалите один инструмент, чтобы освободить место.", "Delete an instrument to free a slot."),
     ("Добавлено инструментов:", "Instruments added:"),
     (
         "У вас пока нет инструментов. Добавьте биржу, торговую пару и таймфреймы.",
-        "You have no instruments yet. Add an exchange, trading pair, and timeframes.",
+        "You have no instruments yet. Add an exchange, trading pair, and supported timeframes.",
     ),
     (
         "Выберите раздел. Здесь объясняется, когда приходит сигнал, почему пред-FVG доступен только для Bitcoin и как считается лимит инструментов.",
@@ -101,7 +118,7 @@ TEXT_REPLACEMENTS = (
     ),
     ("1. Выберите биржу.", "1. Choose an exchange."),
     ("2. Введите пару: BTC, BTCUSDT или BTC/USDT.", "2. Enter a pair: BTC, BTCUSDT, or BTC/USDT."),
-    ("3. Отметьте таймфреймы.", "3. Select timeframes."),
+    ("3. Выберите доступные таймфреймы.", "3. Select the available timeframes."),
     ("4. Проверьте настройки и подтвердите сохранение.", "4. Review the settings and confirm."),
     (
         "Одинаковая пара на разных биржах считается разными инструментами, потому что свечи и котировки могут отличаться.",
@@ -112,31 +129,29 @@ TEXT_REPLACEMENTS = (
         "FVG is a price imbalance across three candles. A standard alert arrives only after candle C closes and confirms the zone.",
     ),
     (
-        "Доступные таймфреймы: 15 минут, 1 час, 4 часа и 1 день. Одна и та же подтверждённая зона повторно не отправляется.",
-        "Available timeframes: 15 minutes, 1 hour, 4 hours, and 1 day. The same confirmed zone is not sent twice.",
+        "Пред-FVG предупреждает о возможной 15-минутной зоне до закрытия свечи C. Эта функция доступна только для пар с базовым активом BTC и только при выбранном таймфрейме 15 минут.",
+        "Pre-FVG warns about a possible 15-minute zone before candle C closes. It is available only for BTC pairs with the 15-minute timeframe selected.",
     ),
     (
-        "Пред-FVG предупреждает о возможной 15-минутной зоне до закрытия свечи C. Эта функция доступна только для пар с базовым активом BTC.",
-        "Pre-FVG warns about a possible 15-minute zone before candle C closes. It is available only for pairs with BTC as the base asset.",
+        "Для ETH, SOL и остальных активов уведомление приходит исключительно после подтверждения закрытой свечой на таймфрейме 15 минут.",
+        "For ETH, SOL, and other assets, alerts arrive only after confirmation by a closed 15-minute candle.",
     ),
-    (
-        "Для ETH, SOL и остальных активов уведомление приходит исключительно после подтверждения закрытой свечой.",
-        "For ETH, SOL, and other assets, alerts arrive only after confirmation by a closed candle.",
-    ),
-    ("Несколько таймфреймов одной пары занимают одно место.", "Multiple timeframes for one pair use a single slot."),
+    ("Несколько таймфреймов одной BTC-пары занимают одно место.", "Multiple timeframes for one BTC pair use a single slot."),
     (
         "Отключённый инструмент сохраняет настройки и продолжает занимать место. После удаления место освобождается.",
         "A disabled instrument keeps its settings and still uses a slot. Deleting it frees the slot.",
     ),
-    (
-        "Выберите хотя бы один таймфрейм. Уведомление придёт только после закрытия подтверждающей свечи.",
-        "Select at least one timeframe. The alert arrives only after the confirming candle closes.",
-    ),
-    (
-        "Сигнал будет отправлен только после закрытия свечи, подтверждающей FVG.",
-        "The alert will be sent only after the candle confirming the FVG closes.",
-    ),
+    ("Уведомление придёт только после закрытия подтверждающей свечи.", "The alert arrives only after the confirming candle closes."),
+    ("Сигнал будет отправлен только после закрытия свечи, подтверждающей FVG.", "The alert will be sent only after the candle confirming the FVG closes."),
     ("Инструмент уже удалён или не найден.", "The instrument was deleted or could not be found."),
+    ("Пред-FVG: добавьте таймфрейм 15м", "Pre-FVG: add the 15m timeframe"),
+    ("пред-FVG BTC выключен", "BTC pre-FVG disabled"),
+    ("пред-FVG недоступен", "pre-FVG unavailable"),
+    ("пред-FVG BTC", "BTC pre-FVG"),
+    ("без подтверждённых", "confirmed disabled"),
+    ("нужен BTC с таймфреймом 15м", "requires BTC on 15m"),
+    ("🐮 бычьи", "🐮 bullish"),
+    ("🐻 медвежьи", "🐻 bearish"),
     ("Модуль:", "Module:"),
     ("Инструменты:", "Instruments:"),
     ("Биржи:", "Exchanges:"),
@@ -156,14 +171,7 @@ TEXT_REPLACEMENTS = (
     ("включён", "enabled"),
     ("выключены", "disabled"),
     ("выключен", "disabled"),
-    ("без подтверждённых", "confirmed disabled"),
     ("подтверждённые", "confirmed"),
-    ("пред-FVG BTC выключен", "BTC pre-FVG disabled"),
-    ("пред-FVG BTC", "BTC pre-FVG"),
-    ("пред-FVG недоступен", "pre-FVG unavailable"),
-    ("нужен BTC с таймфреймом 15м", "requires BTC on 15m"),
-    ("🐮 бычьи", "🐮 bullish"),
-    ("🐻 медвежьи", "🐻 bearish"),
     ("не выбраны", "not selected"),
 )
 
