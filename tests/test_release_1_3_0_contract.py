@@ -10,11 +10,11 @@ from database.process_restart_guard_status import read_restart_guard_status
 from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
 
 
-class Release131ContractTests(unittest.TestCase):
+class Release132ContractTests(unittest.TestCase):
     def test_release_version_and_vds_default(self):
-        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.1")
+        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.2")
         updater = Path("scripts/update_vds.sh").read_text(encoding="utf-8")
-        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.1}"', updater)
+        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.2}"', updater)
 
     def test_candidate_tests_are_isolated_from_production_env(self):
         installer = Path("scripts/install_vds.sh").read_text(encoding="utf-8")
