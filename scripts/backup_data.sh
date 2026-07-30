@@ -116,6 +116,8 @@ esac
 current_step="copy_runtime_files"
 rsync -a \
   --exclude '.manual_backups' \
+  --exclude '._*' \
+  --exclude '.DS_Store' \
   --exclude 'fvg_event_store.sqlite3' \
   --exclude 'fvg_event_store.sqlite3-wal' \
   --exclude 'fvg_event_store.sqlite3-shm' \
@@ -249,7 +251,9 @@ PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" -m database.backup_audit \
   >/dev/null
 
 current_step="create_archive"
-tar -C "${snapshot}" -czf "${temporary}" .
+# BSD tar on macOS may synthesize AppleDouble (._*) members for extended
+# attributes. They are not runtime data and are not part of the manifest.
+COPYFILE_DISABLE=1 tar -C "${snapshot}" -czf "${temporary}" .
 chmod 600 "${temporary}"
 
 current_step="verify_temporary_archive"
