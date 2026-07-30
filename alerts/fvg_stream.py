@@ -13,6 +13,7 @@ import aiohttp
 import certifi
 
 from config import FVG_DELIVERY_QUEUE_SIZE, MAX_ACTIVE_SYMBOLS
+from exchanges.fvg_candles import is_bitcoin_symbol
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,12 @@ class BitunixFvgStream:
                 MAX_ACTIVE_SYMBOLS,
             )
         return symbols[:MAX_ACTIVE_SYMBOLS]
+
+    @staticmethod
+    def _channels_for(symbol: str) -> tuple[str, ...]:
+        if is_bitcoin_symbol(symbol):
+            return ("market_kline_1min", "market_kline_15min")
+        return ("market_kline_15min",)
 
     def _raise_if_kline_stale(
         self,
@@ -172,7 +179,7 @@ class BitunixFvgStream:
                         args = [
                             {"symbol": symbol, "ch": channel}
                             for symbol in symbols
-                            for channel in ("market_kline_1min", "market_kline_15min")
+                            for channel in self._channels_for(symbol)
                         ]
                         await ws.send_json({"op": "subscribe", "args": args})
                         now = datetime.now(UTC)
@@ -213,10 +220,7 @@ class BitunixFvgStream:
                                         "args": [
                                             {"symbol": symbol, "ch": channel}
                                             for symbol in sorted(removed)
-                                            for channel in (
-                                                "market_kline_1min",
-                                                "market_kline_15min",
-                                            )
+                                            for channel in self._channels_for(symbol)
                                         ],
                                     })
                                 if added:
@@ -225,10 +229,7 @@ class BitunixFvgStream:
                                         "args": [
                                             {"symbol": symbol, "ch": channel}
                                             for symbol in sorted(added)
-                                            for channel in (
-                                                "market_kline_1min",
-                                                "market_kline_15min",
-                                            )
+                                            for channel in self._channels_for(symbol)
                                         ],
                                     })
                                     for symbol in sorted(added):
