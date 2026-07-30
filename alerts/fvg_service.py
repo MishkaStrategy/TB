@@ -9,13 +9,18 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
-from telegram.error import Forbidden, RetryAfter
-
 from alerts.fvg_detector import FvgDetector, aggregate_current_15m
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType
 from alerts.fvg_store import FvgAlertSettings, FvgEventStore
-from config import HEALTH_WRITE_INTERVAL_SECONDS
+from alerts.telegram_errors import TelegramErrorKind, classify_telegram_error
+from config import (
+    DELIVERY_STATUS_TRACKING_ENABLED,
+    HEALTH_WRITE_INTERVAL_SECONDS,
+    USER_BLOCK_STATUS_ENABLED,
+)
+from database.telegram_delivery import TelegramDeliveryRegistry
 from exchanges.bitunix import BitunixClient
+from exchanges.funding import exchange_label
 
 
 logger = logging.getLogger(__name__)
@@ -110,14 +115,62 @@ class CandleCache:
 
 
 class FvgAlertService:
-    def __init__(self, client=None, detector=None, settings=None, event_store=None):
+    def __init__(
+        self,
+        client=None,
+        detector=None,
+        settings=None,
+        event_store=None,
+        delivery_registry=None,
+        suppress_unavailable_users=None,
+    ):
         self.client = client or BitunixClient()
         self.detector = detector or FvgDetector()
         self.settings = settings or FvgAlertSettings()
         self.event_store = event_store or FvgEventStore()
+        self.delivery_registry = delivery_registry
+        if self.delivery_registry is None and (
+            DELIVERY_STATUS_TRACKING_ENABLED or USER_BLOCK_STATUS_ENABLED
+        ):
+            self.delivery_registry = TelegramDeliveryRegistry(
+                getattr(self.event_store, "path", None)
+            )
+        self.suppress_unavailable_users = (
+            USER_BLOCK_STATUS_ENABLED
+            if suppress_unavailable_users is None
+            else bool(suppress_unavailable_users)
+        )
         self.cache = CandleCache()
         self._delivery_lock = asyncio.Lock()
         self._last_ws_health_write = 0.0
+
+    def _delivery_allowed(self, chat_id: int | str) -> bool:
+        return (
+            not self.suppress_unavailable_users
+            or self.delivery_registry is None
+            or self.delivery_registry.can_deliver(chat_id)
+        )
+
+    def _filter_recipients(self, recipients) -> list[int]:
+        recipients = list(recipients)
+        if self.delivery_registry is None or not self.suppress_unavailable_users:
+            return recipients
+        allowed = [chat_id for chat_id in recipients if self._delivery_allowed(chat_id)]
+        suppressed = len(recipients) - len(allowed)
+        if suppressed:
+            self.event_store.increment_health(
+                "delivery_suppressed_inactive_users",
+                suppressed,
+            )
+        return allowed
+
+    def _record_delivery_failure(self, chat_id, decision, error) -> None:
+        if self.delivery_registry is not None:
+            self.delivery_registry.record_failure(chat_id, decision, error)
+
+    def _record_delivery_success(self, chat_id) -> None:
+        if self.delivery_registry is not None:
+            self.delivery_registry.record_success(chat_id)
 
     def recover(self, symbol: str, now: datetime | None = None) -> list[FvgEvent]:
         """Restore recent data and return only timely pre/current confirmed events."""
@@ -206,7 +259,9 @@ class FvgAlertService:
                         else "confirmed_events"
                     )
                 try:
-                    recipients = self.settings.recipients(event)
+                    recipients = self._filter_recipients(
+                        self.settings.recipients(event)
+                    )
                 except Exception as error:
                     logger.exception(
                         "Failed to evaluate FVG recipients event=%s",
@@ -265,54 +320,64 @@ class FvgAlertService:
             chat_id = item["chat_id"]
             event_id = item["event_id"]
             attempts = int(item.get("attempts", 0))
+
+            if not self._delivery_allowed(chat_id):
+                self.event_store.abandon_delivery(chat_id, event_id)
+                self.event_store.increment_health(
+                    "delivery_suppressed_inactive_users"
+                )
+                continue
+
             try:
                 await bot.send_message(
                     chat_id=int(chat_id),
                     text=item["message_text"],
                 )
-            except Forbidden as error:
-                logger.warning(
-                    "Telegram permanently rejected chat=%s event=%s: %s",
+            except Exception as error:
+                decision = classify_telegram_error(error)
+                log = getattr(logger, decision.log_level, logger.warning)
+                log(
+                    "Telegram delivery failed chat=%s event=%s code=%s attempt=%s: %s",
                     chat_id,
                     event_id,
+                    decision.code,
+                    attempts + 1,
                     error,
                 )
-                self.event_store.abandon_delivery(chat_id, event_id)
-                self.event_store.increment_health("delivery_permanent_failures")
+
+                if decision.kind is TelegramErrorKind.IGNORABLE:
+                    self._record_delivery_success(chat_id)
+                    self.event_store.mark_delivered(chat_id, event_id)
+                    self.event_store.increment_health("delivery_ignored")
+                    completed += 1
+                    continue
+
+                self._record_delivery_failure(chat_id, decision, error)
                 self.event_store.update_health(last_error=str(error))
-            except RetryAfter as error:
-                retry_after = error.retry_after
-                if isinstance(retry_after, timedelta):
-                    delay = retry_after.total_seconds()
-                else:
-                    delay = float(retry_after)
+
+                if not decision.retryable:
+                    self.event_store.abandon_delivery(chat_id, event_id)
+                    self.event_store.increment_health(
+                        "delivery_permanent_failures"
+                    )
+                    continue
+
+                delay = decision.retry_after_seconds
+                if delay is None:
+                    delay = min(300, 5 * (2 ** min(attempts, 6)))
                 self.event_store.mark_delivery_failed(
                     chat_id,
                     event_id,
                     str(error),
                     retry_after_seconds=max(1, delay),
                 )
+                if decision.code == "rate_limited":
+                    self.event_store.increment_health("delivery_rate_limited")
+                else:
+                    self.event_store.increment_health("delivery_failures")
                 self.event_store.increment_health("delivery_retries")
-                self.event_store.update_health(last_error=str(error))
-            except Exception as error:
-                delay = min(300, 5 * (2 ** min(attempts, 6)))
-                logger.warning(
-                    "FVG delivery failed chat=%s event=%s attempt=%s: %s",
-                    chat_id,
-                    event_id,
-                    attempts + 1,
-                    error,
-                )
-                self.event_store.mark_delivery_failed(
-                    chat_id,
-                    event_id,
-                    str(error),
-                    retry_after_seconds=delay,
-                )
-                self.event_store.increment_health("delivery_failures")
-                self.event_store.increment_health("delivery_retries")
-                self.event_store.update_health(last_error=str(error))
             else:
+                self._record_delivery_success(chat_id)
                 self.event_store.mark_delivered(chat_id, event_id)
                 self.event_store.increment_health("notifications_sent")
                 completed += 1
@@ -329,7 +394,9 @@ class FvgAlertService:
                     else "confirmed_events"
                 )
             try:
-                recipients = self.settings.recipients(event)
+                recipients = self._filter_recipients(
+                    self.settings.recipients(event)
+                )
             except Exception as error:
                 self.event_store.update_health(last_error=str(error))
                 self.event_store.increment_health("recipient_failures")
@@ -345,15 +412,28 @@ class FvgAlertService:
                         text=format_fvg_message(event),
                     )
                 except Exception as error:
+                    decision = classify_telegram_error(error)
                     logger.warning(
-                        "FVG delivery failed chat=%s event=%s: %s",
+                        "FVG delivery failed chat=%s event=%s code=%s: %s",
                         chat_id,
                         event.event_id,
+                        decision.code,
                         error,
                     )
+                    if decision.kind is TelegramErrorKind.IGNORABLE:
+                        self._record_delivery_success(chat_id)
+                        self.event_store.mark_delivered(chat_id, event.event_id)
+                        self.event_store.increment_health("delivery_ignored")
+                        continue
+                    self._record_delivery_failure(chat_id, decision, error)
                     self.event_store.update_health(last_error=str(error))
                     self.event_store.increment_health("delivery_failures")
+                    if not decision.retryable:
+                        self.event_store.increment_health(
+                            "delivery_permanent_failures"
+                        )
                     continue
+                self._record_delivery_success(chat_id)
                 self.event_store.mark_delivered(chat_id, event.event_id)
                 self.event_store.increment_health("notifications_sent")
 
@@ -378,6 +458,7 @@ def format_fvg_message(event: FvgEvent) -> str:
     return (
         f"{title}\n"
         f"Инструмент: {event.symbol}\n"
+        f"Биржа: {exchange_label(event.exchange)}\n"
         f"Таймфрейм: {event.timeframe}\n"
         f"Направление: {direction}\n"
         f"Зона FVG: {_price(event.zone_low)} — {_price(event.zone_high)}\n"

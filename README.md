@@ -1,67 +1,48 @@
 # FVG Alert Bot
 
-![Version](https://img.shields.io/badge/version-1.2.0-2ea44f)
+![Version](https://img.shields.io/badge/version-1.3.0-2ea44f)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab)
 ![Telegram](https://img.shields.io/badge/interface-Telegram-2aabee)
-![Status](https://img.shields.io/badge/status-production--ready-1f883d)
+![Status](https://img.shields.io/badge/status-release--candidate-f59e0b)
 
-Telegram-бот для мониторинга **Fair Value Gap (FVG)** на Bitunix и ставок фандинга на нескольких фьючерсных биржах. Бот собирает рыночные данные, применяет персональные фильтры, отправляет уведомления и показывает статистику прямо в Telegram.
+Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ставок фандинга на фьючерсных биржах. Бот собирает публичные рыночные данные, применяет персональные фильтры, отправляет уведомления и показывает операционное состояние прямо в Telegram.
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Актуальный стабильный релиз: **1.2.0**.
+Следующий релиз: **1.3.0**. Telegram Mini App и новый графический WebApp-интерфейс в эту версию не входят.
 
-## Интерфейс программы
-
-<p align="center">
-  <img src="docs/images/telegram-main-menu.svg" width="48%" alt="Главное меню FVG Alert Bot">
-  <img src="docs/images/telegram-fvg-alert.svg" width="48%" alt="FVG-уведомление и пользовательские настройки">
-</p>
-
-<p align="center">
-  <img src="docs/images/telegram-funding.svg" width="82%" alt="Мультибиржевой рейтинг фандинга">
-</p>
-
-Изображения собраны из фактических текстов, кнопок и форматов сообщений текущей версии. Значения цен и ставок на иллюстрациях зафиксированы как демонстрационные, чтобы README не менялся вместе с рынком.
-
-## Что умеет бот
+## Что входит в 1.3.0
 
 ### FVG
 
-- предварительные FVG-уведомления в точке T−3;
-- подтверждённые FVG на 15-минутном таймфрейме;
+- настройка по схеме `биржа → пара → таймфреймы → подтверждение`;
+- до 10 уникальных комбинаций `биржа + торговая пара` на Telegram ID;
+- подтверждённые FVG на `15m`, `1h`, `4h`, `1d`;
+- сигнал только после закрытия свечи C;
+- BTC-only пред-FVG T−3 только на `15m`;
+- Bitunix, Binance, Bybit, BingX, Bitget и Gate;
 - отдельное включение бычьих и медвежьих сигналов;
-- персональный список инструментов;
-- фильтры цены и размера зоны;
-- автоматическое включение подтверждённых FVG для `BTCUSDT` при первом `/start`;
-- WebSocket Bitunix как основной источник данных;
-- REST recovery, stale-watchdog и process watchdog;
-- постоянная SQLite/WAL-очередь доставки с повторными попытками.
+- pause/delete и изменение таймфреймов;
+- exchange-aware фильтры цены и размера зоны;
+- отдельный FAQ по FVG-инструментам;
+- один расчёт на уникальную комбинацию `биржа + символ + таймфрейм`, независимо от числа получателей.
+
+Старые FVG settings schema v2 автоматически мигрируют в schema v3: существующие символы получают биржу Bitunix и таймфрейм `15m`, направления и фильтры сохраняются.
 
 ### Мультибиржевой фандинг
 
-Поддерживаются:
+Поддерживаются Bitunix, Binance, Bybit, BingX, Bitget и Gate.
 
-- Bitunix;
-- Binance;
-- Bybit;
-- BingX;
-- Bitget;
-- Gate.
-
-Бот показывает топ положительных и отрицательных ставок, проверяет отдельный инструмент сразу по всем площадкам и позволяет настроить персональные уведомления:
-
-- частота от `15` до `2880` минут с шагом `15` минут;
+- общий снимок каждые 15 минут на `:00`, `:15`, `:30`, `:45` UTC;
+- интервал уведомлений от `15` до `2880` минут с шагом `15` минут;
 - минимальный абсолютный процент;
 - положительное, отрицательное или оба направления;
-- одна или несколько бирж;
-- включение и выключение рассылки.
-
-Общий снимок всех подключённых бирж обновляется на границах `:00`, `:15`, `:30` и `:45` UTC и используется для всех пользователей. В `funding_snapshot_history` сохраняются только три последних сжатых снимка.
+- выбор одной или нескольких бирж;
+- только три последних сжатых снимка в `funding_snapshot_history`.
 
 ### Telegram-интерфейс
 
-После `/start` бот закрепляет постоянное нижнее меню:
+После `/start` доступно постоянное нижнее меню:
 
 - `📉 FVG`;
 - `💸 Фандинг`;
@@ -70,50 +51,55 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** на Bitu
 - `⚙️ Настройки`;
 - `❤️ Донат`.
 
-Для каждого Telegram ID отдельно сохраняются:
+Для каждого Telegram ID отдельно сохраняются язык RU/EN, compact/detailed формат, FVG-инструменты и фильтры, funding alerts и выбранные биржи.
 
-- русский или английский язык;
-- компактный или подробный формат уведомлений;
-- FVG-фильтры;
-- настройки funding alerts;
-- выбранные биржи.
+### Админ-панель и «⚙️ Операции»
 
-### Админ-панель
+Команда `/admin` доступна только ID из `ADMIN_TELEGRAM_IDS`.
 
-Команда `/admin` доступна только ID из `ADMIN_TELEGRAM_IDS`. Панель позволяет:
+Панель показывает WebSocket, REST recovery, outbox, ошибки доставки, SQLite, ресурсы, backup, VERSION/BUILD_COMMIT и позволяет выполнить подтверждаемый systemd restart.
 
-- переключать публичный и приватный режим;
-- просматривать allowlist;
-- проверять WebSocket и REST recovery;
-- видеть outbox, доставки и ошибки;
-- выполнять `PRAGMA quick_check` SQLite-баз;
-- смотреть память, load average и свободное место;
-- создавать ручной backup;
-- проверять VERSION, BUILD_COMMIT и Python;
-- подтверждённо перезапускать процесс через systemd.
+Read-only экран `⚙️ Операции` дополнительно показывает:
 
-Административные права проверяются заново при каждом callback.
+- lifecycle процесса и фоновые задачи;
+- SQLite observability snapshots;
+- состояние restart circuit breaker, cooldown, quota и последние решения;
+- состояние FVG history archive;
+- размеры archive main/WAL/SHM;
+- schema metadata, последние archive runs и batch statistics;
+- archive counters, failures, backlog signal и последнюю ошибку.
 
-## Архитектура и надёжность
+Operational readers открывают SQLite через `mode=ro` и `PRAGMA query_only=ON`. Экран не выполняет migration, repair, archive audit, export/restore, compaction, circuit reset или restart.
 
-- один общий WebSocket Bitunix для активных FVG-инструментов;
-- один общий funding-снимок на биржу вместо копии рынка для каждого пользователя;
-- SQLite/WAL для событий, доставок, outbox, funding-state и health-метрик;
-- ограничение истории и регулярные checkpoint/vacuum;
-- атомарная VDS-установка;
-- автоматический rollback при неудачном запуске;
-- ежедневные согласованные backup;
-- health-метрики, watchdog и recovery-задачи.
+## Надёжность
+
+- persistent Telegram delivery status;
+- feature-flagged Outbox V2 с bounded retry, expiration и dead-letter;
+- SQLite/WAL event store и funding store;
+- read-only SQLite growth observability;
+- проверяемые backup с manifest и SHA-256;
+- persistent leases и watchdog фоновых задач;
+- bounded graceful shutdown;
+- archive-before-delete для terminal FVG history;
+- read-only archive audit CLI;
+- persistent restart circuit breaker;
+- атомарная VDS-установка и автоматический rollback;
+- Bot API-only deployment без Telegram App credentials.
+
+Рискованные operational-функции выключены по умолчанию и включаются поэтапно через `.env`.
 
 Подробности:
 
-- [`docs/RELEASE_1.2.0.md`](docs/RELEASE_1.2.0.md);
-- [`docs/MULTI_EXCHANGE_FUNDING.md`](docs/MULTI_EXCHANGE_FUNDING.md);
-- [`docs/VDS_DEPLOYMENT.md`](docs/VDS_DEPLOYMENT.md).
+- [`docs/RELEASE_1.3.0.md`](docs/RELEASE_1.3.0.md);
+- [`docs/FVG_MULTI_INSTRUMENTS.md`](docs/FVG_MULTI_INSTRUMENTS.md);
+- [`docs/ADMIN_OPERATIONS_STATUS.md`](docs/ADMIN_OPERATIONS_STATUS.md);
+- [`docs/PROCESS_RESTART_CIRCUIT_BREAKER.md`](docs/PROCESS_RESTART_CIRCUIT_BREAKER.md);
+- [`docs/FVG_HISTORY_ARCHIVE.md`](docs/FVG_HISTORY_ARCHIVE.md);
+- [`docs/VDS_BOT_API_ONLY_UPDATE.md`](docs/VDS_BOT_API_ONLY_UPDATE.md).
 
-## Локальный запуск
+## Telegram credentials
 
-Создайте `.env` рядом с `bot.py`:
+Для работы нужен только Bot API token от BotFather:
 
 ```env
 TELEGRAM_TOKEN=токен_от_BotFather
@@ -122,18 +108,22 @@ ALLOWED_TELEGRAM_IDS=123456789
 PUBLIC_ACCESS_ENABLED=false
 ```
 
+Не используются `API_ID`, `API_HASH`, Telethon, Pyrogram, вход по номеру телефона или user-session string.
+
+API-ключи бирж для текущих FVG и funding-данных не требуются.
+
+## Локальный запуск
+
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python bot.py
+PUBLIC_ACCESS_ENABLED=true .venv/bin/python bot.py
 ```
-
-API-ключи бирж для FVG и текущих funding-ставок не требуются.
 
 ## Первая установка на Ubuntu/Debian VDS
 
-Поддерживаются Ubuntu 22.04/24.04 и Debian 12. Требуется не менее 1 ГБ свободного места на файловой системе `/opt` и 5000 inode.
+Поддерживаются Ubuntu 22.04/24.04 и Debian 12. Рекомендуется не менее 1 ГБ свободного места на `/opt` и 5000 inode.
 
 ```bash
 ssh root@IP_АДРЕС_СЕРВЕРА
@@ -141,46 +131,31 @@ apt update && apt install -y git
 git clone https://github.com/MishkaStrategy/TB.git /root/TB
 cd /root/TB
 git checkout main
-test "$(cat VERSION)" = "1.2.0"
+test "$(cat VERSION)" = "1.3.0"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
-Установщик собирает staging-релиз и выполняет unit-тесты до остановки работающего процесса. Затем он создаёт backup, атомарно переключает релиз и автоматически возвращает предыдущую версию при ошибке запуска.
+Установщик собирает staging-релиз и запускает unit suite до остановки работающего процесса. Затем создаёт backup, атомарно переключает релиз и автоматически возвращает предыдущую версию при ошибке запуска.
 
-## Обновление существующего VDS до 1.2.0
+## Обновление существующего VDS до 1.3.0
 
-Production-обновление рекомендуется выполнять по проверенному тегу, а не по движущемуся `main`:
+Production обновляется только после публикации проверенного тега `v1.3.0` и SHA:
 
 ```bash
-ssh root@IP_АДРЕС_СЕРВЕРА
 cd /root/TB
+git status --short
 git fetch origin --tags --prune
 git checkout main
 git pull --ff-only origin main
-TARGET_REF=v1.2.0 EXPECTED_VERSION=1.2.0 bash scripts/update_vds.sh
+
+sudo env \
+  TARGET_REF=v1.3.0 \
+  EXPECTED_VERSION=1.3.0 \
+  EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
+  bash scripts/update_vds_bot_api_only.sh
 ```
 
-При необходимости можно дополнительно закрепить полный или сокращённый SHA:
-
-```bash
-TARGET_REF=v1.2.0 \
-EXPECTED_VERSION=1.2.0 \
-EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
-  bash scripts/update_vds.sh
-```
-
-`scripts/update_vds.sh`:
-
-1. проверяет root, чистоту checkout и существующую установку;
-2. получает remote branch или tag из `TARGET_REF`;
-3. проверяет `VERSION` и опциональный `EXPECTED_COMMIT`;
-4. создаёт согласованный pre-update backup runtime-state;
-5. запускает атомарный установщик с запасом не менее 1 ГБ;
-6. проверяет systemd, версию и ссылку на runtime-state;
-7. выполняет `PRAGMA quick_check` обеих SQLite-баз;
-8. записывает Git SHA в `/opt/fvg-alert-bot/BUILD_COMMIT`.
-
-Сохраняются `/etc/fvg-alert-bot.env`, `/var/lib/fvg-alert-bot` и пользовательские настройки. Повторно вводить токен и Telegram ID не требуется.
+Сохраняются `/etc/fvg-alert-bot.env`, `/var/lib/fvg-alert-bot`, пользовательские настройки и SQLite. Wrapper блокирует Telegram App/user-session credentials, не печатая токен.
 
 ## Проверка после обновления
 
@@ -190,49 +165,41 @@ cat /opt/fvg-alert-bot/BUILD_COMMIT
 systemctl is-active fvg-alert-bot
 systemctl is-enabled fvg-alert-bot
 systemctl status fvg-alert-bot --no-pager --full
-journalctl -u fvg-alert-bot -n 100 --no-pager
-ls -lah /var/backups/fvg-alert-bot
+journalctl -u fvg-alert-bot -n 150 --no-pager
+
+sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
+sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 ```
 
-Ожидается:
+Ожидается версия `1.3.0`, точный audited SHA, `active`, `enabled` и `ok` для обеих SQLite-баз.
 
-```text
-1.2.0
-active
-enabled
-```
+Telegram smoke:
 
-Проверка ограниченной истории funding на VDS:
+- `/start`, `/menu`, `/funding`, `/admin`, `/donate`;
+- добавление FVG-инструмента и выбор `15m/1h/4h/1d`;
+- повторное открытие и сохранение настроек;
+- RU/EN и compact/detailed;
+- `⚙️ Операции`: restart guard и FVG archive.
 
-```bash
-sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 \
-  "SELECT captured_at, exchange_count, rate_count, compressed_bytes FROM funding_snapshot_history ORDER BY captured_at DESC;"
-```
-
-В результате должно быть не больше трёх строк.
-
-В Telegram проверьте `/start`, `/menu`, `/funding`, `/admin` и `/donate`, переключение RU/EN, оба формата уведомлений и интервалы `15`, `45 мин`, `1ч`, `1,5ч`.
-
-## Production-настройки
-
-Основной файл:
-
-```bash
-nano /etc/fvg-alert-bot.env
-```
-
-Защитные лимиты:
+## Production flags
 
 ```env
 MAX_ACTIVE_SYMBOLS=100
-MAX_SYMBOLS_PER_USER=20
+MAX_SYMBOLS_PER_USER=10
 FVG_DELIVERY_QUEUE_SIZE=1000
-HEALTH_WRITE_INTERVAL_SECONDS=30
-BITUNIX_REQUESTS_PER_SECOND=8
-HEALTH_ALERT_INTERVAL_SECONDS=60
-HEALTH_ALERT_STALE_WS_SECONDS=180
-HEALTH_ALERT_OUTBOX_THRESHOLD=100
-HEALTH_ALERT_COOLDOWN_SECONDS=1800
+
+DELIVERY_STATUS_TRACKING_ENABLED=false
+USER_BLOCK_STATUS_ENABLED=false
+OUTBOX_RETRY_POLICY_ENABLED=false
+OUTBOX_EXPIRATION_ENABLED=false
+DATABASE_OBSERVABILITY_ENABLED=false
+BACKGROUND_TASK_REGISTRY_ENABLED=false
+BACKGROUND_TASK_WATCHDOG_ENABLED=false
+RUNTIME_LIFECYCLE_ENABLED=false
+GRACEFUL_SHUTDOWN_ENABLED=false
+FVG_HISTORY_ARCHIVE_ENABLED=false
+FVG_PROCESS_GRACEFUL_RESTART_ENABLED=false
+FVG_PROCESS_RESTART_GUARD_ENABLED=false
 ```
 
 После ручного изменения:
@@ -254,11 +221,7 @@ systemctl restart fvg-alert-bot
 | Резервные копии | `/var/backups/fvg-alert-bot` |
 | systemd units | `/etc/systemd/system/fvg-alert-bot*` |
 
-Код и virtualenv принадлежат `root`. Процесс `fvgbot` записывает данные только в `/var/lib/fvg-alert-bot`.
-
 ## Backup и rollback
-
-Ежедневный архив содержит JSON-state и согласованные SQLite-снимки обеих баз. Live WAL/SHM и каталог `.manual_backups` в архив не копируются.
 
 ```bash
 systemctl list-timers fvg-alert-bot-backup.timer
@@ -267,7 +230,7 @@ journalctl -u fvg-alert-bot-backup.service -n 100 --no-pager
 ls -lah /var/backups/fvg-alert-bot
 ```
 
-Установщик хранит предыдущий релиз в `/opt/fvg-alert-bot.previous`. Подробные процедуры: [`docs/VDS_DEPLOYMENT.md`](docs/VDS_DEPLOYMENT.md).
+Установщик хранит предыдущий релиз в `/opt/fvg-alert-bot.previous`. Verified backup включает manifest, SHA-256 и согласованные SQLite snapshots. Live WAL/SHM не копируются как обычные файлы.
 
 ## Диагностика
 
@@ -277,28 +240,20 @@ systemctl show fvg-alert-bot \
   -p NRestarts -p ExecMainStatus -p Result -p MemoryCurrent
 df -h / /tmp /opt
 df -ih / /tmp /opt
-getent hosts api.telegram.org
-getent hosts fapi.bitunix.com
-getent hosts fapi.binance.com
-getent hosts api.bybit.com
-getent hosts open-api.bingx.com
-getent hosts api.bitget.com
-getent hosts api.gateio.ws
 ```
 
-Telegram `Conflict` означает, что тот же токен используется другим polling-процессом.
+Telegram `Conflict` означает, что тот же Bot API token используется другим polling-процессом.
 
 ## Команды
 
 - `/menu` — открыть меню;
 - `/fvg_alert on|off` — подтверждённые FVG;
 - `/fvg_pre_alert on|off` — пред-FVG T−3;
-- `/fvg_symbol add ETHUSDT` — добавить инструмент;
-- `/fvg_symbol remove ETHUSDT` — удалить инструмент;
-- `/fvg_price BTCUSDT 50000 90000 both` — ценовой фильтр;
+- `/fvg_symbol` — FVG instruments wizard;
+- `/fvg_price` — ценовой фильтр;
 - `/fvg_size` — фильтр размера зоны;
 - `/fvg_stats` — статистика FVG;
-- `/funding` — мультибиржевой рейтинг и funding alerts;
+- `/funding` — рейтинг и funding alerts;
 - `/admin` — админ-панель;
 - `/donate` — поддержать проект.
 
@@ -310,6 +265,6 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-CI включает GitHub-hosted полный release-аудит: shell validation, dependency audit, компиляцию, полный unit suite, bounded soak и проверку production systemd units. Отдельно проверяются 15-минутный scheduler, миграция старых интервалов, ограниченная история SQLite и политика capability labels.
+CI включает dependency audit, compilation, release contract, FVG migration/timeframe tests, оба новых read-only admin sections, полный unit suite, bounded 500×10 soak и production systemd verification.
 
-После публикации workflow создаёт тег `v1.2.0`, GitHub Release, исходный архив `fvg-alert-bot-1.2.0.tar.gz` и SHA-256 checksum.
+После публикации release workflow создаёт тег `v1.3.0`, GitHub Release, архив `fvg-alert-bot-1.3.0.tar.gz` и SHA-256 checksum.

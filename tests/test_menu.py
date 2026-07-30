@@ -27,7 +27,7 @@ class MenuTests(unittest.TestCase):
         callbacks = [row[0].callback_data for row in keyboard]
         self.assertEqual(
             labels,
-            ["🔔 Настройки FVG 15м", "📊 Статистика FVG", "💸 Фандинг", "⚙️ Настройки"],
+            ["🔔 Настройки FVG", "📊 Статистика FVG", "💸 Фандинг", "⚙️ Настройки"],
         )
         self.assertIn("menu:fvg-settings", callbacks)
         self.assertIn("menu:fvg-stats", callbacks)
@@ -88,8 +88,13 @@ class MenuTests(unittest.TestCase):
 
         rows = build_fvg_settings_menu(42, Settings()).inline_keyboard
         labels = [button.text for row in rows for button in row]
+        callbacks = [button.callback_data for row in rows for button in row]
         self.assertIn("✅ Цена", labels)
         self.assertIn("⏸️ 📏 Размер FVG", labels)
+        self.assertIn("📌 Инструменты", labels)
+        self.assertIn("❓ FAQ по FVG", labels)
+        self.assertIn("fvg-inst:open", callbacks)
+        self.assertIn("fvg-inst:faq:main", callbacks)
 
     def test_real_price_and_size_changes_refresh_settings_menu_status(self):
         with TemporaryDirectory() as directory:

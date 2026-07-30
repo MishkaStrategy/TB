@@ -7,6 +7,8 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from alerts.fvg_store import FvgAlertSettings
+from exchanges.funding import EXCHANGE_LABELS
+from exchanges.fvg_candles import is_bitcoin_symbol
 from handlers.auth import authorized
 
 
@@ -44,9 +46,21 @@ def parse_size_minimum(text: str) -> str:
     return value
 
 
+def _instrument(settings: FvgAlertSettings, chat_id: int, key: str) -> dict:
+    return settings.user(chat_id).get("symbols", {}).get(key, {})
+
+
 def _filter(settings: FvgAlertSettings, chat_id: int, kind: str, symbol: str) -> dict:
     key = "price_filter" if kind == "price" else "size_filter"
-    return settings.user(chat_id).get("symbols", {}).get(symbol, {}).get(key, {})
+    return _instrument(settings, chat_id, symbol).get(key, {})
+
+
+def _instrument_label(key: str, config: dict) -> str:
+    symbol = config.get("symbol", key)
+    exchange = config.get("exchange")
+    if not exchange:
+        return symbol
+    return f"{symbol} · {EXCHANGE_LABELS.get(exchange, exchange)}"
 
 
 def _kind_name(kind: str) -> str:
@@ -71,11 +85,12 @@ def build_filter_symbol_menu(chat_id: int, kind: str, settings=None):
     symbols = settings.user(chat_id).get("symbols", {})
     rows = []
     key = "price_filter" if kind == "price" else "size_filter"
-    for symbol, config in symbols.items():
+    for instrument_key, config in symbols.items():
         mark = "✅" if config.get(key, {}).get("enabled", False) else "⏸️"
         rows.append([
             InlineKeyboardButton(
-                f"{mark} {symbol}", callback_data=f"fvg-filter:select:{kind}:{symbol}"
+                f"{mark} {_instrument_label(instrument_key, config)}",
+                callback_data=f"fvg-filter:select:{kind}:{instrument_key}",
             )
         ])
     rows.append([InlineKeyboardButton("⬅️ Настройки FVG", callback_data="menu:fvg-settings")])
@@ -84,7 +99,9 @@ def build_filter_symbol_menu(chat_id: int, kind: str, settings=None):
 
 def build_filter_menu(chat_id: int, kind: str, symbol: str, settings=None):
     settings = settings or FvgAlertSettings()
+    instrument = _instrument(settings, chat_id, symbol)
     config = _filter(settings, chat_id, kind, symbol)
+    supports_pre = is_bitcoin_symbol(instrument.get("symbol", symbol))
 
     def mark(value):
         return "✅" if value else "⏸️"
@@ -108,17 +125,18 @@ def build_filter_menu(chat_id: int, kind: str, symbol: str, settings=None):
                 callback_data=f"fvg-filter:bear:{kind}:{symbol}",
             ),
         ],
-        [
-            InlineKeyboardButton(
-                f"{mark(config.get('apply_to_pre_fvg', True))} Пред-FVG",
-                callback_data=f"fvg-filter:pre:{kind}:{symbol}",
-            ),
-            InlineKeyboardButton(
-                f"{mark(config.get('apply_to_confirmed_fvg', True))} Подтверждённые",
-                callback_data=f"fvg-filter:confirmed:{kind}:{symbol}",
-            ),
-        ],
     ]
+    event_type_row = []
+    if supports_pre:
+        event_type_row.append(InlineKeyboardButton(
+            f"{mark(config.get('apply_to_pre_fvg', True))} Пред-FVG BTC",
+            callback_data=f"fvg-filter:pre:{kind}:{symbol}",
+        ))
+    event_type_row.append(InlineKeyboardButton(
+        f"{mark(config.get('apply_to_confirmed_fvg', True))} Подтверждённые",
+        callback_data=f"fvg-filter:confirmed:{kind}:{symbol}",
+    ))
+    rows.append(event_type_row)
     if kind == "size":
         unit = config.get("unit", "USD")
         rows.append([
@@ -144,6 +162,7 @@ def build_filter_menu(chat_id: int, kind: str, symbol: str, settings=None):
 
 def format_filter_text(chat_id: int, kind: str, symbol: str, settings=None) -> str:
     settings = settings or FvgAlertSettings()
+    instrument = _instrument(settings, chat_id, symbol)
     config = _filter(settings, chat_id, kind, symbol)
     suffix = ""
     if kind == "size":
@@ -155,11 +174,18 @@ def format_filter_text(chat_id: int, kind: str, symbol: str, settings=None) -> s
         if kind == "size"
         else f"Диапазон: {minimum} — {maximum}"
     )
+    title = _instrument_label(symbol, instrument)
+    pre_note = (
+        "\nПред-FVG применяется только к Bitcoin."
+        if is_bitcoin_symbol(instrument.get("symbol", symbol))
+        else "\nДля этого инструмента доступны только подтверждённые FVG."
+    )
     return (
-        f"{'💰' if kind == 'price' else '📏'} Фильтр {_kind_name(kind)} · {symbol}\n\n"
+        f"{'💰' if kind == 'price' else '📏'} Фильтр {_kind_name(kind)} · {title}\n\n"
         f"Статус: {'✅ включён' if config.get('enabled', False) else '⏸️ выключен'}\n"
         f"{value_text}\n"
         "Все остальные настройки меняются кнопками ниже."
+        f"{pre_note}"
     )
 
 
@@ -168,7 +194,7 @@ async def _show_picker(message, chat_id: int, kind: str, *, edit=False):
     symbols = settings.user(chat_id).get("symbols", {})
     text = f"Выбери инструмент для фильтра {_kind_name(kind)}:"
     if not symbols:
-        text = "Сначала добавь инструмент командой /fvg_symbol add BTCUSDT."
+        text = "Сначала добавьте инструмент в разделе «📌 Инструменты»."
     method = message.edit_text if edit else message.reply_text
     await method(text, reply_markup=build_filter_symbol_menu(chat_id, kind, settings))
 
@@ -234,6 +260,7 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     settings = FvgAlertSettings()
     config = _filter(settings, chat_id, kind, symbol)
+    instrument = _instrument(settings, chat_id, symbol)
     if action == "select":
         await query.message.edit_text(
             format_filter_text(chat_id, kind, symbol, settings),
@@ -261,6 +288,9 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         "toggle": "enabled", "bull": "apply_to_bullish", "bear": "apply_to_bearish",
         "pre": "apply_to_pre_fvg", "confirmed": "apply_to_confirmed_fvg",
     }
+    if action == "pre" and not is_bitcoin_symbol(instrument.get("symbol", symbol)):
+        await query.answer("Пред-FVG доступен только для Bitcoin.", show_alert=True)
+        return
     if action in toggle_keys:
         key = toggle_keys[action]
         changes[key] = not config.get(key, key != "enabled")
