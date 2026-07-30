@@ -76,9 +76,23 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Audit Python dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install pip-audit
-          pip-audit -r requirements.txt --progress-spinner off
+          audit_status=1
+          for attempt in 1 2 3; do
+            if pip-audit -r requirements.txt --progress-spinner off; then
+              audit_status=0
+              break
+            fi
+            audit_status=$?
+            if (( attempt < 3 )); then
+              echo "pip-audit failed on attempt ${attempt}; retrying after transient-network backoff" >&2
+              sleep $((attempt * 5))
+            fi
+          done
+          exit "${audit_status}"
 
       - name: Compile Python sources
         run: >-
