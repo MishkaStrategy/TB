@@ -223,8 +223,15 @@ RUNTIME_LIFECYCLE_HISTORY_RETENTION_DAYS = parse_positive_int(
 MAX_ACTIVE_SYMBOLS = parse_positive_int(
     os.getenv("MAX_ACTIVE_SYMBOLS"), 100, "MAX_ACTIVE_SYMBOLS"
 )
-MAX_SYMBOLS_PER_USER = parse_positive_int(
-    os.getenv("MAX_SYMBOLS_PER_USER"), 10, "MAX_SYMBOLS_PER_USER"
+MAX_FVG_INSTRUMENTS_PER_USER = 10
+_configured_symbols_per_user = parse_positive_int(
+    os.getenv("MAX_SYMBOLS_PER_USER"),
+    MAX_FVG_INSTRUMENTS_PER_USER,
+    "MAX_SYMBOLS_PER_USER",
+)
+MAX_SYMBOLS_PER_USER = min(
+    _configured_symbols_per_user,
+    MAX_FVG_INSTRUMENTS_PER_USER,
 )
 FVG_DELIVERY_QUEUE_SIZE = parse_positive_int(
     os.getenv("FVG_DELIVERY_QUEUE_SIZE"), 1000, "FVG_DELIVERY_QUEUE_SIZE"
