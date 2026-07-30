@@ -215,15 +215,16 @@ exec "${REAL_TAR}" "$@"
             archives = list(backup_dir.glob("fvg-alert-bot-*.tar.gz"))
             self.assertEqual(len(archives), 1)
             with tarfile.open(archives[0], "r:gz") as archive:
-                names = [
-                    name.removeprefix("./")
+                members = {
+                    name.removeprefix("./"): name
                     for name in archive.getnames()
                     if name not in {"", ".", "./"}
-                ]
-                manifest_member = archive.extractfile(MANIFEST_NAME)
+                }
+                manifest_member = archive.extractfile(members[MANIFEST_NAME])
                 self.assertIsNotNone(manifest_member)
                 manifest = json.load(manifest_member)
 
+            names = list(members)
             self.assertFalse(
                 any(Path(name).name.startswith("._") for name in names),
                 names,
