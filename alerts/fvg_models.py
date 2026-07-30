@@ -63,6 +63,7 @@ class FvgEvent:
     detected_at: datetime
     is_confirmed: bool
     data_complete: bool
+    exchange: str = "bitunix"
 
     def to_json(self) -> dict:
         result = asdict(self)
@@ -82,6 +83,9 @@ def event_id(
     direction: FvgDirection,
     candle_c_open_time: datetime,
     event_type: FvgEventType,
+    exchange: str = "bitunix",
 ) -> str:
     timestamp = candle_c_open_time.astimezone(UTC).isoformat().replace("+00:00", "Z")
-    return f"{symbol}:{timeframe}:{direction.value}:{timestamp}:{event_type.value}"
+    base = f"{symbol}:{timeframe}:{direction.value}:{timestamp}:{event_type.value}"
+    # Preserve existing Bitunix identifiers so an upgrade cannot resend old events.
+    return base if exchange == "bitunix" else f"{exchange}:{base}"

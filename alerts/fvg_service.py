@@ -20,6 +20,7 @@ from config import (
 )
 from database.telegram_delivery import TelegramDeliveryRegistry
 from exchanges.bitunix import BitunixClient
+from exchanges.funding import exchange_label
 
 
 logger = logging.getLogger(__name__)
@@ -457,6 +458,7 @@ def format_fvg_message(event: FvgEvent) -> str:
     return (
         f"{title}\n"
         f"Инструмент: {event.symbol}\n"
+        f"Биржа: {exchange_label(event.exchange)}\n"
         f"Таймфрейм: {event.timeframe}\n"
         f"Направление: {direction}\n"
         f"Зона FVG: {_price(event.zone_low)} — {_price(event.zone_high)}\n"
