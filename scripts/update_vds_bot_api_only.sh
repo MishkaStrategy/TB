@@ -23,7 +23,7 @@ from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-values: dict[str, str] = {}
+values = {}
 
 for raw_line in path.read_text(encoding="utf-8").splitlines():
     line = raw_line.strip()
