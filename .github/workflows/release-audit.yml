@@ -46,11 +46,13 @@ jobs:
           bash -n \
             scripts/install_vds.sh \
             scripts/backup_data.sh \
-            scripts/update_vds.sh
+            scripts/update_vds.sh \
+            scripts/update_vds_bot_api_only.sh
           test "$(tr -d '\r\n' < VERSION)" = "1.2.0"
           grep -F 'runs-on: ubuntu-latest' .github/workflows/release.yml
           grep -F 'git archive' .github/workflows/release.yml
           grep -F 'TARGET_REF="${TARGET_REF:-main}"' scripts/update_vds.sh
+          grep -F 'TELEGRAM_API_HASH' scripts/update_vds_bot_api_only.sh
 
       - name: Install and audit dependencies
         shell: bash
