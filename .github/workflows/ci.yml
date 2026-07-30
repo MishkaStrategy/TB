@@ -44,9 +44,7 @@ jobs:
 
   tests:
     name: Python tests
-    runs-on:
-      - self-hosted
-      - fast
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       # Existing handler tests exercise the explicitly public test fixture.
@@ -61,8 +59,10 @@ jobs:
         run: >-
           bash -n
           scripts/install_vds.sh
+          scripts/run_candidate_tests.sh
           scripts/backup_data.sh
           scripts/update_vds.sh
+          scripts/update_vds_bot_api_only.sh
 
       - name: Create isolated Python environment
         run: |
@@ -95,14 +95,15 @@ jobs:
           set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
 
-      - name: Run bounded pipeline soak
+      # The full 500 x 10 release soak runs independently in release-audit.
+      - name: Run bounded pipeline smoke
         run: |
           python run_fvg_soak.py \
             --database "${RUNNER_TEMP}/fvg-soak.sqlite3" \
-            --events 500 \
-            --recipients 10 \
-            --batch-size 50 \
-            --max-seconds 180 \
+            --events 100 \
+            --recipients 5 \
+            --batch-size 25 \
+            --max-seconds 120 \
             --max-peak-memory-mb 256 \
             --reset \
             --output soak-report.json
@@ -139,10 +140,7 @@ jobs:
 
   vds-linux-verification:
     name: Linux VDS systemd verification
-    runs-on:
-      - self-hosted
-      - linux
-      - fast
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:

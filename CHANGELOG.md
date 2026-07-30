@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.1 — 2026-07-30
+
+Installer hotfix для релиза `1.3.0`. Первая production-попытка остановилась до atomic switch, поэтому VDS осталась на `1.2.0` и rollback не потребовался.
+
+### Исправлено
+
+- candidate unit tests теперь запускаются через `env -i` и не наследуют production `/etc/fvg-alert-bot.env`;
+- реальные Telegram credentials и operational feature flags не попадают в staging test process;
+- полный candidate test log сохраняется в `/var/log/fvg-alert-bot`;
+- installer сохраняет исходный exit code test process и останавливается до выключения production-службы;
+- `MAX_SYMBOLS_PER_USER` ограничен сверху значением 10, даже если старый production env содержит большее значение;
+- legacy-настройки с количеством инструментов выше лимита сохраняются без обрезки;
+- добавлены regression tests изоляции candidate environment, защиты секретов и legacy over-limit settings.
+
+### Совместимость
+
+- функции FVG и operational stack из `1.3.0` не изменены;
+- `/etc/fvg-alert-bot.env` и `/var/lib/fvg-alert-bot` не переписываются автоматически;
+- Telegram Mini App, `API_ID/API_HASH` и пользовательские Telegram-сессии не входят в релиз.
+
 ## 1.3.0 — 2026-07-30
 
 Единый feature-релиз новых FVG-функций и полного operational-стека поверх актуального `main`. Telegram Mini App из PR #53 исключён.
@@ -118,11 +138,3 @@
 - приватный/публичный режим из Telegram-админ-панели;
 - атомарное VDS-обновление, backup и rollback;
 - event-quality backtest без искусственного P&L.
-
-### Эксплуатация
-
-- для обновления VDS рекомендуется иметь не менее 1 ГБ свободного места на файловой системе `/opt`;
-- runtime-state в `/var/lib/fvg-alert-bot` и секреты в `/etc/fvg-alert-bot.env` сохраняются между обновлениями;
-- стабильную production-установку следует обновлять только при критической необходимости.
-
-История release candidates `1.0.0-rc1`–`1.0.0-rc10` сохранена в Git history и соответствующих тегах.
