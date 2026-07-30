@@ -1,27 +1,36 @@
 # Read-only admin operations status
 
 The admin panel contains a `⚙️ Операции` screen that summarizes process
-lifecycle, the persistent restart circuit breaker, background jobs and the latest
-SQLite observability snapshots.
+lifecycle, the persistent restart circuit breaker, FVG history archive health,
+background jobs and the latest SQLite observability snapshots.
 
 The screen is intentionally read-only. It does not add rerun, enable, disable,
-restart, circuit reset, lease recovery or retention actions.
+restart, circuit reset, archive export/restore, lease recovery or retention
+actions.
 
 ## Data sources
 
-The reader opens the existing FVG SQLite file through a SQLite URI with
+The reader opens the existing FVG runtime SQLite file through a SQLite URI with
 `mode=ro` and enables `PRAGMA query_only=ON`.
 
-It first inspects `sqlite_schema` and only queries tables that already exist:
+It first inspects `sqlite_schema` and only queries runtime tables that already
+exist:
 
 - `runtime_lifecycle_state` and `runtime_lifecycle_events`;
 - `process_restart_guard_state` and `process_restart_requests`;
+- `health` archive counters;
 - `background_task_state`;
 - `database_observation_runs`.
 
-If a feature has never been enabled and its tables do not exist, the screen
-shows `нет данных`. Opening the screen does not create the database file or any
-optional table.
+The configured FVG history archive is opened through a separate `mode=ro`,
+`query_only` connection. Only these archive tables are read:
+
+- `archive_metadata`;
+- `fvg_archive_runs`.
+
+If a feature has never been enabled and its tables or archive file do not exist,
+the screen shows `нет данных` or `Файл: не создан`. Opening the screen does not
+create the runtime database, archive file or any optional table.
 
 ## Process section
 
@@ -68,6 +77,35 @@ The reader returns at most five recent request rows. The Telegram formatter only
 shows the latest one and truncates long reason/error text so the full screen
 stays below Telegram's message-size limit.
 
+## FVG archive section
+
+The archive section displays:
+
+- whether the configured archive file exists and can be read;
+- combined main/WAL/SHM file size;
+- archive schema version;
+- latest archive run time and cutoff;
+- event, delivery and source-delete counts for the latest batch;
+- cumulative event/delivery counters stored in runtime health;
+- archive failure count;
+- the saved `fvg_archive_backlog_possible` signal;
+- last archive update and last stored archive error.
+
+The reader intentionally does not query `archived_fvg_events` or
+`archived_fvg_deliveries`. It reads only metadata, at most five run rows and the
+already stored runtime-health values. Therefore opening the Telegram screen does
+not perform:
+
+- `COUNT(*)` over archive history;
+- `PRAGMA quick_check`;
+- payload JSON validation;
+- orphan-delivery detection;
+- archive reconciliation;
+- checkpoint, compaction, export or restore.
+
+Those deeper checks remain available only through the explicit
+`run_fvg_archive_audit.py` CLI documented in `docs/FVG_ARCHIVE_AUDIT.md`.
+
 ## Background task section
 
 The screen displays:
@@ -112,10 +150,14 @@ operational data is exposed to non-admin Telegram users.
 
 - Missing runtime database: the screen reports `database_file_missing` and does
   not create a file.
-- Busy or unreadable SQLite: the error is displayed without retry loops or
-  migrations.
-- Missing optional tables: the corresponding section reports no data while the
-  rest of the screen remains available.
+- Busy or unreadable runtime SQLite: the error is displayed without retry loops
+  or migrations.
+- Missing optional runtime tables: the corresponding section reports no data
+  while the rest of the screen remains available.
+- Missing archive file: the archive section reports `Файл: не создан` and does
+  not create it.
+- Incomplete or unreadable archive schema: the archive section reports the
+  read error without running migration or repair.
 - Malformed guard timestamps: the reader does not treat them as an active
   cooldown and continues showing the stored request history.
 
@@ -124,6 +166,7 @@ operational data is exposed to non-admin Telegram users.
 - task rerun or cancellation;
 - feature-flag changes;
 - restart circuit reset/unblock actions;
+- archive export, restore or compaction;
 - dead-letter actions;
 - backup-history inspection;
 - automatic remediation;

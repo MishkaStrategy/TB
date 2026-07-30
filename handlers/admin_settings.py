@@ -233,6 +233,43 @@ def format_operations_status(snapshot=None) -> str:
                     f"  — Ошибка: {_format_error(latest.get('error_class'), latest.get('error_message'))}"
                 )
 
+    archive = snapshot.get("fvg_archive", {})
+    lines.extend(["", "Архив FVG"])
+    health = archive.get("runtime_health", {})
+    if not archive.get("exists"):
+        lines.append("• Файл: не создан")
+    else:
+        file_status = "доступен" if archive.get("available") else "ошибка"
+        lines.append(
+            f"• Файл: {file_status} · {_format_bytes(archive.get('total_bytes'))}"
+        )
+    if archive.get("error_message"):
+        lines.append(f"• Ошибка чтения: {_short(archive.get('error_message'))}")
+    latest_run = archive.get("latest_run")
+    if latest_run:
+        lines.extend([
+            f"• Последний перенос: {_format_time(latest_run.get('archived_at'))}",
+            "• Batch: "
+            f"событий {int(latest_run.get('event_count') or 0)}, "
+            f"доставок {int(latest_run.get('delivery_count') or 0)}, "
+            f"удалено {int(latest_run.get('source_deleted_count') or 0)}",
+            f"• Cutoff: {_format_time(latest_run.get('cutoff_at'))}",
+        ])
+    elif archive.get("available"):
+        lines.append("• Переносов пока нет")
+    if health:
+        lines.extend([
+            "• Всего: "
+            f"событий {int(health.get('events_archived') or 0)}, "
+            f"доставок {int(health.get('deliveries_archived') or 0)}",
+            f"• Ошибок архивирования: {int(health.get('fvg_archive_failures') or 0)}",
+            f"• Backlog возможен: {'да' if health.get('fvg_archive_backlog_possible') else 'нет'}",
+        ])
+        if health.get("last_archive_at"):
+            lines.append(f"• Health update: {_format_time(health.get('last_archive_at'))}")
+        if health.get("last_archive_error"):
+            lines.append(f"• Последняя ошибка: {_short(health.get('last_archive_error'))}")
+
     tasks = snapshot.get("tasks", {})
     lines.extend(["", "Фоновые задачи"])
     if not tasks.get("available"):

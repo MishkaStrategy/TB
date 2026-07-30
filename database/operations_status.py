@@ -9,6 +9,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from database.fvg_history_config import FVG_HISTORY_ARCHIVE_PATH
+from database.fvg_history_status import read_fvg_history_status
 from database.process_restart_guard_status import read_restart_guard_status
 
 
@@ -54,8 +56,16 @@ class OperationsStatusReader:
 
     DEFAULT_PATH = Path("data/fvg_event_store.sqlite3")
 
-    def __init__(self, path: str | os.PathLike | None = None):
+    def __init__(
+        self,
+        path: str | os.PathLike | None = None,
+        *,
+        archive_path: str | os.PathLike | None = None,
+    ):
         self.path = Path(path) if path is not None else self.DEFAULT_PATH
+        self.archive_path = Path(
+            archive_path if archive_path is not None else FVG_HISTORY_ARCHIVE_PATH
+        )
 
     def _connect(self) -> sqlite3.Connection:
         uri = f"{self.path.resolve().as_uri()}?mode=ro"
@@ -292,6 +302,7 @@ class OperationsStatusReader:
         current = _utc(now)
         result = {
             "database_path": str(self.path),
+            "archive_path": str(self.archive_path),
             "captured_at": current.isoformat(),
             "available": False,
             "error_message": None,
@@ -316,6 +327,21 @@ class OperationsStatusReader:
                 "latest_request": None,
                 "recent_requests": [],
             },
+            "fvg_archive": {
+                "enabled": False,
+                "archive_path": str(self.archive_path),
+                "exists": False,
+                "available": False,
+                "error_message": None,
+                "schema_version": None,
+                "latest_run": None,
+                "recent_runs": [],
+                "runtime_health": {},
+                "main_bytes": 0,
+                "wal_bytes": 0,
+                "shm_bytes": 0,
+                "total_bytes": 0,
+            },
             "databases": {"available": False, "latest": [], "growth_24h": []},
         }
         if not self.path.exists():
@@ -336,6 +362,11 @@ class OperationsStatusReader:
                     connection,
                     tables,
                     now=current,
+                )
+                result["fvg_archive"] = read_fvg_history_status(
+                    connection,
+                    tables,
+                    archive_path=self.archive_path,
                 )
                 result["databases"] = self._database_observations(
                     connection,
