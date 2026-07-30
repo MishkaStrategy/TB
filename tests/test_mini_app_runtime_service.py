@@ -21,6 +21,7 @@ class MiniAppRuntimeServiceTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.funding = FundingAlertStore(self.root / "funding.sqlite3")
         self.exchanges = FundingExchangeStore(self.funding.path)
+        self.runtime = RuntimeSettings(self.root / "runtime.json")
         self.service = self._service()
         self.user = TelegramUser(id=42, first_name="Михаил")
 
@@ -30,7 +31,7 @@ class MiniAppRuntimeServiceTests(unittest.TestCase):
             fvg_settings=FvgAlertSettings(self.root / "fvg.json"),
             funding_settings=self.funding,
             funding_exchanges=self.exchanges,
-            runtime_settings=RuntimeSettings(self.root / "runtime.json"),
+            runtime_settings=self.runtime,
             access_registry=AccessRegistry(self.root / "access.json"),
             activity_registry=UserActivityRegistry(self.root / "activity.json"),
             admin_checker=(lambda telegram_id: admin and telegram_id == 42),
@@ -73,6 +74,14 @@ class MiniAppRuntimeServiceTests(unittest.TestCase):
         settings["general"]["messageMode"] = "compact"
         self.service.save_settings(self.user, settings)
         self.assertTrue(self.exchanges.crossing_values(42))
+
+    def test_production_settings_put_ignores_admin_writes(self):
+        service = self._service(admin=True)
+        settings = copy.deepcopy(service.read_settings(self.user)["settings"])
+        settings["admin"]["publicAccessEnabled"] = True
+        saved = service.save_settings(self.user, settings)
+        self.assertFalse(self.runtime.public_access_enabled(default=False))
+        self.assertFalse(saved["settings"]["admin"]["publicAccessEnabled"])
 
     def test_non_admin_receives_stable_empty_diagnostics(self):
         diagnostics = self.service.read_settings(self.user)["settings"]["admin"][
