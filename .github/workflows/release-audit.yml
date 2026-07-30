@@ -71,8 +71,9 @@ jobs:
             if pip-audit -r requirements.txt --progress-spinner off; then
               audit_status=0
               break
+            else
+              audit_status=$?
             fi
-            audit_status=$?
             if (( attempt < 3 )); then
               echo "pip-audit failed on attempt ${attempt}; retrying after transient-network backoff" >&2
               sleep $((attempt * 5))
