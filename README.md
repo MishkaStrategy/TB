@@ -1,17 +1,17 @@
 # FVG Alert Bot
 
-![Version](https://img.shields.io/badge/version-1.3.0-2ea44f)
+![Version](https://img.shields.io/badge/version-1.3.2-2ea44f)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab)
 ![Telegram](https://img.shields.io/badge/interface-Telegram-2aabee)
-![Status](https://img.shields.io/badge/status-release--candidate-f59e0b)
+![Status](https://img.shields.io/badge/status-stable-2ea44f)
 
 Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ставок фандинга на фьючерсных биржах. Бот собирает публичные рыночные данные, применяет персональные фильтры, отправляет уведомления и показывает операционное состояние прямо в Telegram.
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Следующий релиз: **1.3.0**. Telegram Mini App и новый графический WebApp-интерфейс в эту версию не входят.
+Текущий релиз: **1.3.2**. Это immutable metadata follow-up к installer hotfix `1.3.1`; функциональный FVG/operations стек основан на `1.3.0`. Telegram Mini App и графический WebApp-интерфейс в релиз не входят.
 
-## Что входит в 1.3.0
+## Что входит в 1.3.x
 
 ### FVG
 
@@ -28,6 +28,8 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - один расчёт на уникальную комбинацию `биржа + символ + таймфрейм`, независимо от числа получателей.
 
 Старые FVG settings schema v2 автоматически мигрируют в schema v3: существующие символы получают биржу Bitunix и таймфрейм `15m`, направления и фильтры сохраняются.
+
+Верхний публичный лимит — 10 инструментов. Старый env override не может повысить его. Legacy-настройки, где уже сохранено больше 10 инструментов, не обрезаются: пользователь может удалять их, но не может добавлять новые до снижения количества ниже лимита.
 
 ### Мультибиржевой фандинг
 
@@ -84,12 +86,17 @@ Operational readers открывают SQLite через `mode=ro` и `PRAGMA qu
 - read-only archive audit CLI;
 - persistent restart circuit breaker;
 - атомарная VDS-установка и автоматический rollback;
-- Bot API-only deployment без Telegram App credentials.
+- Bot API-only deployment без Telegram App credentials;
+- candidate unit tests в `env -i` без production secrets и feature flags;
+- полный candidate test log в `/var/log/fvg-alert-bot`;
+- обязательный CI на GitHub-hosted Ubuntu, не на production VDS.
 
 Рискованные operational-функции выключены по умолчанию и включаются поэтапно через `.env`.
 
 Подробности:
 
+- [`docs/RELEASE_1.3.2.md`](docs/RELEASE_1.3.2.md);
+- [`docs/RELEASE_1.3.1.md`](docs/RELEASE_1.3.1.md);
 - [`docs/RELEASE_1.3.0.md`](docs/RELEASE_1.3.0.md);
 - [`docs/FVG_MULTI_INSTRUMENTS.md`](docs/FVG_MULTI_INSTRUMENTS.md);
 - [`docs/ADMIN_OPERATIONS_STATUS.md`](docs/ADMIN_OPERATIONS_STATUS.md);
@@ -131,15 +138,15 @@ apt update && apt install -y git
 git clone https://github.com/MishkaStrategy/TB.git /root/TB
 cd /root/TB
 git checkout main
-test "$(cat VERSION)" = "1.3.0"
+test "$(cat VERSION)" = "1.3.2"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
-Установщик собирает staging-релиз и запускает unit suite до остановки работающего процесса. Затем создаёт backup, атомарно переключает релиз и автоматически возвращает предыдущую версию при ошибке запуска.
+Установщик собирает staging-релиз и запускает unit suite в чистом окружении до остановки работающего процесса. Production `.env` не копируется в staging. Затем создаётся backup, выполняется атомарное переключение, а при ошибке запуска автоматически возвращается предыдущая версия.
 
-## Обновление существующего VDS до 1.3.0
+## Обновление существующего VDS до 1.3.2
 
-Production обновляется только после публикации проверенного тега `v1.3.0` и SHA:
+Production обновляется только после публикации проверенного тега `v1.3.2` и точного SHA из deployment issue:
 
 ```bash
 cd /root/TB
@@ -149,8 +156,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.0 \
-  EXPECTED_VERSION=1.3.0 \
+  TARGET_REF=v1.3.2 \
+  EXPECTED_VERSION=1.3.2 \
   EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -165,13 +172,14 @@ cat /opt/fvg-alert-bot/BUILD_COMMIT
 systemctl is-active fvg-alert-bot
 systemctl is-enabled fvg-alert-bot
 systemctl status fvg-alert-bot --no-pager --full
+systemctl show fvg-alert-bot -p NRestarts -p ExecMainStatus -p MemoryCurrent -p MemoryMax
 journalctl -u fvg-alert-bot -n 150 --no-pager
 
 sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
 sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 ```
 
-Ожидается версия `1.3.0`, точный audited SHA, `active`, `enabled` и `ok` для обеих SQLite-баз.
+Ожидается версия `1.3.2`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
 
 Telegram smoke:
 
@@ -179,7 +187,8 @@ Telegram smoke:
 - добавление FVG-инструмента и выбор `15m/1h/4h/1d`;
 - повторное открытие и сохранение настроек;
 - RU/EN и compact/detailed;
-- `⚙️ Операции`: restart guard и FVG archive.
+- `⚙️ Операции`: restart guard и FVG archive;
+- отсутствие Telegram Mini App.
 
 ## Production flags
 
@@ -218,6 +227,7 @@ systemctl restart fvg-alert-bot
 | Предыдущий релиз | `/opt/fvg-alert-bot.previous` |
 | Runtime-state и SQLite | `/var/lib/fvg-alert-bot` |
 | Секреты и production-настройки | `/etc/fvg-alert-bot.env` |
+| Candidate test logs | `/var/log/fvg-alert-bot` |
 | Резервные копии | `/var/backups/fvg-alert-bot` |
 | systemd units | `/etc/systemd/system/fvg-alert-bot*` |
 
@@ -265,6 +275,6 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-CI включает dependency audit, compilation, release contract, FVG migration/timeframe tests, оба новых read-only admin sections, полный unit suite, bounded 500×10 soak и production systemd verification.
+CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, FVG migration/timeframe tests, оба read-only admin sections, полный unit suite, bounded `500 × 10` soak и production systemd verification.
 
-После публикации release workflow создаёт тег `v1.3.0`, GitHub Release, архив `fvg-alert-bot-1.3.0.tar.gz` и SHA-256 checksum.
+После публикации release workflow создаёт тег `v1.3.2`, GitHub Release, архив `fvg-alert-bot-1.3.2.tar.gz` и SHA-256 checksum.
