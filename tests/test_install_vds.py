@@ -5,6 +5,9 @@ from pathlib import Path
 class InstallVdsScriptTests(unittest.TestCase):
     def setUp(self):
         self.script = Path("scripts/install_vds.sh").read_text(encoding="utf-8")
+        self.candidate_runner = Path("scripts/run_candidate_tests.sh").read_text(
+            encoding="utf-8"
+        )
 
     def test_pre_switch_backup_uses_staging_runtime(self):
         expected = "\n".join(
@@ -39,8 +42,9 @@ class InstallVdsScriptTests(unittest.TestCase):
     def test_pip_and_tests_use_staging_temp_without_cache(self):
         self.assertGreaterEqual(self.script.count("PIP_NO_CACHE_DIR=1"), 2)
         self.assertIn('TMPDIR="${STAGING_DIR}/tmp"', self.script)
-        self.assertIn("export TMPDIR='${STAGING_DIR}/tmp'", self.script)
-        self.assertIn("export MPLCONFIGDIR='${STAGING_DIR}/tmp/mpl'", self.script)
+        self.assertIn('"TMPDIR=${TMP_ROOT}"', self.candidate_runner)
+        self.assertIn('"MPLCONFIGDIR=${MPL_CONFIG}"', self.candidate_runner)
+        self.assertIn("env -i", self.candidate_runner)
         self.assertIn('rm -rf "${STAGING_DIR}/data" "${STAGING_DIR}/tmp"', self.script)
 
 
