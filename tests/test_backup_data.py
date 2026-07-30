@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -165,6 +166,73 @@ class RuntimeBackupTests(unittest.TestCase):
             )
             self.assertEqual(history["file_count"], 4)
             self.assertIsNone(history["error_message"])
+
+    def test_backup_suppresses_macos_appledouble_metadata(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            data_dir = root / "data"
+            backup_dir = root / "backups"
+            tools_dir = root / "tools"
+            data_dir.mkdir()
+            tools_dir.mkdir()
+
+            (data_dir / "runtime_settings.json").write_text(
+                '{"public_access_enabled": false}',
+                encoding="utf-8",
+            )
+            (data_dir / "._runtime_settings.json").write_bytes(b"appledouble")
+            (data_dir / ".DS_Store").write_bytes(b"finder metadata")
+
+            real_tar = shutil.which("tar")
+            self.assertIsNotNone(real_tar)
+            tar_wrapper = tools_dir / "tar"
+            tar_wrapper.write_text(
+                """#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${COPYFILE_DISABLE:-}" != "1" ]]; then
+  echo "COPYFILE_DISABLE was not enabled" >&2
+  exit 97
+fi
+exec "${REAL_TAR}" "$@"
+""",
+                encoding="utf-8",
+            )
+            tar_wrapper.chmod(0o755)
+
+            environment = backup_environment(data_dir, backup_dir)
+            environment["REAL_TAR"] = str(real_tar)
+            environment["PATH"] = f"{tools_dir}{os.pathsep}{environment['PATH']}"
+            result = subprocess.run(
+                ["bash", str(BACKUP_SCRIPT)],
+                cwd=PROJECT_ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            archives = list(backup_dir.glob("fvg-alert-bot-*.tar.gz"))
+            self.assertEqual(len(archives), 1)
+            with tarfile.open(archives[0], "r:gz") as archive:
+                names = [
+                    name.removeprefix("./")
+                    for name in archive.getnames()
+                    if name not in {"", ".", "./"}
+                ]
+                manifest_member = archive.extractfile(MANIFEST_NAME)
+                self.assertIsNotNone(manifest_member)
+                manifest = json.load(manifest_member)
+
+            self.assertFalse(
+                any(Path(name).name.startswith("._") for name in names),
+                names,
+            )
+            self.assertNotIn(".DS_Store", names)
+            self.assertEqual(
+                {item["path"] for item in manifest["files"]},
+                {"runtime_settings.json"},
+            )
 
     def test_corrupt_source_database_is_not_published_and_records_failure(self):
         with tempfile.TemporaryDirectory() as tempdir:
