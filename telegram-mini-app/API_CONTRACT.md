@@ -3,12 +3,13 @@
 ## Общие правила
 
 - Авторизация выполняется только по проверенному Telegram `initData`.
-- Telegram ID извлекается сервером и не принимается из JSON-body.
+- Telegram ID текущего пользователя извлекается сервером и не принимается из JSON-body.
 - Все значения повторно валидируются backend до первой записи.
-- Ответ содержит нормализованную полную модель настроек.
 - Точные десятичные значения передаются строками.
-- Административные поля возвращаются только после повторной проверки `is_admin(telegram_id)`.
-- Общий `PUT` не выполняет backup, restart и изменение allowlist.
+- Административные данные и операции доступны только после повторной проверки `is_admin(telegram_id)`.
+- Общий `PUT /settings` сохраняет только персональные настройки.
+- Режим доступа, allowlist, backup и restart выполняются только через отдельные endpoints.
+- Каждое административное изменение требует короткоживущего одноразового подтверждения.
 
 ## Авторизация
 
@@ -79,6 +80,12 @@ Backend проверяет HMAC-SHA-256, обязательные поля, от
       "available": true,
       "publicAccessEnabled": false,
       "allowedUsers": [],
+      "capabilities": {
+        "accessWrite": true,
+        "allowlistWrite": true,
+        "backup": false,
+        "restart": false
+      },
       "diagnostics": {
         "websocket": "connected",
         "lastWebsocketMessage": "2026-07-29T12:00:00+00:00",
@@ -119,7 +126,9 @@ Backend проверяет HMAC-SHA-256, обязательные поля, от
 }
 ```
 
-Для обычного пользователя `admin.available=false`, allowlist пуст, а `diagnostics` сохраняет ту же полную схему с безопасными значениями `unknown`, `null` и `0`.
+Для обычного пользователя `admin.available=false`; все admin capabilities имеют значение `false`, а диагностика сохраняет стабильную безопасную схему.
+
+`capabilities.backup` и `capabilities.restart` становятся `true` только после подключения production callbacks. До этого endpoints существуют, но завершаются fail-closed ошибкой `409`.
 
 ## PUT `/api/mini-app/settings`
 
@@ -134,7 +143,9 @@ Backend проверяет HMAC-SHA-256, обязательные поля, от
 }
 ```
 
-Отправляется полная структура из GET. Ответ имеет тот же формат и содержит значения после серверной нормализации.
+Отправляется полная структура из GET. Backend сохраняет только `general`, `fvg` и `funding`. Объект `admin` принимается для совместимости модели, но не выполняет административных записей.
+
+Ответ имеет тот же формат и содержит значения после серверной нормализации.
 
 ## Маппинг `general`
 
@@ -212,48 +223,145 @@ Scope:
 
 При изменении порога, направлений, бирж или отключении рассылки очищается legacy и мультибиржевой crossing-state.
 
-## Административные данные
+## Одноразовое подтверждение admin-действия
 
-Источники:
+### POST `/api/mini-app/admin/confirmations`
 
-- `RuntimeSettings`;
-- `AccessRegistry`;
-- `UserActivityRegistry`;
-- health-метрики FVG event store;
-- `PRAGMA quick_check` SQLite;
-- `/proc/self/status` или `resource.getrusage`;
-- `os.getloadavg`;
-- `shutil.disk_usage`;
-- `VERSION`, `BUILD_COMMIT` и версия Python.
-
-Через общий PUT администратор может менять только `publicAccessEnabled`. `available`, `allowedUsers` и `diagnostics` являются server-owned и read-only.
-
-Будущие опасные операции используют отдельные endpoint:
-
-```text
-POST /api/mini-app/admin/backup
-POST /api/mini-app/admin/restart/prepare
-POST /api/mini-app/admin/restart/confirm
-POST /api/mini-app/admin/allowlist
-DELETE /api/mini-app/admin/allowlist/{telegram_id}
+```json
+{
+  "action": "allowlist.add",
+  "telegramId": 123456789
+}
 ```
+
+Поддерживаемые действия:
+
+- `allowlist.add`;
+- `allowlist.remove`;
+- `access.public`;
+- `access.private`;
+- `backup.create`;
+- `bot.restart`.
+
+Для allowlist-действий `telegramId` обязателен. Ответ:
+
+```json
+{
+  "token": "one-time-random-token",
+  "action": "allowlist.add",
+  "confirmationText": "ALLOW 123456789",
+  "expiresAt": "2026-07-30T00:02:00+00:00"
+}
+```
+
+Токен:
+
+- действует 120 секунд по умолчанию;
+- привязан к проверенному Telegram ID администратора;
+- привязан к точному действию и целевому Telegram ID;
+- удаляется при первой попытке использования;
+- не может быть повторно использован или перенесён на другую цель.
+
+## Режим доступа
+
+### PUT `/api/mini-app/admin/access`
+
+```json
+{
+  "publicAccessEnabled": true,
+  "confirmationToken": "one-time-random-token",
+  "confirmationText": "PUBLIC ACCESS"
+}
+```
+
+Режим сохраняется через существующий `RuntimeSettings`.
+
+## Allowlist
+
+### POST `/api/mini-app/admin/allowlist`
+
+```json
+{
+  "telegramId": 123456789,
+  "name": "Михаил",
+  "username": "example",
+  "confirmationToken": "one-time-random-token",
+  "confirmationText": "ALLOW 123456789"
+}
+```
+
+Создаёт или заменяет runtime-запись со статусом `allowed`. При отсутствии имени backend использует данные `UserActivityRegistry`, если пользователь уже взаимодействовал с ботом.
+
+### DELETE `/api/mini-app/admin/allowlist/{telegram_id}`
+
+```json
+{
+  "confirmationToken": "one-time-random-token",
+  "confirmationText": "REMOVE 123456789"
+}
+```
+
+Env-allowlist и администраторов нельзя удалить через Mini App. Удаляются только runtime-записи `AccessRegistry`.
+
+## Backup
+
+### POST `/api/mini-app/admin/backup`
+
+```json
+{
+  "confirmationToken": "one-time-random-token",
+  "confirmationText": "CREATE BACKUP"
+}
+```
+
+Endpoint вызывает только переданный production callback. Mini App backend не запускает shell или `systemctl` самостоятельно. Пока callback не подключён, capability равна `false`, а endpoint возвращает `409 BACKUP_ACTION_UNAVAILABLE`.
+
+## Restart
+
+### POST `/api/mini-app/admin/restart`
+
+```json
+{
+  "confirmationToken": "one-time-random-token",
+  "confirmationText": "RESTART BOT"
+}
+```
+
+Endpoint вызывает только переданный production restart callback. До интеграции с graceful restart/restart-guard capability равна `false`, а endpoint возвращает `409 RESTART_ACTION_UNAVAILABLE`.
 
 ## Ошибки
 
 ```json
 {
   "error": {
-    "code": "INVALID_FUNDING_INTERVAL",
-    "message": "Частота должна быть от 15 минут до 48 часов с шагом 15 минут.",
-    "field": "settings.funding.intervalMinutes"
+    "code": "CONFIRMATION_MISMATCH",
+    "message": "Подтверждение не соответствует действию или пользователю.",
+    "field": "confirmationToken"
   }
 }
 ```
 
+Основные коды подтверждения:
+
+- `CONFIRMATION_TOKEN_REQUIRED`;
+- `CONFIRMATION_INVALID`;
+- `CONFIRMATION_EXPIRED`;
+- `CONFIRMATION_MISMATCH`;
+- `CONFIRMATION_TEXT_MISMATCH`;
+- `ADMIN_REQUIRED`;
+- `PROTECTED_ACCESS_RECORD`;
+- `BACKUP_ACTION_UNAVAILABLE`;
+- `RESTART_ACTION_UNAVAILABLE`.
+
 Коды HTTP:
 
+- `200` — операция выполнена;
+- `201` — challenge или allowlist-запись создана;
+- `202` — production callback принял backup/restart;
 - `400` — формат или валидация;
 - `401` — отсутствует или не прошёл проверку Telegram `initData`;
-- `403` — нет доступа;
+- `403` — нет доступа или административных прав;
+- `404` — runtime allowlist-запись не найдена;
+- `409` — истёкшее/повторное/несоответствующее подтверждение или отключённый adapter;
 - `415` — неверный Content-Type;
 - `500` — внутренняя ошибка без раскрытия секретов.
