@@ -16,26 +16,44 @@ class RuntimeSettings:
     def __init__(self, path="data/runtime_settings.json"):
         self.path = Path(path)
 
-    def public_access_enabled(self, default=False):
-        value = self._read().get("public_access_enabled")
+    def _boolean(self, key, default=False):
+        value = self._read().get(key)
         return value if isinstance(value, bool) else bool(default)
 
-    def set_public_access_enabled(self, enabled):
+    def _set_boolean(self, key, enabled):
         with _WRITE_LOCK:
             data = self._read()
-            data["public_access_enabled"] = bool(enabled)
+            data[key] = bool(enabled)
             self._write(data)
         return bool(enabled)
 
-    def toggle_public_access(self, default=False):
+    def _toggle_boolean(self, key, default=False):
         with _WRITE_LOCK:
             data = self._read()
-            value = data.get("public_access_enabled")
+            value = data.get(key)
             current = value if isinstance(value, bool) else bool(default)
             enabled = not current
-            data["public_access_enabled"] = enabled
+            data[key] = enabled
             self._write(data)
         return enabled
+
+    def public_access_enabled(self, default=False):
+        return self._boolean("public_access_enabled", default)
+
+    def set_public_access_enabled(self, enabled):
+        return self._set_boolean("public_access_enabled", enabled)
+
+    def toggle_public_access(self, default=False):
+        return self._toggle_boolean("public_access_enabled", default)
+
+    def maintenance_enabled(self, default=False):
+        return self._boolean("maintenance_enabled", default)
+
+    def set_maintenance_enabled(self, enabled):
+        return self._set_boolean("maintenance_enabled", enabled)
+
+    def toggle_maintenance(self, default=False):
+        return self._toggle_boolean("maintenance_enabled", default)
 
     def _read(self):
         if not self.path.exists():

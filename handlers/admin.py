@@ -1,4 +1,4 @@
-"""Administrator dashboard, user statistics and operational health."""
+"""Telegram administrator dashboard and safe operational controls."""
 
 from __future__ import annotations
 
@@ -11,45 +11,94 @@ from telegram.ext import ContextTypes
 from config import PUBLIC_ACCESS_ENABLED, is_admin
 from database.runtime_settings import RuntimeSettings
 from database.user_activity import UserActivityRegistry
+from operations.admin_service import (
+    active_user_count,
+    background_tasks,
+    clear_stuck_outbox,
+    disable_symbol_for_all_users,
+    event_counts,
+    problematic_symbols,
+    process_memory_bytes,
+    run_recovery,
+)
+from operations.stream_control import restart_fvg_stream
 
 
 _RUNTIME_SETTINGS = RuntimeSettings()
+UTC = timezone.utc
 
 
 def public_access_enabled():
-    """Return the access mode currently applied by authorization handlers."""
     return _RUNTIME_SETTINGS.public_access_enabled(default=PUBLIC_ACCESS_ENABLED)
 
 
-def admin_keyboard(public_access=None):
+def maintenance_enabled():
+    return _RUNTIME_SETTINGS.maintenance_enabled(default=False)
+
+
+def admin_keyboard(public_access=None, maintenance=None):
     if public_access is None:
         public_access = public_access_enabled()
-    access_label = (
-        "🌐 Доступ: публичный"
-        if public_access
-        else "🔐 Доступ: приватный"
-    )
+    if maintenance is None:
+        maintenance = maintenance_enabled()
     return InlineKeyboardMarkup(
         [
             [
+                InlineKeyboardButton("📊 Обзор", callback_data="admin:overview"),
+                InlineKeyboardButton("👥 Пользователи", callback_data="admin:users"),
+            ],
+            [
+                InlineKeyboardButton("⚠️ Инструменты", callback_data="admin:problems"),
+                InlineKeyboardButton("⏱ Задачи", callback_data="admin:tasks"),
+            ],
+            [InlineKeyboardButton("🧰 Действия", callback_data="admin:actions")],
+            [
                 InlineKeyboardButton(
-                    "👥 Статистика пользователей",
-                    callback_data="admin:users",
+                    "🚧 Обслуживание: включено"
+                    if maintenance
+                    else "✅ Обслуживание: выключено",
+                    callback_data="admin:ask_maintenance",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "🩺 Состояние бота",
-                    callback_data="admin:health",
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    access_label,
+                    "🌐 Доступ: публичный"
+                    if public_access
+                    else "🔐 Доступ: приватный",
                     callback_data="admin:toggle_access",
                 )
             ],
         ]
+    )
+
+
+def actions_keyboard():
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🔌 Перезапустить WebSocket", callback_data="admin:ask_restart")],
+            [InlineKeyboardButton("♻️ Запустить REST recovery", callback_data="admin:ask_recovery")],
+            [InlineKeyboardButton("🧹 Очистить зависший outbox", callback_data="admin:ask_clear")],
+            [InlineKeyboardButton("🔔 Тестовое уведомление", callback_data="admin:test")],
+            [InlineKeyboardButton("⬅️ Назад", callback_data="admin:main")],
+        ]
+    )
+
+
+def confirm_keyboard(action, *, payload=None):
+    data = f"admin:confirm_{action}"
+    if payload:
+        data += f":{payload}"
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("✅ Подтвердить", callback_data=data),
+            InlineKeyboardButton("❌ Отмена", callback_data="admin:actions"),
+        ]]
+    )
+
+
+def back_keyboard(target="main"):
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⬅️ Назад", callback_data=f"admin:{target}")]]
     )
 
 
@@ -74,17 +123,32 @@ def _format_bytes(value):
     return f"{size} Б"
 
 
+def _age_seconds(raw, now):
+    if not raw:
+        return None
+    try:
+        value = datetime.fromisoformat(str(raw)).astimezone(UTC)
+    except (TypeError, ValueError):
+        return None
+    return max(0, int((now - value).total_seconds()))
+
+
 def format_user_stats(registry=None, now=None):
     registry = registry or UserActivityRegistry()
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     users = list(registry.users().values())
 
     def active_since(delta):
-        return sum(
-            datetime.fromisoformat(user["last_seen"]) >= now - delta
-            for user in users
-            if user.get("last_seen")
-        )
+        count = 0
+        for user in users:
+            try:
+                count += (
+                    datetime.fromisoformat(user["last_seen"]).astimezone(UTC)
+                    >= now - delta
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+        return count
 
     latest = sorted(
         users,
@@ -110,68 +174,92 @@ def format_user_stats(registry=None, now=None):
     return "\n".join(lines)
 
 
-def format_bot_health(event_store, now=None):
-    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+def format_bot_health(event_store, now=None, registry=None):
+    now = (now or datetime.now(UTC)).astimezone(UTC)
     health = event_store.health()
     ws_connected = health.get("ws_connected")
-    if ws_connected is True:
-        ws_status = "подключён"
-    elif ws_connected is False:
-        ws_status = "отключён"
-    else:
-        ws_status = "неизвестно"
+    ws_status = (
+        "подключён"
+        if ws_connected is True
+        else "отключён"
+        if ws_connected is False
+        else "неизвестно"
+    )
+    last_ws = health.get("last_ws_message")
+    ws_age = _age_seconds(last_ws, now)
+    ws_age_suffix = f" ({ws_age} сек. назад)" if ws_age is not None else ""
 
-    database_size = 0
+    try:
+        hour_signals, day_signals = event_counts(event_store, now)
+    except (AttributeError, TypeError):
+        hour_signals = day_signals = 0
+    try:
+        active_users = active_user_count(registry or UserActivityRegistry(), now)
+    except (AttributeError, OSError):
+        active_users = 0
     try:
         database_size = event_store.path.stat().st_size
     except OSError:
-        pass
-
-    last_ws = health.get("last_ws_message")
-    ws_age = ""
-    if last_ws:
-        try:
-            age = max(
-                0,
-                int(
-                    (
-                        now
-                        - datetime.fromisoformat(str(last_ws)).astimezone(
-                            timezone.utc
-                        )
-                    ).total_seconds()
-                ),
-            )
-            ws_age = f" ({age} сек. назад)"
-        except (TypeError, ValueError):
-            ws_age = ""
+        database_size = 0
 
     return "\n".join(
         [
             "🩺 Состояние FVG Alert Bot",
             "",
             f"Bitunix WebSocket: {ws_status}",
-            f"Последняя WS-свеча: {_format_time(last_ws)}{ws_age}",
             (
-                "Последний REST recovery: "
-                f"{_format_time(health.get('last_rest_recovery'))}"
+                f"Задержка последней свечи: {ws_age} сек."
+                if ws_age is not None
+                else "Задержка последней свечи: —"
             ),
-            f"Последняя ошибка: {health.get('last_error') or '—'}",
-            "",
-            f"Событий в SQLite: {int(health.get('events') or 0)}",
-            f"Успешных доставок: {int(health.get('deliveries') or 0)}",
+            f"Последняя WS-свеча: {_format_time(last_ws)}{ws_age_suffix}",
+            f"Активных пользователей за 24ч: {active_users}",
+            f"Сигналов за час / сутки: {hour_signals} / {day_signals}",
             f"Сообщений в outbox: {int(health.get('outbox') or 0)}",
+            f"Ошибок доставки: {int(health.get('delivery_failures') or 0)}",
             (
-                "Ошибок доставки: "
-                f"{int(health.get('delivery_failures') or 0)}"
+                "Постоянных ошибок доставки: "
+                f"{int(health.get('delivery_permanent_failures') or 0)}"
             ),
-            (
-                "Повторных доставок: "
-                f"{int(health.get('delivery_retries') or 0)}"
-            ),
+            f"REST recovery: {int(health.get('rest_recoveries') or 0)}",
+            f"Ошибок recovery: {int(health.get('recovery_failures') or 0)}",
+            f"Использование памяти: {_format_bytes(process_memory_bytes())}",
             f"Размер SQLite: {_format_bytes(database_size)}",
+            f"Последний REST recovery: {_format_time(health.get('last_rest_recovery'))}",
+            f"Последняя ошибка: {health.get('last_error') or '—'}",
         ]
     )
+
+
+def format_problem_symbols(event_store):
+    rows = problematic_symbols(event_store)
+    if not rows:
+        return (
+            "⚠️ Проблемные инструменты\n\nПроблемных инструментов в outbox нет.",
+            [],
+        )
+    lines = ["⚠️ Проблемные инструменты", ""]
+    for row in rows:
+        error = str(row.get("last_error") or "—").replace("\n", " ")[:80]
+        lines.append(
+            f"• {row['symbol']}: сообщений {row['pending']}, "
+            f"попыток {row['attempts']}\n  {error}"
+        )
+    return "\n".join(lines), [row["symbol"] for row in rows]
+
+
+def problems_keyboard(symbols):
+    rows = [
+        [
+            InlineKeyboardButton(
+                f"⛔ Отключить {symbol}",
+                callback_data=f"admin:disable:{symbol}",
+            )
+        ]
+        for symbol in symbols
+    ]
+    rows.append([InlineKeyboardButton("⬅️ Назад", callback_data="admin:main")])
+    return InlineKeyboardMarkup(rows)
 
 
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -181,10 +269,9 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Эта панель доступна только администраторам."
         )
         return
-    current_access = await asyncio.to_thread(public_access_enabled)
     await update.effective_message.reply_text(
         "🛠 Админ-панель",
-        reply_markup=admin_keyboard(current_access),
+        reply_markup=admin_keyboard(),
     )
 
 
@@ -199,34 +286,142 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Эта панель доступна только администраторам."
         )
         return
-    if query.data == "admin:users":
-        text = await asyncio.to_thread(format_user_stats)
-        await query.edit_message_text(text, reply_markup=admin_keyboard())
-    elif query.data == "admin:health":
-        from alerts.scheduler import get_fvg_service
 
-        text = await asyncio.to_thread(
-            format_bot_health,
-            get_fvg_service().event_store,
+    from alerts.scheduler import get_fvg_service
+
+    service = get_fvg_service()
+    data = query.data or ""
+
+    if data == "admin:main":
+        await query.edit_message_text(
+            "🛠 Админ-панель",
+            reply_markup=admin_keyboard(),
         )
-        await query.edit_message_text(text, reply_markup=admin_keyboard())
-    elif query.data == "admin:toggle_access":
+    elif data in {"admin:overview", "admin:health"}:
+        text = await asyncio.to_thread(format_bot_health, service.event_store)
+        await query.edit_message_text(text, reply_markup=back_keyboard())
+    elif data == "admin:users":
+        text = await asyncio.to_thread(format_user_stats)
+        await query.edit_message_text(text, reply_markup=back_keyboard())
+    elif data == "admin:problems":
+        text, symbols = await asyncio.to_thread(
+            format_problem_symbols,
+            service.event_store,
+        )
+        await query.edit_message_text(
+            text,
+            reply_markup=problems_keyboard(symbols),
+        )
+    elif data == "admin:tasks":
+        tasks = background_tasks(context.application)
+        text = "⏱ Фоновые задачи\n\n" + (
+            "\n".join(f"• {name}" for name in tasks)
+            or "Нет активных задач."
+        )
+        await query.edit_message_text(text, reply_markup=back_keyboard())
+    elif data == "admin:actions":
+        await query.edit_message_text(
+            "🧰 Служебные действия",
+            reply_markup=actions_keyboard(),
+        )
+    elif data == "admin:ask_restart":
+        await query.edit_message_text(
+            "Перезапустить WebSocket-соединение Bitunix? "
+            "Telegram-бот продолжит работать.",
+            reply_markup=confirm_keyboard("restart"),
+        )
+    elif data == "admin:confirm_restart":
+        await restart_fvg_stream(context.application)
+        await query.edit_message_text(
+            "✅ WebSocket перезапущен.",
+            reply_markup=actions_keyboard(),
+        )
+    elif data == "admin:ask_recovery":
+        await query.edit_message_text(
+            "Принудительно выполнить REST recovery для всех активных инструментов?",
+            reply_markup=confirm_keyboard("recovery"),
+        )
+    elif data == "admin:confirm_recovery":
+        events, failures = await run_recovery(service, context.bot)
+        await query.edit_message_text(
+            f"✅ Recovery завершён. Событий: {events}. Ошибок: {failures}.",
+            reply_markup=actions_keyboard(),
+        )
+    elif data == "admin:ask_clear":
+        await query.edit_message_text(
+            "Удалить из outbox сообщения с 3+ попытками или старше 60 минут? "
+            "Действие необратимо.",
+            reply_markup=confirm_keyboard("clear"),
+        )
+    elif data == "admin:confirm_clear":
+        removed = await asyncio.to_thread(
+            clear_stuck_outbox,
+            service.event_store,
+        )
+        await query.edit_message_text(
+            f"✅ Удалено зависших сообщений: {removed}.",
+            reply_markup=actions_keyboard(),
+        )
+    elif data == "admin:test":
+        await context.bot.send_message(
+            chat_id=user.id,
+            text="🔔 Тестовое уведомление администратора доставлено успешно.",
+        )
+        service.event_store.increment_health("admin_test_notifications")
+        await query.edit_message_text(
+            "✅ Тестовое уведомление отправлено.",
+            reply_markup=actions_keyboard(),
+        )
+    elif data == "admin:toggle_access":
         enabled = await asyncio.to_thread(
             _RUNTIME_SETTINGS.toggle_public_access,
             PUBLIC_ACCESS_ENABLED,
         )
-        if enabled:
-            text = (
-                "🌐 Публичный доступ включён.\n\n"
-                "Бот теперь принимает команды от всех Telegram-пользователей."
-            )
-        else:
-            text = (
-                "🔐 Приватный доступ включён.\n\n"
-                "Бот принимает команды только от пользователей из allowlist "
-                "и одобренных заявок."
-            )
         await query.edit_message_text(
-            text,
-            reply_markup=admin_keyboard(enabled),
+            "🌐 Публичный доступ включён."
+            if enabled
+            else "🔐 Приватный доступ включён.",
+            reply_markup=admin_keyboard(enabled, maintenance_enabled()),
+        )
+    elif data == "admin:ask_maintenance":
+        target = not maintenance_enabled()
+        await query.edit_message_text(
+            (
+                "Включить режим обслуживания? Пользовательские команды "
+                "будут доступны только администраторам."
+                if target
+                else "Выключить режим обслуживания и вернуть обычную работу?"
+            ),
+            reply_markup=confirm_keyboard("maintenance"),
+        )
+    elif data == "admin:confirm_maintenance":
+        enabled = await asyncio.to_thread(
+            _RUNTIME_SETTINGS.toggle_maintenance,
+            False,
+        )
+        await query.edit_message_text(
+            "🚧 Режим обслуживания включён."
+            if enabled
+            else "✅ Режим обслуживания выключен.",
+            reply_markup=admin_keyboard(public_access_enabled(), enabled),
+        )
+    elif data.startswith("admin:disable:"):
+        symbol = data.rsplit(":", 1)[-1].upper()
+        await query.edit_message_text(
+            f"Отключить {symbol} у всех пользователей? "
+            "Поток автоматически отпишется от инструмента.",
+            reply_markup=confirm_keyboard("disable", payload=symbol),
+        )
+    elif data.startswith("admin:confirm_disable:"):
+        symbol = data.rsplit(":", 1)[-1].upper()
+        affected = await asyncio.to_thread(
+            disable_symbol_for_all_users,
+            service.settings,
+            symbol,
+        )
+        service.event_store.increment_health("admin_disabled_symbols")
+        await query.edit_message_text(
+            f"✅ {symbol} отключён. "
+            f"Изменено пользовательских настроек: {affected}.",
+            reply_markup=back_keyboard("problems"),
         )
