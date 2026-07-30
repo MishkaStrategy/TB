@@ -45,6 +45,8 @@ class MultiExchangeFvgPoller:
         timeframe: str,
         now: datetime | None = None,
     ) -> list[FvgEvent]:
+        if timeframe != "15m" and not is_bitcoin_symbol(symbol):
+            return []
         now = (now or datetime.now(UTC)).astimezone(UTC)
         candles = self.candle_client.load(
             exchange,
