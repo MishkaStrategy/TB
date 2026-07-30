@@ -32,9 +32,9 @@ The update wrapper validates this without printing the bot token.
 
 The first `v1.3.0` production attempt stopped during candidate tests before `systemctl stop` and atomic switch. Production remained on `1.2.0`; rollback was not required and runtime SQLite data were not changed.
 
-The confirmed cause was production environment contamination: a stale `MAX_SYMBOLS_PER_USER=20` override affected candidate unit tests. Releases `1.3.1` and `1.3.2` isolate candidate tests with `env -i`, retain a complete test log and cap the effective FVG instrument limit at 10.
+The confirmed cause was production environment contamination: a stale `MAX_SYMBOLS_PER_USER=20` override affected candidate unit tests. Releases `1.3.1` and later isolate candidate tests with `env -i`, retain a complete test log and cap the effective FVG instrument limit at 10.
 
-`v1.3.2` is the current audited deployment target. Telegram Mini App PR #53 is excluded.
+`v1.3.3` is the current audited deployment target. It also prevents macOS BSD tar from adding AppleDouble `._*` metadata files to verified backup archives. Telegram Mini App PR #53 is excluded.
 
 ## Preflight
 
@@ -48,7 +48,7 @@ git status --short
 
 `git status --short` must be empty. Also verify both runtime SQLite databases with `PRAGMA quick_check`, record the current `NRestarts`, and confirm at least 1 GB free space plus 5000 inode on `/opt`.
 
-## Update to 1.3.2
+## Update to 1.3.3
 
 Use the published tag and exact audited commit from the production deployment issue:
 
@@ -59,8 +59,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.2 \
-  EXPECTED_VERSION=1.3.2 \
+  TARGET_REF=v1.3.3 \
+  EXPECTED_VERSION=1.3.3 \
   EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -81,6 +81,10 @@ Before the production process is stopped:
 
 The installed service continues to read the external production file through systemd `EnvironmentFile=/etc/fvg-alert-bot.env`.
 
+## Backup portability
+
+The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from the runtime snapshot and runs tar with `COPYFILE_DISABLE=1`. This prevents macOS from synthesizing unmanifested AppleDouble members after the manifest is built. Archive verification remains strict for all ordinary unmanifested members.
+
 ## Post-deploy
 
 ```bash
@@ -97,7 +101,7 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
-- installed version is `1.3.2`;
+- installed version is `1.3.3`;
 - installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - `NRestarts` does not grow during observation;
@@ -105,7 +109,7 @@ Expected results:
 - no startup traceback or Telegram polling conflict appears;
 - no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`.
 
-## 1.3.2 smoke checks
+## 1.3.3 smoke checks
 
 - FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
 - existing schema-v2 FVG settings appear as Bitunix `15m` without losing filters;

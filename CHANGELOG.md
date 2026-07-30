@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.3.3 — 2026-07-30
+
+Кроссплатформенный hotfix verified backup для macOS.
+
+### Исправлено
+
+- macOS BSD tar больше не добавляет AppleDouble `._*` members после построения manifest;
+- backup запускает tar с `COPYFILE_DISABLE=1`;
+- существующие `._*` и `.DS_Store` исключаются из runtime snapshot;
+- manifest verifier остаётся строгим для обычных неподтверждённых файлов;
+- добавлен behavior-level regression test с контролируемым tar wrapper.
+
+### Проверено
+
+- полный unit suite;
+- candidate environment isolation;
+- dependency audit;
+- bounded `500 × 10` soak;
+- production systemd render/verify;
+- Telegram Mini App по-прежнему исключён.
+
 ## 1.3.2 — 2026-07-30
 
 Immutable metadata follow-up к installer hotfix `1.3.1`. Runtime-fix не изменён.
