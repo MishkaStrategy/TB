@@ -5,7 +5,13 @@ from __future__ import annotations
 from telegram.ext import ExtBot
 
 from database.user_preferences import UserPreferences
+from fvg_ui_localization import translate_fvg_label, translate_fvg_text
 from localization import CURRENT_CHAT_ID, localize_text, translate_label
+
+
+def _localized_text(text: str, language: str, mode: str) -> str:
+    translated = localize_text(text, language, mode)
+    return translate_fvg_text(translated, language)
 
 
 class LocalizedExtBot(ExtBot):
@@ -32,7 +38,8 @@ class LocalizedExtBot(ExtBot):
             for row in data.get(key, []):
                 for button in row:
                     if isinstance(button, dict) and isinstance(button.get("text"), str):
-                        button["text"] = translate_label(button["text"], language)
+                        base = translate_label(button["text"], language)
+                        button["text"] = translate_fvg_label(base, language)
         try:
             return type(reply_markup).de_json(data, self)
         except Exception:
@@ -45,7 +52,7 @@ class LocalizedExtBot(ExtBot):
         )
         return await super().send_message(
             chat_id,
-            localize_text(text, preferences["language"], preferences["message_mode"]),
+            _localized_text(text, preferences["language"], preferences["message_mode"]),
             *args,
             **kwargs,
         )
@@ -56,7 +63,7 @@ class LocalizedExtBot(ExtBot):
             kwargs.get("reply_markup"), preferences["language"]
         )
         return await super().edit_message_text(
-            localize_text(text, preferences["language"], preferences["message_mode"]),
+            _localized_text(text, preferences["language"], preferences["message_mode"]),
             *args,
             **kwargs,
         )
@@ -71,7 +78,7 @@ class LocalizedExtBot(ExtBot):
     async def answer_callback_query(self, callback_query_id, *args, text=None, **kwargs):
         if text is not None:
             preferences = self._chat_preferences()
-            text = localize_text(
+            text = _localized_text(
                 text,
                 preferences["language"],
                 preferences["message_mode"],
