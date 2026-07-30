@@ -50,10 +50,11 @@ git fetch origin --tags --prune
 git checkout main
 git pull --ff-only origin main
 
-TARGET_REF=main \
-EXPECTED_VERSION=1.2.0 \
-EXPECTED_COMMIT=<reviewed-full-commit-sha> \
-  sudo -E bash scripts/update_vds_bot_api_only.sh
+sudo env \
+  TARGET_REF=main \
+  EXPECTED_VERSION=1.2.0 \
+  EXPECTED_COMMIT=<reviewed-full-commit-sha> \
+  bash scripts/update_vds_bot_api_only.sh
 ```
 
 The wrapper first verifies Bot API-only credentials and then delegates to `scripts/update_vds.sh`, preserving its backup, candidate build, unit tests, atomic switch, rollback, systemd, version, commit, and SQLite checks.
