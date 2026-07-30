@@ -2,16 +2,48 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from .diagnostics import (
     collect_admin_diagnostics,
     empty_admin_diagnostics,
     normalize_admin_diagnostics,
 )
-from .service import MiniAppSettingsService as BaseMiniAppSettingsService
+from .service import (
+    MiniAppSettingsService as BaseMiniAppSettingsService,
+    _normalize_settings_payload,
+)
 
 
 class MiniAppSettingsService(BaseMiniAppSettingsService):
     """Production adapter for funding state and administrative diagnostics."""
+
+    def save_settings(self, user, settings_payload: Any) -> dict:
+        """Save personal settings only.
+
+        Administrative writes are intentionally excluded from the general PUT
+        endpoint. Access mode, allowlist, backup and restart use dedicated
+        one-time-confirmed endpoints in ``admin_actions``.
+        """
+
+        if not self.is_authorized(user.id):
+            raise PermissionError("Доступ к Mini App не разрешён.")
+        normalized = _normalize_settings_payload(
+            settings_payload, max_symbols=self.max_symbols_per_user
+        )
+
+        current_general = self.preferences.ensure(user.id)
+        if current_general["language"] != normalized["general"]["language"]:
+            self.preferences.set_language(user.id, normalized["general"]["language"])
+        if current_general["message_mode"] != normalized["general"]["message_mode"]:
+            self.preferences.set_message_mode(
+                user.id, normalized["general"]["message_mode"]
+            )
+
+        self._replace_fvg_user(user.id, normalized["fvg"])
+        self._save_funding(user.id, normalized["funding"])
+        self.activity_registry.touch(user)
+        return self._envelope(user)
 
     def _save_funding(self, telegram_id: int, desired: dict) -> None:
         current = self.funding_settings.user(telegram_id)
