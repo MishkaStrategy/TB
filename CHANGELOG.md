@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.3
+
+- Исправлена portability verified-backup: macOS AppleDouble (`._*`) и `.DS_Store`
+  исключаются из snapshot, а `tar` запускается с `COPYFILE_DISABLE=1`.
+- Manifest verifier сохраняет строгую проверку всех обычных неизвестных файлов;
+  compatibility-исключение ограничено только macOS metadata.
+- Добавлена regression-проверка archive, manifest, checksum и SQLite snapshot.
+
 ## 1.3.2 — 2026-07-30
 
 Immutable metadata follow-up к installer hotfix `1.3.1`. Runtime-fix не изменён.

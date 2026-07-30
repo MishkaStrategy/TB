@@ -116,6 +116,8 @@ esac
 current_step="copy_runtime_files"
 rsync -a \
   --exclude '.manual_backups' \
+  --exclude '._*' \
+  --exclude '.DS_Store' \
   --exclude 'fvg_event_store.sqlite3' \
   --exclude 'fvg_event_store.sqlite3-wal' \
   --exclude 'fvg_event_store.sqlite3-shm' \
@@ -249,7 +251,10 @@ PYTHONPATH="${INSTALL_DIR}" "${PYTHON}" -m database.backup_audit \
   >/dev/null
 
 current_step="create_archive"
-tar -C "${snapshot}" -czf "${temporary}" .
+# Avoid emitting macOS AppleDouble/resource-fork metadata when this script is
+# run on a developer workstation. Runtime backups remain portable and the
+# manifest continues to describe every archived runtime file.
+COPYFILE_DISABLE=1 tar -C "${snapshot}" -czf "${temporary}" .
 chmod 600 "${temporary}"
 
 current_step="verify_temporary_archive"

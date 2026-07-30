@@ -1,4 +1,5 @@
 import hashlib
+import io
 import json
 import os
 import sqlite3
@@ -40,6 +41,38 @@ def backup_environment(data_dir: Path, backup_dir: Path) -> dict:
 
 
 class RuntimeBackupTests(unittest.TestCase):
+    def test_verification_ignores_appledouble_sidecars(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            archive_path = root / "backup.tar.gz"
+            manifest = {
+                "schema_version": 1,
+                "run_id": "test-run",
+                "archive_name": archive_path.name,
+                "file_count": 1,
+                "total_uncompressed_bytes": 2,
+                "files": [
+                    {
+                        "path": "runtime_settings.json",
+                        "size": 2,
+                        "sha256": hashlib.sha256(b"{}").hexdigest(),
+                        "kind": "file",
+                    }
+                ],
+            }
+            with tarfile.open(archive_path, "w:gz") as archive:
+                for name, data in (
+                    (MANIFEST_NAME, json.dumps(manifest).encode()),
+                    ("runtime_settings.json", b"{}"),
+                    ("._runtime_settings.json", b"metadata"),
+                    (".DS_Store", b"metadata"),
+                ):
+                    info = tarfile.TarInfo(name)
+                    info.size = len(data)
+                    archive.addfile(info, io.BytesIO(data))
+            from database.backup_audit import verify_archive
+            self.assertEqual(verify_archive(archive_path)["file_count"], 1)
+
     def test_backup_contains_verified_manifest_databases_and_history(self):
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -69,6 +102,8 @@ class RuntimeBackupTests(unittest.TestCase):
                 '{"public_access_enabled": false}',
                 encoding="utf-8",
             )
+            (data_dir / "._runtime_settings.json").write_bytes(b"metadata")
+            (data_dir / ".DS_Store").write_bytes(b"metadata")
             manual_backups = data_dir / ".manual_backups"
             manual_backups.mkdir()
             (manual_backups / "old-backup.tar.gz").write_bytes(b"not recursive")
@@ -104,6 +139,8 @@ class RuntimeBackupTests(unittest.TestCase):
             self.assertTrue((extract_dir / "runtime_settings.json").is_file())
             self.assertTrue((extract_dir / MANIFEST_NAME).is_file())
             self.assertFalse((extract_dir / ".manual_backups").exists())
+            self.assertFalse((extract_dir / "._runtime_settings.json").exists())
+            self.assertFalse((extract_dir / ".DS_Store").exists())
             self.assertFalse((extract_dir / "fvg_event_store.sqlite3-wal").exists())
             self.assertFalse((extract_dir / "funding_alerts.sqlite3-wal").exists())
             self.assertFalse(

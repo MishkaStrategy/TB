@@ -174,6 +174,11 @@ def _archive_members(archive: tarfile.TarFile) -> dict[str, tarfile.TarInfo]:
             continue
         if member.isdir():
             continue
+        # Compatibility with pre-fix archives created on macOS.  Only known
+        # Apple filesystem metadata is ignored; every other unexpected member
+        # remains subject to strict manifest verification below.
+        if any(part.startswith("._") or part == ".DS_Store" for part in relative.split("/")):
+            continue
         if not member.isfile():
             raise ValueError(f"Archive special member is not allowed: {member.name}")
         if relative in members:
