@@ -19,6 +19,9 @@ class EnabledSettings:
     def is_pre_enabled(self, chat_id):
         return False
 
+    def user(self, chat_id):
+        return {"symbols": {"BTCUSDT": {}}}
+
 
 class MenuTests(unittest.TestCase):
     def test_main_menu_contains_supported_actions(self):
@@ -27,7 +30,7 @@ class MenuTests(unittest.TestCase):
         callbacks = [row[0].callback_data for row in keyboard]
         self.assertEqual(
             labels,
-            ["🔔 Настройки FVG", "📊 Статистика FVG", "💸 Фандинг", "⚙️ Настройки"],
+            ["✅ FVG · 1/10", "📊 Статистика FVG", "💸 Фандинг", "⚙️ Настройки"],
         )
         self.assertIn("menu:fvg-settings", callbacks)
         self.assertIn("menu:fvg-stats", callbacks)
@@ -49,7 +52,7 @@ class MenuTests(unittest.TestCase):
         self.assertEqual(MENU_ALIASES["⚙️ Settings"], "settings")
         self.assertEqual(MENU_ALIASES["💸 Funding"], "funding")
 
-    def test_settings_keyboard_contains_language_and_message_modes(self):
+    def test_settings_keyboard_contains_language_message_modes_and_centers(self):
         keyboard = settings_keyboard(
             42,
             preferences={"language": "ru", "message_mode": "detailed"},
@@ -58,8 +61,12 @@ class MenuTests(unittest.TestCase):
         callbacks = [button.callback_data for row in keyboard for button in row]
         self.assertIn("✅ Русский", labels)
         self.assertIn("✅ Подробные", labels)
+        self.assertIn("📉 FVG-центр", labels)
+        self.assertIn("🔔 Центр уведомлений", labels)
         self.assertIn("settings:language:en", callbacks)
         self.assertIn("settings:mode:compact", callbacks)
+        self.assertIn("settings:fvg", callbacks)
+        self.assertIn("settings:alerts", callbacks)
 
     def test_donation_text_contains_supported_assets_and_wallet(self):
         text = format_donation_text()
@@ -80,6 +87,7 @@ class MenuTests(unittest.TestCase):
                     "bearish_enabled": True,
                     "symbols": {
                         "BTCUSDT": {
+                            "timeframes": ["15m"],
                             "price_filter": {"enabled": True},
                             "size_filter": {"enabled": False},
                         }
@@ -93,6 +101,7 @@ class MenuTests(unittest.TestCase):
         self.assertIn("⏸️ 📏 Размер FVG", labels)
         self.assertIn("📌 Инструменты", labels)
         self.assertIn("❓ FAQ по FVG", labels)
+        self.assertIn("✅ Пред-FVG BTC · 15м", labels)
         self.assertIn("fvg-inst:open", callbacks)
         self.assertIn("fvg-inst:faq:main", callbacks)
 

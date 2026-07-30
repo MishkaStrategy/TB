@@ -11,6 +11,7 @@ from database.user_preferences import UserPreferences
 from handlers.admin_settings import admin, admin_callback
 from handlers.donate import donate
 from handlers.fvg_alert import fvg_alert, fvg_pre_alert, fvg_stats
+from handlers.fvg_dashboard import build_fvg_dashboard_handlers
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
 from handlers.fvg_instruments import build_fvg_instrument_handlers
 from handlers.menu import menu, menu_callback
@@ -118,6 +119,8 @@ def main():
     app.add_handler(CommandHandler("donate", donate))
 
     for handler in build_settings_handlers():
+        app.add_handler(handler)
+    for handler in build_fvg_dashboard_handlers():
         app.add_handler(handler)
     for handler in build_fvg_filter_handlers():
         app.add_handler(handler)
