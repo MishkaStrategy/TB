@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.3.2 — 2026-07-30
+
+Immutable metadata follow-up к installer hotfix `1.3.1`. Runtime-fix не изменён.
+
+### Исправлено
+
+- README, install/update examples и release links синхронизированы с `VERSION=1.3.2`;
+- Bot API-only VDS инструкция указывает актуальный deployment tag/version;
+- stable status больше не отображается как release candidate;
+- обязательные CI jobs перенесены с production VDS на GitHub-hosted Ubuntu;
+- добавлен regression test согласованности VERSION, README, updater, release audit и VDS документации.
+
+### Гарантии
+
+- теги `v1.3.0` и `v1.3.1` не переписываются;
+- runtime-state и production env не изменяются release-процессом;
+- Telegram Mini App PR #53 не входит;
+- production deployment выполняется отдельно и только по точному SHA тега.
+
 ## 1.3.1 — 2026-07-30
 
 Installer hotfix для релиза `1.3.0`. Первая production-попытка остановилась до atomic switch, поэтому VDS осталась на `1.2.0` и rollback не потребовался.
