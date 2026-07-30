@@ -52,6 +52,46 @@ class AccessRegistry:
         self._write(data)
         return True
 
+    def allow(self, user_id, name=None, username=None):
+        """Create or replace a runtime allowlist record.
+
+        This method is intentionally separate from ``decide`` because an
+        administrator may add a Telegram ID before that user submits a request.
+        Environment-provided IDs remain outside this registry and must be
+        protected by the caller.
+        """
+
+        user_id = int(user_id)
+        if user_id <= 0:
+            raise ValueError("user_id must be positive")
+        data = self._read()
+        users = data.setdefault("users", {})
+        previous = users.get(str(user_id), {})
+        record = {
+            "status": "allowed",
+            "name": str(name or previous.get("name") or "Без имени").strip()
+            or "Без имени",
+            "username": (
+                str(username).strip().lstrip("@")
+                if username is not None
+                else previous.get("username")
+            ),
+        }
+        users[str(user_id)] = record
+        self._write(data)
+        return deepcopy(record)
+
+    def remove(self, user_id):
+        """Remove a runtime access record and return whether it existed."""
+
+        data = self._read()
+        users = data.setdefault("users", {})
+        removed = users.pop(str(int(user_id)), None)
+        if removed is None:
+            return False
+        self._write(data)
+        return True
+
     def _read(self):
         if not self.path.exists():
             return {}
@@ -63,5 +103,7 @@ class AccessRegistry:
     def _write(self, data):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temporary.replace(self.path)
