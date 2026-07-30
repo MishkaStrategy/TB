@@ -10,9 +10,9 @@ from alerts.fvg_models import FvgEvent, FvgEventType
 from alerts.fvg_service import (
     OUTBOX_BATCH_SIZE,
     OUTBOX_MAX_BATCHES_PER_PASS,
-    FvgAlertService,
     format_fvg_message,
 )
+from alerts.fvg_limited_service import FvgAlertService
 from alerts.telegram_outbox import OutboxRetryPolicy, TelegramOutboxWorker
 from config import (
     OUTBOX_BASE_BACKOFF_SECONDS,

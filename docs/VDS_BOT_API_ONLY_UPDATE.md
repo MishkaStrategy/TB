@@ -40,9 +40,9 @@ git status --short
 
 `git status --short` must be empty.
 
-## Update
+## Update to 1.3.0
 
-Use an explicitly reviewed ref and commit:
+Use the published tag and exact audited commit:
 
 ```bash
 cd /root/TB
@@ -51,13 +51,13 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=main \
-  EXPECTED_VERSION=1.2.0 \
-  EXPECTED_COMMIT=<reviewed-full-commit-sha> \
+  TARGET_REF=v1.3.0 \
+  EXPECTED_VERSION=1.3.0 \
+  EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
 
-The wrapper first verifies Bot API-only credentials and then delegates to `scripts/update_vds.sh`, preserving its backup, candidate build, unit tests, atomic switch, rollback, systemd, version, commit, and SQLite checks.
+Before the tag exists, do not deploy a moving integration branch to production. The wrapper first verifies Bot API-only credentials and then delegates to `scripts/update_vds.sh`, preserving its backup, candidate build, unit tests, atomic switch, rollback, systemd, version, commit, and SQLite checks.
 
 ## Post-deploy
 
@@ -66,7 +66,7 @@ cat /opt/fvg-alert-bot/VERSION
 cat /opt/fvg-alert-bot/BUILD_COMMIT
 systemctl is-active fvg-alert-bot
 systemctl is-enabled fvg-alert-bot
-journalctl -u fvg-alert-bot -n 100 --no-pager
+journalctl -u fvg-alert-bot -n 150 --no-pager
 
 sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
 sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
@@ -74,10 +74,20 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
+- installed version is `1.3.0`;
+- installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - both SQLite checks return `ok`;
 - no startup traceback appears in the journal;
 - no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`.
+
+## 1.3.0 smoke checks
+
+- FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
+- existing schema-v2 FVG settings appear as Bitunix `15m` without losing filters;
+- `⚙️ Операции` shows restart circuit-breaker status;
+- `⚙️ Операции` shows read-only FVG archive status;
+- Telegram Mini App is not deployed or required.
 
 ## Secret-safe credential check
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Safely update an existing FVG Alert Bot VDS installation from a reviewed ref.
 # Run as root from the repository checkout:
-#   TARGET_REF=v1.2.0 EXPECTED_VERSION=1.2.0 bash scripts/update_vds.sh
+#   TARGET_REF=v1.3.0 EXPECTED_VERSION=1.3.0 bash scripts/update_vds.sh
 
 set -euo pipefail
 
@@ -11,7 +11,7 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/fvg-alert-bot}"
 STATE_DIR="${STATE_DIR:-/var/lib/fvg-alert-bot}"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/fvg-alert-bot}"
 TARGET_REF="${TARGET_REF:-main}"
-EXPECTED_VERSION="${EXPECTED_VERSION:-1.2.0}"
+EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.0}"
 EXPECTED_COMMIT="${EXPECTED_COMMIT:-}"
 MIN_FREE_MB="${FVG_INSTALL_MIN_FREE_MB:-1024}"
 

@@ -1,0 +1,37 @@
+import unittest
+from pathlib import Path
+
+from alerts.fvg_limited_service import FvgAlertService as LimitedFvgAlertService
+from alerts.fvg_service_v2 import OutboxV2FvgAlertService
+from alerts.fvg_store import FvgAlertSettings
+from database.fvg_history_status import read_fvg_history_status
+from database.process_restart_guard_status import read_restart_guard_status
+from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
+
+
+class Release130ContractTests(unittest.TestCase):
+    def test_release_version_and_vds_default(self):
+        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.0")
+        updater = Path("scripts/update_vds.sh").read_text(encoding="utf-8")
+        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.0}"', updater)
+
+    def test_fvg_timeframes_and_settings_schema(self):
+        self.assertEqual(CONFIRMED_TIMEFRAMES, ("15m", "1h", "4h", "1d"))
+        self.assertEqual(FvgAlertSettings.SCHEMA_VERSION, 3)
+        self.assertTrue(issubclass(OutboxV2FvgAlertService, LimitedFvgAlertService))
+
+    def test_admin_operations_readers_are_available(self):
+        self.assertTrue(callable(read_restart_guard_status))
+        self.assertTrue(callable(read_fvg_history_status))
+
+    def test_bot_api_only_deployment_and_no_mini_app(self):
+        wrapper = Path("scripts/update_vds_bot_api_only.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("TELEGRAM_TOKEN", wrapper)
+        self.assertIn("TELEGRAM_API_HASH", wrapper)
+        self.assertFalse(Path("telegram-mini-app").exists())
+
+
+if __name__ == "__main__":
+    unittest.main()
