@@ -10,11 +10,11 @@ from database.process_restart_guard_status import read_restart_guard_status
 from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
 
 
-class Release132ContractTests(unittest.TestCase):
+class Release133ContractTests(unittest.TestCase):
     def test_release_version_and_vds_default(self):
-        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.2")
+        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.3")
         updater = Path("scripts/update_vds.sh").read_text(encoding="utf-8")
-        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.2}"', updater)
+        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.3}"', updater)
 
     def test_candidate_tests_are_isolated_from_production_env(self):
         installer = Path("scripts/install_vds.sh").read_text(encoding="utf-8")
@@ -24,6 +24,12 @@ class Release132ContractTests(unittest.TestCase):
         self.assertIn("env -i", helper)
         self.assertIn("TELEGRAM_TOKEN=ci-placeholder", helper)
         self.assertIn("MAX_SYMBOLS_PER_USER=10", helper)
+
+    def test_backup_suppresses_macos_metadata(self):
+        backup = Path("scripts/backup_data.sh").read_text(encoding="utf-8")
+        self.assertIn("COPYFILE_DISABLE=1 tar", backup)
+        self.assertIn("--exclude '._*'", backup)
+        self.assertIn("--exclude '.DS_Store'", backup)
 
     def test_fvg_timeframes_settings_schema_and_limit(self):
         self.assertEqual(CONFIRMED_TIMEFRAMES, ("15m", "1h", "4h", "1d"))
