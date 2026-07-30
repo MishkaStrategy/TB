@@ -10,8 +10,9 @@ Mini App развивается параллельно существующем�
 - Mini App пока не добавляется в боевое меню;
 - используются существующие JSON/SQLite-хранилища;
 - backend API выключен по умолчанию;
-- backup, restart и изменение allowlist остаются заблокированными;
-- без `VITE_API_BASE_URL` frontend работает на mock-данных.
+- без `VITE_API_BASE_URL` frontend работает на mock-данных;
+- access mode и runtime allowlist доступны только через подтверждаемые admin endpoints;
+- backup и restart остаются fail-closed, пока не подключены production callbacks.
 
 Интеграция и очистка старых элементов бота выполняются только после полного тестирования и отдельного решения о выпуске.
 
@@ -67,10 +68,8 @@ Mini App развивается параллельно существующем�
 
 Раздел доступен только после серверной проверки `is_admin`.
 
-Реализованы:
+Read-only диагностика:
 
-- публичный и приватный режим доступа;
-- read-only allowlist;
 - статус WebSocket;
 - последняя свеча и REST recovery;
 - последняя операционная ошибка;
@@ -82,6 +81,18 @@ Mini App развивается параллельно существующем�
 - свободное и общее место на диске;
 - PID;
 - VERSION, BUILD_COMMIT и версия Python.
+
+Подтверждаемые записи:
+
+- переключение публичного/приватного режима;
+- добавление runtime-записи allowlist;
+- удаление runtime-записи allowlist;
+- защита env-allowlist и администраторов от удаления;
+- отдельные capabilities для access, allowlist, backup и restart.
+
+Каждая административная запись использует короткоживущий одноразовый challenge, привязанный к проверенному Telegram ID администратора, точному действию и цели. Повторное использование, изменение цели и просроченный challenge отклоняются.
+
+Backup и restart endpoints реализованы как безопасные адаптеры. Они не выполняют shell-команды или `systemctl` самостоятельно и остаются выключенными, пока lifecycle не передаст проверенные production callbacks.
 
 Недоступные показатели не ломают endpoint: backend возвращает стабильную схему с безопасными значениями `unknown`, `null` и `0`.
 
@@ -109,7 +120,7 @@ npm install
 npm run dev
 ```
 
-При пустом `VITE_API_BASE_URL` используется mock-режим.
+При пустом `VITE_API_BASE_URL` используется mock-режим. В mock-режиме административные записи намеренно недоступны.
 
 Проверка:
 
@@ -123,9 +134,15 @@ npm run build
 Реализованы:
 
 ```text
-GET /healthz
-GET /api/mini-app/settings
-PUT /api/mini-app/settings
+GET    /healthz
+GET    /api/mini-app/settings
+PUT    /api/mini-app/settings
+POST   /api/mini-app/admin/confirmations
+PUT    /api/mini-app/admin/access
+POST   /api/mini-app/admin/allowlist
+DELETE /api/mini-app/admin/allowlist/{telegram_id}
+POST   /api/mini-app/admin/backup
+POST   /api/mini-app/admin/restart
 ```
 
 Telegram `initData` передаётся в заголовке:
@@ -141,11 +158,12 @@ Backend:
 3. извлекает Telegram ID только из проверенного `initData`;
 4. повторяет правила публичного/приватного доступа бота;
 5. валидирует полный payload до первой записи;
-6. повторно проверяет административные права;
-7. ограничивает размер тела запроса;
-8. использует точный CORS allowlist;
-9. возвращает структурированные ошибки;
-10. не создаёт второй источник пользовательских настроек.
+6. повторно проверяет административные права на каждом admin-запросе;
+7. требует одноразовое подтверждение для каждой admin-записи;
+8. ограничивает размер тела запроса;
+9. использует точный CORS allowlist;
+10. возвращает структурированные ошибки;
+11. не создаёт второй источник пользовательских настроек.
 
 Полная схема: [`API_CONTRACT.md`](API_CONTRACT.md).
 
@@ -177,7 +195,9 @@ python -m unittest -v \
   tests.test_mini_app_service \
   tests.test_mini_app_runtime_service \
   tests.test_mini_app_diagnostics \
-  tests.test_mini_app_web
+  tests.test_mini_app_web \
+  tests.test_mini_app_admin_actions \
+  tests.test_mini_app_admin_web
 ```
 
 Все тесты входят в общий запуск:
@@ -190,9 +210,10 @@ CI дополнительно выполняет frontend typecheck/build, depen
 
 ## Оставшиеся этапы
 
-1. Отдельные подтверждаемые admin endpoints для backup, restart и allowlist.
-2. HTTPS-размещение frontend и API.
-3. Регистрация URL в BotFather.
-4. Тестовая кнопка открытия только для администратора.
-5. Параллельное тестирование со старым Telegram UI.
-6. После полного принятия — переключение настроек на Mini App и удаление только подтверждённо лишних элементов бота.
+1. Подключить backup callback после принятия production backup-ветки.
+2. Подключить restart callback после принятия graceful restart/restart-guard веток.
+3. HTTPS-размещение frontend и API.
+4. Регистрация URL в BotFather.
+5. Тестовая кнопка открытия только для администратора.
+6. Параллельное тестирование со старым Telegram UI.
+7. После полного принятия — переключение настроек на Mini App и удаление только подтверждённо лишних элементов бота.
