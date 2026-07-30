@@ -5,9 +5,11 @@ from telegram.ext import ContextTypes
 
 from alerts.fvg_models import FvgDirection
 from alerts.fvg_store import FvgAlertSettings, split_instrument_key
+from config import MAX_SYMBOLS_PER_USER
 from exchanges.fvg_candles import is_bitcoin_symbol
 from handlers.auth import authorized
 from handlers.fvg_alert import build_fvg_stats_period_menu, format_fvg_stats, send_fvg_stats
+from handlers.fvg_dashboard import show_fvg_dashboard
 from handlers.fvg_instruments import show_fvg_instruments
 
 
@@ -34,7 +36,10 @@ def build_reply_menu() -> ReplyKeyboardMarkup:
 
 def build_main_menu(chat_id, settings=None):
     settings = settings or FvgAlertSettings()
-    fvg_label = "🔔 Настройки FVG" if settings.is_enabled(chat_id) else "🔕 Настройки FVG"
+    user = settings.user(chat_id)
+    instrument_count = len(user.get("symbols", {}))
+    status = "✅" if settings.is_enabled(chat_id) else "⏸️"
+    fvg_label = f"{status} FVG · {instrument_count}/{MAX_SYMBOLS_PER_USER}"
     return InlineKeyboardMarkup(
         [
             [InlineKeyboardButton(fvg_label, callback_data="menu:fvg-settings")],
@@ -55,7 +60,17 @@ def _config_symbol(key: str, config: dict) -> str:
         return ""
 
 
+def _pre_capable(key: str, config: dict) -> bool:
+    symbol = _config_symbol(key, config)
+    return bool(
+        symbol
+        and is_bitcoin_symbol(symbol)
+        and "15m" in set(config.get("timeframes") or ("15m",))
+    )
+
+
 def build_fvg_settings_menu(chat_id, settings=None):
+    """Compatibility menu retained for old callbacks and direct commands."""
     settings = settings or FvgAlertSettings()
     user = settings.user(chat_id)
 
@@ -63,27 +78,27 @@ def build_fvg_settings_menu(chat_id, settings=None):
         return "✅" if enabled else "⏸️"
 
     instruments = list(user.get("symbols", {}).items())
-    price_enabled = any(item.get("price_filter", {}).get("enabled", False) for _, item in instruments)
-    size_enabled = any(item.get("size_filter", {}).get("enabled", False) for _, item in instruments)
-    has_bitcoin = any(
-        is_bitcoin_symbol(_config_symbol(key, item))
-        for key, item in instruments
-        if _config_symbol(key, item)
+    price_enabled = any(
+        item.get("price_filter", {}).get("enabled", False)
+        for _, item in instruments
     )
+    size_enabled = any(
+        item.get("size_filter", {}).get("enabled", False)
+        for _, item in instruments
+    )
+    has_pre_capable = any(_pre_capable(key, item) for key, item in instruments)
 
-    rows = [
-        [InlineKeyboardButton(
-            f"{mark(user['enabled'])} Модуль FVG",
-            callback_data="menu:fvg-toggle",
-        )],
-    ]
+    rows = [[InlineKeyboardButton(
+        f"{mark(user['enabled'])} Модуль FVG",
+        callback_data="menu:fvg-toggle",
+    )]]
     notification_row = [InlineKeyboardButton(
         f"{mark(user['notify_confirmed_fvg'])} Подтверждённые",
         callback_data="menu:fvg-confirmed-toggle",
     )]
-    if has_bitcoin:
+    if has_pre_capable:
         notification_row.append(InlineKeyboardButton(
-            f"{mark(user['notify_pre_fvg'])} Пред-FVG BTC",
+            f"{mark(user['notify_pre_fvg'])} Пред-FVG BTC · 15м",
             callback_data="menu:pre-fvg-toggle",
         ))
     rows.extend((
@@ -100,18 +115,30 @@ def build_fvg_settings_menu(chat_id, settings=None):
         ],
         [
             InlineKeyboardButton("📌 Инструменты", callback_data="fvg-inst:open"),
-            InlineKeyboardButton(f"{mark(price_enabled)} Цена", callback_data="menu:fvg-price"),
+            InlineKeyboardButton(
+                f"{mark(price_enabled)} Цена",
+                callback_data="menu:fvg-price",
+            ),
         ],
-        [InlineKeyboardButton(f"{mark(size_enabled)} 📏 Размер FVG", callback_data="menu:fvg-size")],
+        [InlineKeyboardButton(
+            f"{mark(size_enabled)} 📏 Размер FVG",
+            callback_data="menu:fvg-size",
+        )],
         [InlineKeyboardButton("❓ FAQ по FVG", callback_data="fvg-inst:faq:main")],
-        [InlineKeyboardButton("⬅️ Главное меню", callback_data="menu:fvg-back")],
+        [InlineKeyboardButton("⬅️ FVG-центр", callback_data="fvg-ui:center")],
     ))
     return InlineKeyboardMarkup(rows)
 
 
 async def show_menu(message, chat_id):
-    await message.reply_text("Главное меню закреплено на клавиатуре ниже.", reply_markup=build_reply_menu())
-    await message.reply_text("Панель управления:", reply_markup=build_main_menu(chat_id))
+    await message.reply_text(
+        "Главное меню закреплено на клавиатуре ниже.",
+        reply_markup=build_reply_menu(),
+    )
+    await message.reply_text(
+        "Панель управления:",
+        reply_markup=build_main_menu(chat_id),
+    )
 
 
 @authorized
@@ -130,46 +157,72 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if action == "fvg-settings":
-        settings = FvgAlertSettings()
-        await message.edit_text(
-            "Настройки применяются отдельно для вашего Telegram ID.",
-            reply_markup=build_fvg_settings_menu(chat_id, settings),
-        )
+        await show_fvg_dashboard(message, chat_id, edit=True)
     elif action == "fvg-toggle":
         settings = FvgAlertSettings()
         settings.set_enabled(chat_id, not settings.is_enabled(chat_id))
-        await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
+        await message.edit_reply_markup(
+            reply_markup=build_fvg_settings_menu(chat_id, settings)
+        )
     elif action == "fvg-confirmed-toggle":
         settings = FvgAlertSettings()
         user = settings.user(chat_id)
-        settings.set_confirmed_enabled(chat_id, not user["notify_confirmed_fvg"])
-        await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
+        settings.set_confirmed_enabled(
+            chat_id,
+            not user["notify_confirmed_fvg"],
+        )
+        await message.edit_reply_markup(
+            reply_markup=build_fvg_settings_menu(chat_id, settings)
+        )
     elif action == "pre-fvg-toggle":
         settings = FvgAlertSettings()
-        has_bitcoin = any(
-            is_bitcoin_symbol(_config_symbol(key, config))
+        has_pre_capable = any(
+            _pre_capable(key, config)
             for key, config in settings.user(chat_id).get("symbols", {}).items()
-            if _config_symbol(key, config)
         )
-        if not has_bitcoin:
-            await message.reply_text("Пред-FVG доступен только после добавления Bitcoin-инструмента.")
+        if not has_pre_capable:
+            await message.reply_text(
+                "Пред-FVG доступен только после добавления BTC-инструмента с "
+                "таймфреймом 15 минут."
+            )
             return
-        settings.set_pre_enabled(chat_id, not settings.user(chat_id)["notify_pre_fvg"])
-        await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
+        settings.set_pre_enabled(
+            chat_id,
+            not settings.user(chat_id)["notify_pre_fvg"],
+        )
+        await message.edit_reply_markup(
+            reply_markup=build_fvg_settings_menu(chat_id, settings)
+        )
     elif action in {"fvg-bull-toggle", "fvg-bear-toggle"}:
         settings = FvgAlertSettings()
         user = settings.user(chat_id)
-        direction = FvgDirection.BULLISH if action == "fvg-bull-toggle" else FvgDirection.BEARISH
-        key = "bullish_enabled" if direction is FvgDirection.BULLISH else "bearish_enabled"
+        direction = (
+            FvgDirection.BULLISH
+            if action == "fvg-bull-toggle"
+            else FvgDirection.BEARISH
+        )
+        key = (
+            "bullish_enabled"
+            if direction is FvgDirection.BULLISH
+            else "bearish_enabled"
+        )
         settings.set_direction_enabled(chat_id, direction, not user[key])
-        await message.edit_reply_markup(reply_markup=build_fvg_settings_menu(chat_id, settings))
+        await message.edit_reply_markup(
+            reply_markup=build_fvg_settings_menu(chat_id, settings)
+        )
     elif action == "fvg-symbol-help":
         await show_fvg_instruments(message, chat_id, edit=False)
     elif action == "fvg-back":
-        await message.edit_text("Панель управления:", reply_markup=build_main_menu(chat_id))
+        await message.edit_text(
+            "Панель управления:",
+            reply_markup=build_main_menu(chat_id),
+        )
     elif action == "fvg-stats":
         await send_fvg_stats(message)
     elif action.startswith("fvg-stats:"):
         period = action.split(":", 1)[1]
         days = None if period == "all" else int(period)
-        await message.edit_text(format_fvg_stats(days), reply_markup=build_fvg_stats_period_menu(days))
+        await message.edit_text(
+            format_fvg_stats(days),
+            reply_markup=build_fvg_stats_period_menu(days),
+        )
