@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterable
+from typing import Any, Callable
 
 from aiohttp import web
 
-from .auth import TelegramInitDataError, validate_init_data
+from .admin_actions import AdminActionError, MiniAppAdminActions
+from .auth import TelegramInitDataError, TelegramUser, validate_init_data
 from .runtime_service import MiniAppSettingsService
 from .service import SettingsValidationError
 
@@ -46,6 +48,9 @@ def create_mini_app_application(
     *,
     bot_token: str,
     service: MiniAppSettingsService | None = None,
+    admin_actions: MiniAppAdminActions | None = None,
+    backup_callback: Callable[[TelegramUser], Any] | None = None,
+    restart_callback: Callable[[TelegramUser], Any] | None = None,
     auth_max_age_seconds: int = 3600,
     allowed_origins: Iterable[str] | str | None = None,
     client_max_size: int = DEFAULT_CLIENT_MAX_SIZE,
@@ -65,6 +70,11 @@ def create_mini_app_application(
         raise ValueError("client_max_size must be positive")
 
     settings_service = service or MiniAppSettingsService()
+    action_service = admin_actions or MiniAppAdminActions.from_settings_service(
+        settings_service,
+        backup_callback=backup_callback,
+        restart_callback=restart_callback,
+    )
     origins = _normalize_origins(allowed_origins)
 
     @web.middleware
@@ -85,7 +95,9 @@ def create_mini_app_application(
             response.headers["Access-Control-Allow-Headers"] = (
                 f"Content-Type, {INIT_DATA_HEADER}"
             )
-            response.headers["Access-Control-Allow-Methods"] = "GET, PUT, OPTIONS"
+            response.headers["Access-Control-Allow-Methods"] = (
+                "GET, PUT, POST, DELETE, OPTIONS"
+            )
             response.headers["Access-Control-Max-Age"] = "600"
         return response
 
@@ -95,6 +107,13 @@ def create_mini_app_application(
             return await handler(request)
         except TelegramInitDataError as error:
             return _error_response(401, error.code, str(error))
+        except AdminActionError as error:
+            return _error_response(
+                error.status,
+                error.code,
+                str(error),
+                field=error.field,
+            )
         except SettingsValidationError as error:
             return _error_response(
                 400, error.code, str(error), field=error.field
@@ -120,13 +139,42 @@ def create_mini_app_application(
     app["mini_app_bot_token"] = bot_token
     app["mini_app_auth_max_age_seconds"] = int(auth_max_age_seconds)
     app["mini_app_settings_service"] = settings_service
+    app["mini_app_admin_actions"] = action_service
 
-    def authenticated_user(request: web.Request):
+    def authenticated_user(request: web.Request) -> TelegramUser:
         return validate_init_data(
             request.headers.get(INIT_DATA_HEADER, ""),
             request.app["mini_app_bot_token"],
             max_age_seconds=request.app["mini_app_auth_max_age_seconds"],
         )
+
+    async def json_object(request: web.Request) -> dict:
+        if request.content_type != "application/json":
+            raise AdminActionError(
+                "Ожидается Content-Type application/json.",
+                code="UNSUPPORTED_MEDIA_TYPE",
+                status=415,
+            )
+        try:
+            body = await request.json(loads=json.loads)
+        except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as error:
+            raise AdminActionError(
+                "Некорректный JSON.",
+                code="INVALID_JSON",
+            ) from error
+        if not isinstance(body, dict):
+            raise AdminActionError(
+                "Ожидается JSON-объект.",
+                code="INVALID_JSON_OBJECT",
+            )
+        return body
+
+    def enriched_envelope(user: TelegramUser, envelope: dict) -> dict:
+        settings = envelope.get("settings")
+        admin = settings.get("admin") if isinstance(settings, dict) else None
+        if isinstance(admin, dict):
+            admin["capabilities"] = action_service.capabilities(user)
+        return envelope
 
     async def health(_request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "service": "telegram-mini-app"})
@@ -134,21 +182,12 @@ def create_mini_app_application(
     async def get_settings(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         envelope = request.app["mini_app_settings_service"].read_settings(user)
-        return web.json_response(envelope)
+        return web.json_response(enriched_envelope(user, envelope))
 
     async def put_settings(request: web.Request) -> web.Response:
         user = authenticated_user(request)
-        if request.content_type != "application/json":
-            return _error_response(
-                415,
-                "UNSUPPORTED_MEDIA_TYPE",
-                "Ожидается Content-Type application/json.",
-            )
-        try:
-            body = await request.json(loads=json.loads)
-        except (json.JSONDecodeError, UnicodeDecodeError, ValueError):
-            return _error_response(400, "INVALID_JSON", "Некорректный JSON.")
-        if not isinstance(body, dict) or "settings" not in body:
+        body = await json_object(request)
+        if "settings" not in body:
             return _error_response(
                 400,
                 "SETTINGS_REQUIRED",
@@ -158,7 +197,72 @@ def create_mini_app_application(
         envelope = request.app["mini_app_settings_service"].save_settings(
             user, body["settings"]
         )
-        return web.json_response(envelope)
+        return web.json_response(enriched_envelope(user, envelope))
+
+    async def create_confirmation(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = action_service.create_confirmation(
+            user,
+            action=body.get("action"),
+            target_telegram_id=body.get("telegramId"),
+        )
+        return web.json_response(result, status=201)
+
+    async def put_access_mode(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = action_service.set_public_access(
+            user,
+            public_access_enabled=body.get("publicAccessEnabled"),
+            confirmation_token=body.get("confirmationToken"),
+            confirmation_text=body.get("confirmationText"),
+        )
+        return web.json_response({"result": result})
+
+    async def add_allowlist(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = action_service.add_allowlist(
+            user,
+            target_telegram_id=body.get("telegramId"),
+            name=body.get("name"),
+            username=body.get("username"),
+            confirmation_token=body.get("confirmationToken"),
+            confirmation_text=body.get("confirmationText"),
+        )
+        return web.json_response({"result": result}, status=201)
+
+    async def remove_allowlist(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = action_service.remove_allowlist(
+            user,
+            target_telegram_id=request.match_info.get("telegram_id"),
+            confirmation_token=body.get("confirmationToken"),
+            confirmation_text=body.get("confirmationText"),
+        )
+        return web.json_response({"result": result})
+
+    async def create_backup(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = await action_service.create_backup(
+            user,
+            confirmation_token=body.get("confirmationToken"),
+            confirmation_text=body.get("confirmationText"),
+        )
+        return web.json_response({"result": result}, status=202)
+
+    async def restart_bot(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        body = await json_object(request)
+        result = await action_service.restart_bot(
+            user,
+            confirmation_token=body.get("confirmationToken"),
+            confirmation_text=body.get("confirmationText"),
+        )
+        return web.json_response({"result": result}, status=202)
 
     async def options(_request: web.Request) -> web.Response:
         return web.Response(status=204)
@@ -166,5 +270,15 @@ def create_mini_app_application(
     app.router.add_get("/healthz", health)
     app.router.add_get("/api/mini-app/settings", get_settings)
     app.router.add_put("/api/mini-app/settings", put_settings)
+    app.router.add_post(
+        "/api/mini-app/admin/confirmations", create_confirmation
+    )
+    app.router.add_put("/api/mini-app/admin/access", put_access_mode)
+    app.router.add_post("/api/mini-app/admin/allowlist", add_allowlist)
+    app.router.add_delete(
+        "/api/mini-app/admin/allowlist/{telegram_id}", remove_allowlist
+    )
+    app.router.add_post("/api/mini-app/admin/backup", create_backup)
+    app.router.add_post("/api/mini-app/admin/restart", restart_bot)
     app.router.add_route("OPTIONS", "/{tail:.*}", options)
     return app
