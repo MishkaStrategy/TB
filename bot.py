@@ -25,7 +25,7 @@ from database.runtime_lifecycle import RuntimeLifecycleStore
 from database.telegram_delivery import TelegramDeliveryRegistry
 from database.user_activity import UserActivityRegistry
 from database.user_preferences import UserPreferences
-from handlers.admin_settings import admin, admin_callback
+from handlers.admin import admin, admin_callback
 from handlers.donate import donate
 from handlers.fvg_alert import fvg_alert, fvg_pre_alert, fvg_stats
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
