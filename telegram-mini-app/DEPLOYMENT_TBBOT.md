@@ -5,7 +5,7 @@
 ```text
 Домен:       tbbot.duckdns.org
 Публичный IP: 188.137.236.73
-Backend:     127.0.0.1:8080
+Backend:     127.0.0.1:18080
 ```
 
 Профиль не содержит секретов. DuckDNS token, Telegram token и email для Let's Encrypt не должны добавляться в GitHub.
@@ -18,7 +18,7 @@ Backend:     127.0.0.1:8080
 - Mini App не регистрируется в BotFather;
 - кнопка не добавляется пользователям;
 - существующее меню и настройки бота не изменяются;
-- backend port `8080` не открывается наружу;
+- backend port `18080` не открывается наружу;
 - backup/restart callbacks остаются выключенными до принятия соответствующих operational веток.
 
 ## 1. Подготовка VDS
@@ -27,16 +27,13 @@ Backend:     127.0.0.1:8080
 
 ```bash
 sudo apt update
-sudo apt install -y nginx certbot python3-certbot-nginx rsync curl
+sudo apt install -y nginx certbot python3-certbot-nginx rsync curl unzip
 ```
 
-Для сборки frontend требуется Node.js `20.19+` или `22.12+` и npm.
-
-Проверка:
+Production frontend собирается только в GitHub Actions на Node.js 22. На VDS
+Node.js и npm не требуются и не обновляются. Проверка серверных инструментов:
 
 ```bash
-node --version
-npm --version
 nginx -v
 certbot --version
 ```
@@ -60,17 +57,19 @@ DNS preflight пройден: tbbot.duckdns.org → 188.137.236.73
 ## 3. Frontend и HTTP reverse proxy
 
 ```bash
-sudo bash scripts/deploy_tbbot_mini_app.sh prepare
+sudo MINI_APP_ARTIFACT=/root/tb-mini-app-artifacts/<commit>/tb-mini-app-frontend \
+  MINI_APP_EXPECTED_COMMIT=<full-commit-sha> \
+  bash scripts/deploy_tbbot_mini_app.sh prepare-artifact
 ```
 
 Команда:
 
 1. повторно проверяет DNS;
-2. собирает frontend с `VITE_API_BASE_URL=https://tbbot.duckdns.org`;
+2. безопасно проверяет готовый CI artifact, manifest, commit, domain и API URL;
 3. создаёт атомарный релиз в `/var/www/tb-mini-app/releases/`;
 4. переключает `/var/www/tb-mini-app/current`;
 5. устанавливает отдельный Nginx site;
-6. проксирует `/api/` и `/healthz` на `127.0.0.1:8080`;
+6. проксирует `/api/` и `/healthz` на `127.0.0.1:18080`;
 7. выполняет `nginx -t` и reload.
 
 Скрипт не изменяет `/etc/fvg-alert-bot.env` и не перезапускает бота.
@@ -105,7 +104,7 @@ curl -I https://tbbot.duckdns.org/
 ```env
 MINI_APP_BACKEND_ENABLED=true
 MINI_APP_BACKEND_HOST=127.0.0.1
-MINI_APP_BACKEND_PORT=8080
+MINI_APP_BACKEND_PORT=18080
 MINI_APP_AUTH_MAX_AGE_SECONDS=3600
 MINI_APP_ALLOWED_ORIGINS=https://tbbot.duckdns.org
 ```
@@ -115,12 +114,12 @@ MINI_APP_ALLOWED_ORIGINS=https://tbbot.duckdns.org
 ```bash
 sudo systemctl restart fvg-alert-bot
 sudo systemctl --no-pager --full status fvg-alert-bot
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:18080/healthz
 ```
 
 Ожидается JSON со статусом `ok`.
 
-Порт `8080` не добавлять в UFW или security group.
+Порт `18080` не добавлять в UFW или security group.
 
 ## 6. Сквозная проверка
 
@@ -140,20 +139,20 @@ bash scripts/deploy_tbbot_mini_app.sh verify
 ```bash
 curl -I https://tbbot.duckdns.org/
 curl -i https://tbbot.duckdns.org/healthz
-sudo ss -lntp | grep -E ':(80|443|8080)\b'
+sudo ss -lntp | grep -E ':(80|443|18080)\b'
 ```
 
 Ожидаемая сетевая схема:
 
 ```text
 0.0.0.0:80/443       Nginx
-127.0.0.1:8080       Python backend
+127.0.0.1:18080       Python backend
 ```
 
 Не должно быть:
 
 ```text
-0.0.0.0:8080
+0.0.0.0:18080
 ```
 
 ## 7. Следующий этап

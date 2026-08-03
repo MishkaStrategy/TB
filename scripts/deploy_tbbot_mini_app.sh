@@ -3,7 +3,7 @@
 #
 # Usage:
 #   bash scripts/deploy_tbbot_mini_app.sh preflight
-#   sudo bash scripts/deploy_tbbot_mini_app.sh prepare
+#   sudo bash scripts/deploy_tbbot_mini_app.sh prepare-artifact
 #   sudo LETSENCRYPT_EMAIL=admin@example.com bash scripts/deploy_tbbot_mini_app.sh https
 #   bash scripts/deploy_tbbot_mini_app.sh verify
 
@@ -25,15 +25,22 @@ source "${PROFILE_FILE}"
 
 DOMAIN="${MINI_APP_DOMAIN:-}"
 EXPECTED_IPV4="${MINI_APP_EXPECTED_IPV4:-}"
-BACKEND_PORT="${MINI_APP_BACKEND_PORT:-8080}"
+BACKEND_PORT="${MINI_APP_BACKEND_PORT:-18080}"
+CHECKOUT_COMMIT="$(git -C "${PROJECT_DIR}" rev-parse HEAD 2>/dev/null || true)"
 
 validate_profile() {
   [[ "${DOMAIN}" == "tbbot.duckdns.org" ]] || \
     fail "профиль должен использовать tbbot.duckdns.org"
   [[ "${EXPECTED_IPV4}" == "188.137.236.73" ]] || \
     fail "профиль должен использовать IPv4 188.137.236.73"
-  [[ "${BACKEND_PORT}" == "8080" ]] || \
-    fail "профиль должен использовать локальный backend port 8080"
+  [[ "${BACKEND_PORT}" == "18080" ]] || \
+    fail "профиль должен использовать локальный backend port 18080"
+  [[ "${CHECKOUT_COMMIT}" =~ ^[0-9a-f]{40}$ ]] || \
+    fail "не удалось определить полный commit текущего checkout"
+  if [[ -n "${MINI_APP_EXPECTED_COMMIT:-}" ]]; then
+    [[ "${MINI_APP_EXPECTED_COMMIT}" == "${CHECKOUT_COMMIT}" ]] || \
+      fail "MINI_APP_EXPECTED_COMMIT не совпадает с текущим checkout"
+  fi
   [[ -x "${GENERIC_DEPLOY}" || -f "${GENERIC_DEPLOY}" ]] || \
     fail "не найден ${GENERIC_DEPLOY}"
 }
@@ -66,6 +73,7 @@ run_deploy() {
   exec env \
     MINI_APP_DOMAIN="${DOMAIN}" \
     MINI_APP_BACKEND_PORT="${BACKEND_PORT}" \
+    MINI_APP_EXPECTED_COMMIT="${CHECKOUT_COMMIT}" \
     bash "${GENERIC_DEPLOY}" "${COMMAND}"
 }
 
@@ -73,21 +81,21 @@ case "${COMMAND}" in
   preflight)
     preflight
     ;;
-  prepare|https|verify)
+  prepare-artifact|https|verify)
     run_deploy
     ;;
   -h|--help|help|"")
     cat <<'EOF'
 Usage:
   bash scripts/deploy_tbbot_mini_app.sh preflight
-  sudo bash scripts/deploy_tbbot_mini_app.sh prepare
+  sudo bash scripts/deploy_tbbot_mini_app.sh prepare-artifact
   sudo LETSENCRYPT_EMAIL=<email> bash scripts/deploy_tbbot_mini_app.sh https
   bash scripts/deploy_tbbot_mini_app.sh verify
 
 The wrapper is locked to:
   domain: tbbot.duckdns.org
   IPv4:   188.137.236.73
-  API:    127.0.0.1:8080
+  API:    127.0.0.1:18080
 EOF
     [[ -n "${COMMAND}" ]] || exit 2
     ;;

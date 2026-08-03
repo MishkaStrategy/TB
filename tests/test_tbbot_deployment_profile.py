@@ -21,7 +21,7 @@ class TBBotDeploymentProfileTests(unittest.TestCase):
             {
                 "MINI_APP_DOMAIN": "tbbot.duckdns.org",
                 "MINI_APP_EXPECTED_IPV4": "188.137.236.73",
-                "MINI_APP_BACKEND_PORT": "8080",
+                "MINI_APP_BACKEND_PORT": "18080",
             },
         )
 
@@ -31,6 +31,11 @@ class TBBotDeploymentProfileTests(unittest.TestCase):
         self.assertIn("getent ahostsv4", wrapper)
         self.assertIn('[[ "${DOMAIN}" == "tbbot.duckdns.org" ]]', wrapper)
         self.assertIn('[[ "${EXPECTED_IPV4}" == "188.137.236.73" ]]', wrapper)
+        self.assertIn('[[ "${BACKEND_PORT}" == "18080" ]]', wrapper)
+        self.assertIn("127.0.0.1:18080", wrapper)
+        self.assertNotIn("MINI_APP_BACKEND_PORT=8080", wrapper)
+        self.assertNotIn("0.0.0.0:18080", wrapper)
+        self.assertNotIn("[::]:18080", wrapper)
         self.assertNotIn("systemctl restart fvg-alert-bot", wrapper)
         self.assertNotIn("setmenubutton", wrapper.lower())
 

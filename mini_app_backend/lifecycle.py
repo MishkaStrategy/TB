@@ -30,7 +30,7 @@ async def start_mini_app_backend(application) -> None:
 
     host = os.getenv("MINI_APP_BACKEND_HOST", "127.0.0.1").strip() or "127.0.0.1"
     port = parse_positive_int(
-        os.getenv("MINI_APP_BACKEND_PORT"), 8080, "MINI_APP_BACKEND_PORT"
+        os.getenv("MINI_APP_BACKEND_PORT"), 18080, "MINI_APP_BACKEND_PORT"
     )
     auth_max_age = parse_positive_int(
         os.getenv("MINI_APP_AUTH_MAX_AGE_SECONDS"),

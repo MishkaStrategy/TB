@@ -175,7 +175,7 @@ API запускается в процессе бота только при яв
 ```env
 MINI_APP_BACKEND_ENABLED=true
 MINI_APP_BACKEND_HOST=127.0.0.1
-MINI_APP_BACKEND_PORT=8080
+MINI_APP_BACKEND_PORT=18080
 MINI_APP_AUTH_MAX_AGE_SECONDS=3600
 MINI_APP_ALLOWED_ORIGINS=https://tb-mini-app.duckdns.org
 ```
@@ -183,7 +183,7 @@ MINI_APP_ALLOWED_ORIGINS=https://tb-mini-app.duckdns.org
 Проверка после запуска:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:18080/healthz
 ```
 
 Production endpoint публикуется через HTTPS reverse proxy. aiohttp listener должен оставаться на `127.0.0.1`.
@@ -192,7 +192,7 @@ Production endpoint публикуется через HTTPS reverse proxy. aioht
 
 Подготовлены:
 
-- `scripts/deploy_mini_app.sh` — команды `prepare`, `https` и `verify`;
+- `scripts/deploy_mini_app.sh` — команды `prepare-artifact`, `https` и `verify`;
 - `deploy/mini-app/nginx-site.conf.template` — отдельный Nginx site;
 - атомарные frontend-релизы в `/var/www/tb-mini-app/releases/`;
 - rollback через symlink `/var/www/tb-mini-app/current`;
@@ -204,12 +204,18 @@ Production endpoint публикуется через HTTPS reverse proxy. aioht
 
 ```bash
 sudo MINI_APP_DOMAIN=tb-mini-app.duckdns.org \
-  bash scripts/deploy_mini_app.sh prepare
+  MINI_APP_ARTIFACT=/root/tb-mini-app-artifacts/<commit>/tb-mini-app-frontend \
+  MINI_APP_EXPECTED_COMMIT=<full-commit-sha> \
+  bash scripts/deploy_mini_app.sh prepare-artifact
 
 sudo MINI_APP_DOMAIN=tb-mini-app.duckdns.org \
   LETSENCRYPT_EMAIL=admin@example.com \
   bash scripts/deploy_mini_app.sh https
 ```
+
+Локальная разработка использует `npm run dev`. Production build выполняется в
+GitHub Actions на Node.js 22 и публикуется как `tb-mini-app-frontend`; VDS только
+проверяет и атомарно размещает этот artifact, не вызывая Node.js или npm.
 
 Скрипт не редактирует env бота, не перезапускает службу бота, не обращается к BotFather и не добавляет кнопку в меню.
 

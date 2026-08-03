@@ -123,9 +123,9 @@ Backup и restart endpoints реализованы, но остаются fail-c
 - Nginx reverse proxy;
 - Let’s Encrypt через Certbot;
 - единый origin для frontend и API;
-- backend proxy только на `127.0.0.1:8080`;
+- backend proxy только на `127.0.0.1:18080`;
 - атомарные frontend-релизы и rollback через symlink;
-- отдельные команды `prepare`, `https` и `verify`;
+- отдельные команды `prepare-artifact`, `https` и `verify`;
 - SPA fallback, controlled caching и security headers;
 - отсутствие автоматического изменения env бота;
 - отсутствие автоматического рестарта бота;

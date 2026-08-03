@@ -68,7 +68,30 @@ jobs:
         run: npm run typecheck
 
       - name: Build frontend
-        run: npm run build
+        env:
+          VITE_API_BASE_URL: https://tbbot.duckdns.org
+        run: |
+          npm run build
+          test -f dist/index.html
+
+      - name: Write immutable build manifest
+        env:
+          BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          printf '{\n  "commit": "%s",\n  "domain": "tbbot.duckdns.org",\n  "apiBaseUrl": "https://tbbot.duckdns.org",\n  "builtAt": "%s"\n}\n' \
+            "${BUILD_COMMIT}" "${built_at}" > dist/manifest.json
+          test -f dist/index.html
+          test -f dist/manifest.json
+          test ! -e dist/node_modules
+
+      - name: Publish verified frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb-mini-app-frontend
+          path: telegram-mini-app/dist/
+          if-no-files-found: error
+          retention-days: 7
 
   tests:
     name: Python tests

@@ -7,11 +7,11 @@
 ```text
 https://<subdomain>.duckdns.org/
 ├── /                 статический frontend
-├── /api/mini-app/*   proxy → 127.0.0.1:8080
-└── /healthz          proxy → 127.0.0.1:8080
+├── /api/mini-app/*   proxy → 127.0.0.1:18080
+└── /healthz          proxy → 127.0.0.1:18080
 ```
 
-Backend остаётся внутри процесса бота и слушает только loopback-интерфейс. Порт `8080` не должен быть открыт во внешнем firewall.
+Backend остаётся внутри процесса бота и слушает только loopback-интерфейс. Порт `18080` не должен быть открыт во внешнем firewall.
 
 ## Требования к VDS
 
@@ -20,8 +20,8 @@ Backend остаётся внутри процесса бота и слушае�
 - поддомен DuckDNS, указывающий на публичный IPv4 VDS;
 - Nginx;
 - Certbot с Nginx plugin;
-- Node.js `20.19+` или `22.12+`;
-- npm, rsync и curl.
+- Python 3, rsync и curl;
+- проверенный frontend artifact из GitHub Actions.
 
 Системные пакеты, кроме Node.js:
 
@@ -30,7 +30,9 @@ sudo apt update
 sudo apt install -y nginx certbot python3-certbot-nginx rsync curl
 ```
 
-Скрипт намеренно не устанавливает Node.js автоматически, чтобы не заменять существующий runtime VDS непроверенным репозиторием пакетов.
+Node.js 22 используется только в GitHub Actions: `npm ci`, typecheck и Vite build
+создают artifact `tb-mini-app-frontend`. Production VDS не собирает frontend и
+не требует Node.js/npm.
 
 ## Этап 1 — DNS
 
@@ -54,13 +56,15 @@ DuckDNS token не требуется хранить в проекте при п
 
 ```bash
 sudo MINI_APP_DOMAIN=tb-mini-app.duckdns.org \
-  bash scripts/deploy_mini_app.sh prepare
+  MINI_APP_ARTIFACT=/root/tb-mini-app-artifacts/<commit>/tb-mini-app-frontend \
+  MINI_APP_EXPECTED_COMMIT=<full-commit-sha> \
+  bash scripts/deploy_mini_app.sh prepare-artifact
 ```
 
 Команда:
 
-1. проверяет домен, порт и версию Node.js;
-2. собирает frontend во временной директории с `VITE_API_BASE_URL=https://<domain>`;
+1. проверяет домен, порт и полный commit SHA;
+2. безопасно извлекает artifact и проверяет `index.html` и `manifest.json`;
 3. создаёт immutable release в `/var/www/tb-mini-app/releases/`;
 4. атомарно переключает `/var/www/tb-mini-app/current`;
 5. устанавливает отдельный Nginx site, если его ещё нет;
@@ -96,7 +100,7 @@ curl -I https://tb-mini-app.duckdns.org/
 ```env
 MINI_APP_BACKEND_ENABLED=true
 MINI_APP_BACKEND_HOST=127.0.0.1
-MINI_APP_BACKEND_PORT=8080
+MINI_APP_BACKEND_PORT=18080
 MINI_APP_AUTH_MAX_AGE_SECONDS=3600
 MINI_APP_ALLOWED_ORIGINS=https://tb-mini-app.duckdns.org
 ```
@@ -105,10 +109,10 @@ MINI_APP_ALLOWED_ORIGINS=https://tb-mini-app.duckdns.org
 
 ```bash
 sudo systemctl restart fvg-alert-bot
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:18080/healthz
 ```
 
-Порт `8080` не добавляется в UFW/security group.
+Порт `18080` не добавляется в UFW/security group.
 
 ## Этап 5 — сквозная проверка
 
@@ -142,11 +146,13 @@ curl -i https://tb-mini-app.duckdns.org/healthz
 
 ## Повторное обновление frontend
 
-Для нового frontend-релиза снова выполните `prepare` с тем же доменом. Существующая Certbot-конфигурация не перезаписывается, если Nginx site уже существует.
+Для нового frontend-релиза снова выполните `prepare-artifact` с тем же доменом. Существующая Certbot-конфигурация не перезаписывается, если Nginx site уже существует.
 
 ```bash
 sudo MINI_APP_DOMAIN=tb-mini-app.duckdns.org \
-  bash scripts/deploy_mini_app.sh prepare
+  MINI_APP_ARTIFACT=/root/tb-mini-app-artifacts/<commit>/tb-mini-app-frontend \
+  MINI_APP_EXPECTED_COMMIT=<full-commit-sha> \
+  bash scripts/deploy_mini_app.sh prepare-artifact
 ```
 
 ## Rollback frontend
