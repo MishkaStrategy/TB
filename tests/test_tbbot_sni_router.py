@@ -68,8 +68,9 @@ class TBBotSniRouterTests(unittest.TestCase):
     def test_preflight_rejects_missing_source_sni_conflict_and_email(self) -> None:
         self.assertIn("no canonical Compose or Amnezia source", self.script)
         self.assertIn("is already an Xray Reality serverName", self.script)
-        self.assertIn("LETSENCRYPT_EMAIL is missing", self.script)
-        self.assertIn("<LETSENCRYPT_EMAIL>", self.script)
+        self.assertIn("Xray image digest changed", self.script)
+        self.assertIn("TLS certificate does not match", self.script)
+        self.assertIn("an automatic rollback timer is already active", self.script)
 
     def test_recreation_changes_only_target_binding_and_rollback_restores_inspect(self) -> None:
         self.assertIn("container_port == '443/tcp' and mode == 'sni'", self.script)
@@ -84,14 +85,27 @@ class TBBotSniRouterTests(unittest.TestCase):
         rollback_body = self.script.split("rollback()", 1)[1].split("verify()", 1)[0]
         self.assertLess(rollback_body.index("systemctl stop nginx"), rollback_body.index("recreate_container"))
         self.assertLess(rollback_body.index("recreate_container"), rollback_body.index("systemctl start nginx"))
+        self.assertIn("Nginx did not release external port 443", rollback_body)
+
+    def test_verify_preserves_production_and_xray_invariants(self) -> None:
+        self.assertIn("verify_xray_invariants", self.script)
+        self.assertIn("Xray invariants: OK", self.script)
+        self.assertIn("bot-env.sha256", self.script)
+        self.assertIn("bot-state.txt", self.script)
+        self.assertIn("Mini App backend must remain disabled", self.script)
+        self.assertIn("protected port 8080 changed", self.script)
 
     def test_protected_production_surfaces_are_not_modified(self) -> None:
         lowered = self.script.lower()
         self.assertNotIn("ufw allow", lowered)
         self.assertNotIn("ufw delete", lowered)
-        self.assertNotIn("/etc/fvg-alert-bot.env", self.script)
+        self.assertIn("sha256sum /etc/fvg-alert-bot.env", self.script)
+        self.assertNotIn(">/etc/fvg-alert-bot.env", self.script)
+        self.assertNotIn("source /etc/fvg-alert-bot.env", self.script)
         self.assertNotIn("systemctl restart fvg-alert-bot", self.script)
-        self.assertNotIn("doh-socks-files", self.script)
+        self.assertIn("systemctl is-active --quiet doh-socks-files.service", self.script)
+        self.assertNotIn("systemctl restart doh-socks-files", self.script)
+        self.assertNotIn("systemctl stop doh-socks-files", self.script)
         self.assertNotIn("setmenubutton", lowered)
         self.assertNotIn("botfather", lowered)
 

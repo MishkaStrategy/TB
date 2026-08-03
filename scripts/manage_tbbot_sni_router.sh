@@ -9,6 +9,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOMAIN="tbbot.duckdns.org"
 PUBLIC_IP="188.137.236.73"
 CONTAINER="amnezia-xray"
+EXPECTED_XRAY_IMAGE="sha256:c9b46cda4211c9e3182e3f60076c7047b9825f071b053a3b74354094764b314c"
 BACKUP_ROOT="/var/backups/tbbot-sni-router"
 LOCK_FILE="/run/lock/tbbot-sni-router.lock"
 STREAM_TEMPLATE="${PROJECT_DIR}/deploy/mini-app/nginx-stream-sni.conf.template"
@@ -88,12 +89,16 @@ preflight() {
     [[ -e /usr/lib/nginx/modules/ngx_stream_module.so ]] || fail "Nginx stream module is unavailable"
   docker inspect "${CONTAINER}" >/dev/null 2>&1 || fail "container ${CONTAINER} is missing"
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}")" == true ]] || fail "Xray container is not running"
+  [[ "$(docker inspect -f '{{.Image}}' "${CONTAINER}")" == "${EXPECTED_XRAY_IMAGE}" ]] || fail "Xray image digest changed"
   docker port "${CONTAINER}" 443/tcp | grep -Eq '(^|:)443$' || fail "Xray does not publish container TCP 443"
+  ! systemctl is-active --quiet "${ROLLBACK_UNIT}.timer" || fail "an automatic rollback timer is already active"
   detect_container_source
   assert_no_sni_conflict
   for port in 8443 2443 18080; do port_is_free "${port}" || fail "loopback target port ${port} is already in use"; done
   [[ -r "${EXPECTED_FRONTEND}" ]] || fail "frontend release is missing"
-  [[ -n "${LETSENCRYPT_EMAIL:-}" && "${LETSENCRYPT_EMAIL}" == *@*.* && "${LETSENCRYPT_EMAIL}" != "<LETSENCRYPT_EMAIL>" ]] || fail "LETSENCRYPT_EMAIL is missing"
+  [[ -r "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]] || fail "TLS certificate is missing"
+  openssl x509 -checkend 86400 -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" >/dev/null || fail "TLS certificate is expired or near expiry"
+  openssl x509 -checkhost "${DOMAIN}" -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" >/dev/null || fail "TLS certificate does not match ${DOMAIN}"
   [[ "$(df -Pk /opt | awk 'NR==2 {print $4}')" -ge 1048576 ]] || fail "less than 1 GiB free on /opt"
   [[ "$(df -Pi /opt | awk 'NR==2 {print $4}')" -ge 5000 ]] || fail "fewer than 5000 inodes free on /opt"
   echo "Preflight: OK"
@@ -137,6 +142,8 @@ prepare() {
   ss -lntp >"${snapshot}/payload/ss-lntp.txt"
   systemctl status nginx docker --no-pager --full >"${snapshot}/payload/systemd-status.txt" 2>&1 || true
   systemctl is-active nginx >"${snapshot}/payload/nginx-was-active.txt" || true
+  systemctl show fvg-alert-bot -p ActiveState -p SubState -p NRestarts >"${snapshot}/payload/bot-state.txt"
+  sha256sum /etc/fvg-alert-bot.env >"${snapshot}/payload/bot-env.sha256"
   cat >"${snapshot}/payload/rollback-plan.txt" <<EOF
 1. Disable the Nginx stream listener.
 2. Restore /etc/nginx from payload/nginx.
@@ -262,40 +269,79 @@ PY
 
 rollback() {
   require_root; require_snapshot; verify_manifest "${SNAPSHOT}"
+  local rollback_rc=0
   set +e
   # Removing a stream config does not release 443 from already loaded workers.
   # Stop Nginx before restoring Xray's original public port binding.
-  systemctl stop nginx
+  systemctl stop nginx || rollback_rc=1
+  if ss -lntpH 'sport = :443' | grep -q nginx; then
+    echo "ERROR: Nginx did not release external port 443" >&2
+    rollback_rc=1
+  fi
   rm -f "${STREAM_CONFIG}" "${HTTPS_ENABLED}" "${HTTPS_CONFIG}" "${STREAM_INCLUDE}"
-  cp -a "${SNAPSHOT}/payload/nginx/." /etc/nginx/
-  recreate_container "${SNAPSHOT}" original
-  nginx -t
-  if grep -Fxq active "${SNAPSHOT}/payload/nginx-was-active.txt"; then systemctl start nginx; fi
-  docker port "${CONTAINER}" 443/tcp | grep -Eq '(^|:)443$'
-  [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}")" == true ]]
-  rc=$?
+  cp -a "${SNAPSHOT}/payload/nginx/." /etc/nginx/ || rollback_rc=1
+  recreate_container "${SNAPSHOT}" original || rollback_rc=1
+  nginx -t || rollback_rc=1
+  if grep -Fxq active "${SNAPSHOT}/payload/nginx-was-active.txt"; then systemctl start nginx || rollback_rc=1; fi
+  docker port "${CONTAINER}" 443/tcp | grep -Eq '(^|:)443$' || rollback_rc=1
+  [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null)" == true ]] || rollback_rc=1
   date -u +%FT%TZ >"${SNAPSHOT}/logs/rollback.log"
   chmod 0600 "${SNAPSHOT}/logs/rollback.log"
   set -e
-  (( rc == 0 )) || fail "rollback verification failed"
+  (( rollback_rc == 0 )) || fail "rollback verification failed"
   echo "Rollback complete"
 }
 
+verify_xray_invariants() {
+  local snapshot="$1"
+  python3 - "${snapshot}" "${CONTAINER}" <<'PY'
+import json, pathlib, subprocess, sys
+snapshot=pathlib.Path(sys.argv[1])
+old=json.loads((snapshot/'payload/container-inspect.json').read_text())[0]
+new=json.loads(subprocess.check_output(['docker','inspect',sys.argv[2]],text=True))[0]
+checks={
+    'image': old['Image'] == new['Image'],
+    'restart_policy': old['HostConfig'].get('RestartPolicy') == new['HostConfig'].get('RestartPolicy'),
+    'mounts': old.get('Mounts') == new.get('Mounts'),
+    'networks': sorted(old.get('NetworkSettings',{}).get('Networks',{})) == sorted(new.get('NetworkSettings',{}).get('Networks',{})),
+    'capabilities': old['HostConfig'].get('CapAdd') == new['HostConfig'].get('CapAdd'),
+    'devices': old['HostConfig'].get('Devices') == new['HostConfig'].get('Devices'),
+    'sysctls': old['HostConfig'].get('Sysctls') == new['HostConfig'].get('Sysctls'),
+}
+bindings=new['HostConfig'].get('PortBindings') or {}
+checks['xray_mapping'] = bindings.get('443/tcp') == [{'HostIp':'127.0.0.1','HostPort':'2443'}]
+failed=[name for name,ok in checks.items() if not ok]
+if failed:
+    raise SystemExit('Xray invariant mismatch: '+','.join(failed))
+print('Xray invariants: OK')
+PY
+}
+
 verify() {
-  require_root
+  require_root; require_snapshot; verify_manifest "${SNAPSHOT}"
   nginx -t
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}")" == true ]] || fail "Xray is not running"
+  [[ "$(docker inspect -f '{{.Image}}' "${CONTAINER}")" == "${EXPECTED_XRAY_IMAGE}" ]] || fail "Xray image digest changed"
+  verify_xray_invariants "${SNAPSHOT}"
   ss -lntH 'sport = :2443' | grep -q '127.0.0.1:2443' || fail "Xray loopback port is unavailable"
   ss -lntH 'sport = :8443' | grep -q '127.0.0.1:8443' || fail "Mini App HTTPS listener is unavailable"
   ss -lntH 'sport = :443' | grep -q ':443' || fail "external 443 is unavailable"
+  ss -lntpH 'sport = :443' | grep -q 'nginx' || fail "external 443 is not owned by Nginx"
+  ! ss -lntH 'sport = :18080' | grep -q . || fail "Mini App backend must remain disabled"
   curl --resolve "${DOMAIN}:443:127.0.0.1" --fail --show-error --silent "https://${DOMAIN}/" -o /dev/null
   openssl x509 -checkend 86400 -noout -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
+  timeout 5 bash -c '</dev/tcp/127.0.0.1/2443' || fail "Xray TCP listener is unreachable"
+  systemctl is-active --quiet fvg-alert-bot || fail "production bot is not active"
+  systemctl is-active --quiet doh-socks-files.service || fail "doh-socks-files.service is not active"
+  ss -lntH 'sport = :8080' | grep -q "${PUBLIC_IP}:8080" || fail "protected port 8080 changed"
+  (cd "${SNAPSHOT}" && sha256sum --check --strict payload/bot-env.sha256 >/dev/null) || fail "production env changed"
+  diff -u "${SNAPSHOT}/payload/bot-state.txt" <(systemctl show fvg-alert-bot -p ActiveState -p SubState -p NRestarts) >/dev/null || fail "production bot state changed"
   echo "Verification: OK"
 }
 
 apply() {
   require_root; require_snapshot; verify_manifest "${SNAPSHOT}"
-  local deadline
+  local deadline rc=0
   deadline="$(date -u -d '+30 minutes' +%FT%TZ)"
   systemd-run --unit="${ROLLBACK_UNIT}" --on-active=30m \
     "$(readlink -f "$0")" rollback "${SNAPSHOT}" >/dev/null
