@@ -20,6 +20,7 @@
 
 - Frontend находится в `telegram-mini-app/`.
 - Backend-адаптер находится в `mini_app_backend/`.
+- HTTPS deploy assets находятся в `deploy/mini-app/` и `scripts/deploy_mini_app.sh`.
 - Mini App не создаёт отдельную базу пользовательских настроек.
 - Backend использует существующие `UserPreferences`, `FvgAlertSettings`, `FundingAlertStore`, `FundingExchangeStore`, `RuntimeSettings`, `AccessRegistry` и `UserActivityRegistry`.
 - Frontend работает с единым camelCase JSON-контрактом; backend преобразует его в текущие форматы Python-хранилищ.
@@ -28,6 +29,7 @@
 - Общий settings PUT сохраняет только персональные настройки.
 - Административные записи вынесены в отдельные одноразово подтверждаемые endpoints.
 - Backup и restart выполняются только через переданные production callbacks; API не запускает shell или `systemctl` самостоятельно.
+- Production frontend и API публикуются через один HTTPS origin; backend остаётся на `127.0.0.1`.
 
 ## Требования к интерфейсу
 
@@ -113,6 +115,24 @@
 
 Backup и restart endpoints реализованы, но остаются fail-closed до подключения production callbacks из соответствующих проверенных веток.
 
+## HTTPS-размещение
+
+Подготовлен изолированный production deploy:
+
+- DuckDNS или другой валидный hostname;
+- Nginx reverse proxy;
+- Let’s Encrypt через Certbot;
+- единый origin для frontend и API;
+- backend proxy только на `127.0.0.1:8080`;
+- атомарные frontend-релизы и rollback через symlink;
+- отдельные команды `prepare`, `https` и `verify`;
+- SPA fallback, controlled caching и security headers;
+- отсутствие автоматического изменения env бота;
+- отсутствие автоматического рестарта бота;
+- отсутствие регистрации URL в BotFather.
+
+Полная инструкция находится в `telegram-mini-app/DEPLOYMENT.md`.
+
 ## Безопасность
 
 - Идентичность определяется только по проверенному `Telegram.WebApp.initData`.
@@ -128,6 +148,7 @@ Backup и restart endpoints реализованы, но остаются fail-c
 - Env-allowlist и администраторы не удаляются через Mini App.
 - Confirmation token одноразовый и удаляется при первой попытке исполнения.
 - Backup/restart не имеют fallback на произвольные команды операционной системы.
+- Публично доступны только порты `80/443`; backend listener остаётся loopback-only.
 
 ## API
 
@@ -174,18 +195,21 @@ Backup и restart endpoints реализованы, но остаются fail-c
 6. Расширенная read-only диагностика администратора.
 7. Полная RU/EN-локализация интерфейса Mini App.
 8. Защищённые admin endpoints, confirmation flow, access mode и runtime allowlist.
+9. Production deploy assets для DuckDNS/Nginx/Certbot, атомарного frontend и health-check.
 
 Зависит от других production-веток:
 
-9. Подключение verified backup callback.
-10. Подключение graceful restart/restart-guard callback.
+10. Подключение verified backup callback.
+11. Подключение graceful restart/restart-guard callback.
 
 Осталось:
 
-11. HTTPS-размещение и регистрация URL в BotFather.
-12. Тестовая кнопка только для администратора.
-13. Параллельный тест со старым Telegram UI.
-14. Финальная интеграция только после отдельного подтверждения.
+12. Выполнить HTTPS-размещение на VDS и включить backend env.
+13. Пройти сквозную проверку frontend/API.
+14. Зарегистрировать URL в BotFather.
+15. Добавить тестовую кнопку только для администратора.
+16. Провести параллельный тест со старым Telegram UI.
+17. Выполнить финальную интеграцию только после отдельного подтверждения.
 
 ## Проверки
 
@@ -198,6 +222,9 @@ Backup и restart endpoints реализованы, но остаются fail-c
 - allowlist add/remove и защита env/admin записей;
 - fail-closed backup/restart adapters;
 - HTTP-поток admin endpoints и CORS;
+- Bash syntax deploy-скрипта;
+- безопасная Nginx proxy-конфигурация;
+- отсутствие автоматического production activation в deploy-скрипте;
 - лимиты инструментов;
 - диапазоны цены;
 - Decimal и единицы размера;
@@ -214,4 +241,4 @@ Backup и restart endpoints реализованы, но остаются fail-c
 
 ## Критерий завершения
 
-Mini App считается готовым только когда все настройки читаются и сохраняются через production backend, серверная авторизация и роли проверены, интерфейс протестирован в Telegram-клиентах, RU/EN полностью реализованы, автоматические тесты проходят, production callbacks подключены к принятым operational механизмам, документация развёртывания готова и владелец проекта отдельно разрешил финальную интеграцию и удаление лишних настроек из бота.
+Mini App считается готовым только когда все настройки читаются и сохраняются через production backend, серверная авторизация и роли проверены, интерфейс протестирован в Telegram-клиентах, RU/EN полностью реализованы, автоматические тесты проходят, production callbacks подключены к принятым operational механизмам, HTTPS deploy реально выполнен и проверен, владелец проекта отдельно разрешил финальную интеграцию и удаление лишних настроек из бота.
