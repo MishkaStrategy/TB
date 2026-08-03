@@ -78,6 +78,8 @@ class TBBotSniRouterTests(unittest.TestCase):
         self.assertIn("image=d['Image']", self.script)
         self.assertIn("payload_image", self.script)
         self.assertIn("docker','cp", self.script)
+        self.assertIn("actual_networks-set(networks)", self.script)
+        self.assertIn("docker','network','disconnect", self.script)
         self.assertIn('recreate_container "${SNAPSHOT}" original', self.script)
         self.assertIn('rm -f "${STREAM_CONFIG}"', self.script)
         self.assertNotIn("rm -rf /etc/nginx", self.script)
@@ -90,6 +92,7 @@ class TBBotSniRouterTests(unittest.TestCase):
     def test_verify_preserves_production_and_xray_invariants(self) -> None:
         self.assertIn("verify_xray_invariants", self.script)
         self.assertIn("Xray invariants: OK", self.script)
+        self.assertIn("'network_mode':", self.script)
         self.assertIn("bot-env.sha256", self.script)
         self.assertIn("bot-state.txt", self.script)
         self.assertIn("Mini App backend must remain disabled", self.script)

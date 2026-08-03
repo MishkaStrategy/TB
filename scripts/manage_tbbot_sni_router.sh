@@ -215,6 +215,13 @@ for network,meta in networks.items():
         if alias and alias != name: connect += ['--alias',alias]
     connect += [network,name]
     subprocess.run(connect,check=True)
+# Docker implicitly attaches the default bridge during create. Some Amnezia
+# containers deliberately have that network disconnected while HostConfig
+# still reports NetworkMode=bridge. Reconcile actual membership to inspect.
+actual=json.loads(subprocess.check_output(['docker','inspect',name],text=True))[0]
+actual_networks=set(actual.get('NetworkSettings',{}).get('Networks',{}))
+for extra in sorted(actual_networks-set(networks)):
+    subprocess.run(['docker','network','disconnect',extra,name],check=True)
 subprocess.run(['docker','start',name],check=True,stdout=subprocess.DEVNULL)
 PY
 }
@@ -289,6 +296,7 @@ rollback() {
   chmod 0600 "${SNAPSHOT}/logs/rollback.log"
   set -e
   (( rollback_rc == 0 )) || fail "rollback verification failed"
+  systemctl stop "${ROLLBACK_UNIT}.timer" 2>/dev/null || true
   echo "Rollback complete"
 }
 
@@ -304,6 +312,7 @@ checks={
     'restart_policy': old['HostConfig'].get('RestartPolicy') == new['HostConfig'].get('RestartPolicy'),
     'mounts': old.get('Mounts') == new.get('Mounts'),
     'networks': sorted(old.get('NetworkSettings',{}).get('Networks',{})) == sorted(new.get('NetworkSettings',{}).get('Networks',{})),
+    'network_mode': old['HostConfig'].get('NetworkMode') == new['HostConfig'].get('NetworkMode'),
     'capabilities': old['HostConfig'].get('CapAdd') == new['HostConfig'].get('CapAdd'),
     'devices': old['HostConfig'].get('Devices') == new['HostConfig'].get('Devices'),
     'sysctls': old['HostConfig'].get('Sysctls') == new['HostConfig'].get('Sysctls'),
