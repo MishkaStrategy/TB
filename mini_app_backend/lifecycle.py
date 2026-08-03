@@ -53,6 +53,9 @@ async def start_mini_app_backend(application) -> None:
 
 
 async def stop_mini_app_backend(application) -> None:
-    runner = application.bot_data.pop(RUNNER_KEY, None)
+    bot_data = getattr(application, "bot_data", None)
+    if bot_data is None:
+        return
+    runner = bot_data.pop(RUNNER_KEY, None)
     if runner is not None:
         await runner.cleanup()

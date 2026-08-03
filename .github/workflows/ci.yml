@@ -92,6 +92,7 @@ jobs:
           scripts/update_vds.sh
           scripts/update_vds_bot_api_only.sh
           scripts/deploy_mini_app.sh
+          scripts/deploy_tbbot_mini_app.sh
 
       - name: Create isolated Python environment
         run: |

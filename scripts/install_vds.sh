@@ -14,6 +14,7 @@ PREVIOUS_DIR="${INSTALL_DIR}.previous"
 STATE_DIR="/var/lib/fvg-alert-bot"
 ENV_FILE="/etc/fvg-alert-bot.env"
 BACKUP_DIR="/var/backups/fvg-alert-bot"
+LOG_DIR="/var/log/fvg-alert-bot"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MIN_FREE_MB="${FVG_INSTALL_MIN_FREE_MB:-512}"
 MIN_FREE_INODES="${FVG_INSTALL_MIN_FREE_INODES:-5000}"
@@ -76,6 +77,7 @@ if ! id "${SERVICE_USER}" >/dev/null 2>&1; then
 fi
 
 mkdir -p "${STATE_DIR}" "${BACKUP_DIR}" /tmp/trading-assistant-mpl
+install -d -m 700 -o root -g root "${LOG_DIR}"
 chmod 700 "${STATE_DIR}" "${BACKUP_DIR}" /tmp/trading-assistant-mpl
 chown -R "${SERVICE_USER}:${SERVICE_USER}" "${STATE_DIR}" /tmp/trading-assistant-mpl
 chown root:root "${BACKUP_DIR}"
@@ -116,10 +118,7 @@ rsync -a --delete \
   --exclude 'data' \
   "${PROJECT_DIR}/" "${STAGING_DIR}/"
 
-cp "${ENV_FILE}" "${STAGING_DIR}/.env"
 mkdir -p "${STAGING_DIR}/data" "${STAGING_DIR}/tmp/mpl"
-chown root:"${SERVICE_USER}" "${STAGING_DIR}/.env"
-chmod 640 "${STAGING_DIR}/.env"
 chown -R "${SERVICE_USER}:${SERVICE_USER}" \
   "${STAGING_DIR}/data" "${STAGING_DIR}/tmp"
 chmod 700 "${STAGING_DIR}/data" "${STAGING_DIR}/tmp" "${STAGING_DIR}/tmp/mpl"
@@ -143,18 +142,26 @@ echo "Проверяю кандидат до остановки работающ
   "${STAGING_DIR}/exchanges" \
   "${STAGING_DIR}/handlers" \
   "${STAGING_DIR}/tests"
-runuser -u "${SERVICE_USER}" -- bash -c "
-  set -euo pipefail
-  cd '${STAGING_DIR}'
-  export PUBLIC_ACCESS_ENABLED=true
-  export PYTHONDONTWRITEBYTECODE=1
-  export TMPDIR='${STAGING_DIR}/tmp'
-  export MPLCONFIGDIR='${STAGING_DIR}/tmp/mpl'
-  .venv/bin/python -m unittest discover -s tests -v
-"
+
+candidate_version="$(tr -d '\r\n' < "${STAGING_DIR}/VERSION")"
+candidate_test_log="${LOG_DIR}/candidate-tests-${candidate_version}-$(date -u +%Y%m%dT%H%M%SZ).log"
+set +e
+bash "${STAGING_DIR}/scripts/run_candidate_tests.sh" \
+  "${STAGING_DIR}" \
+  "${candidate_test_log}" \
+  "${SERVICE_USER}"
+candidate_test_status=$?
+set -e
+
+if (( candidate_test_status != 0 )); then
+  echo "Candidate unit tests failed." >&2
+  echo "Full log: ${candidate_test_log}" >&2
+  tail -n 120 "${candidate_test_log}" >&2 || true
+  exit "${candidate_test_status}"
+fi
+echo "Candidate unit tests passed. Full log: ${candidate_test_log}"
 
 # The final release contains no writable code or local secrets/state.
-rm -f "${STAGING_DIR}/.env"
 rm -rf "${STAGING_DIR}/data" "${STAGING_DIR}/tmp"
 chown -R root:root "${STAGING_DIR}"
 ln -s "${STATE_DIR}" "${STAGING_DIR}/data"
@@ -270,7 +277,7 @@ EOF
 
 cat > "/etc/systemd/system/${BACKUP_SERVICE_NAME}.timer" <<EOF
 [Unit]
-Description=Daily FVG Alert Bot runtime-data backup
+Description=Daily backup FVG Alert Bot runtime data
 
 [Timer]
 OnCalendar=*-*-* 03:15:00 UTC

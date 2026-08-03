@@ -1,5 +1,101 @@
 # Changelog
 
+## 1.3.3 — 2026-07-30
+
+Кроссплатформенный hotfix verified backup для macOS.
+
+### Исправлено
+
+- macOS BSD tar больше не добавляет AppleDouble `._*` members после построения manifest;
+- backup запускает tar с `COPYFILE_DISABLE=1`;
+- существующие `._*` и `.DS_Store` исключаются из runtime snapshot;
+- manifest verifier остаётся строгим для обычных неподтверждённых файлов;
+- добавлен behavior-level regression test с контролируемым tar wrapper.
+
+### Проверено
+
+- полный unit suite;
+- candidate environment isolation;
+- dependency audit;
+- bounded `500 × 10` soak;
+- production systemd render/verify;
+- Telegram Mini App по-прежнему исключён.
+
+## 1.3.2 — 2026-07-30
+
+Immutable metadata follow-up к installer hotfix `1.3.1`. Runtime-fix не изменён.
+
+### Исправлено
+
+- README, install/update examples и release links синхронизированы с `VERSION=1.3.2`;
+- Bot API-only VDS инструкция указывает актуальный deployment tag/version;
+- stable status больше не отображается как release candidate;
+- обязательные CI jobs перенесены с production VDS на GitHub-hosted Ubuntu;
+- добавлен regression test согласованности VERSION, README, updater, release audit и VDS документации.
+
+### Гарантии
+
+- теги `v1.3.0` и `v1.3.1` не переписываются;
+- runtime-state и production env не изменяются release-процессом;
+- Telegram Mini App PR #53 не входит;
+- production deployment выполняется отдельно и только по точному SHA тега.
+
+## 1.3.1 — 2026-07-30
+
+Installer hotfix для релиза `1.3.0`. Первая production-попытка остановилась до atomic switch, поэтому VDS осталась на `1.2.0` и rollback не потребовался.
+
+### Исправлено
+
+- candidate unit tests теперь запускаются через `env -i` и не наследуют production `/etc/fvg-alert-bot.env`;
+- реальные Telegram credentials и operational feature flags не попадают в staging test process;
+- полный candidate test log сохраняется в `/var/log/fvg-alert-bot`;
+- installer сохраняет исходный exit code test process и останавливается до выключения production-службы;
+- `MAX_SYMBOLS_PER_USER` ограничен сверху значением 10, даже если старый production env содержит большее значение;
+- legacy-настройки с количеством инструментов выше лимита сохраняются без обрезки;
+- добавлены regression tests изоляции candidate environment, защиты секретов и legacy over-limit settings.
+
+### Совместимость
+
+- функции FVG и operational stack из `1.3.0` не изменены;
+- `/etc/fvg-alert-bot.env` и `/var/lib/fvg-alert-bot` не переписываются автоматически;
+- Telegram Mini App, `API_ID/API_HASH` и пользовательские Telegram-сессии не входят в релиз.
+
+## 1.3.0 — 2026-07-30
+
+Единый feature-релиз новых FVG-функций и полного operational-стека поверх актуального `main`. Telegram Mini App из PR #53 исключён.
+
+### FVG
+
+- exchange-aware FVG-инструменты для Bitunix, Binance, Bybit, BingX, Bitget и Gate;
+- до 10 комбинаций `биржа + торговая пара` на Telegram ID;
+- подтверждённые FVG на `15m`, `1h`, `4h`, `1d` после закрытия свечи C;
+- BTC-only пред-FVG T−3 на `15m`;
+- изменение таймфреймов, pause/delete, FAQ и exchange-aware фильтры;
+- автоматическая миграция FVG settings schema v2 → v3 с сохранением фильтров.
+
+### Operations и администрирование
+
+- Telegram delivery profiles и suppression недоступных чатов;
+- Outbox V2 с state machine, bounded retry, expiration и dead-letter;
+- SQLite observability;
+- verified backup с manifest, SHA-256 и durable history;
+- background task leases и watchdog;
+- lifecycle и graceful shutdown/restart;
+- archive-before-delete и read-only FVG archive audit;
+- persistent restart circuit breaker;
+- read-only состояние circuit breaker в `⚙️ Операции` из PR #65;
+- read-only состояние и статистика FVG archive в `⚙️ Операции` из PR #66.
+
+### Аудит интеграции
+
+- PR #65 включён со всем зависимым stacked-стеком до PR #66;
+- PR #66 включён отдельным следующим шагом;
+- PR #54 вручную объединён с operational-стеком;
+- исправлено наследование Outbox V2, чтобы сохранялась limited non-BTC recovery policy;
+- полный GitHub-hosted CI проверяет migration, `4h`, оба новых admin sections, SQLite, soak и systemd;
+- версия VDS updater обновлена до `1.3.0`;
+- Telegram Mini App, `API_ID/API_HASH` и user sessions не входят в релиз.
+
 ## 1.2.0 — 2026-07-28
 
 Объединены последние подтверждённые изменения из параллельных рабочих чатов поверх production-версии `1.1.0` и подготовлено безопасное обновление VDS.
@@ -34,8 +130,7 @@
 
 ## 1.1.0 — 2026-07-27
 
-Добавлены персональные уведомления о ставках фандинга и подготовлено безопасное
-обновление существующей VDS-установки.
+Добавлены персональные уведомления о ставках фандинга и подготовлено безопасное обновление существующей VDS-установки.
 
 ### Добавлено
 
@@ -45,8 +140,7 @@
 - общий снимок ставок один раз в час в `HH:50 UTC`;
 - подавление повторов до выхода инструмента из условия и нового пересечения;
 - SQLite/WAL-хранилище `funding_alerts.sqlite3` с ограниченным retention;
-- `scripts/update_vds.sh` для preflight, backup, fast-forward обновления,
-  атомарной установки и post-deploy проверки;
+- `scripts/update_vds.sh` для preflight, backup, fast-forward обновления, атомарной установки и post-deploy проверки;
 - запись установленного Git SHA в `/opt/fvg-alert-bot/BUILD_COMMIT`.
 
 ### Исправлено
@@ -84,152 +178,3 @@
 - приватный/публичный режим из Telegram-админ-панели;
 - атомарное VDS-обновление, backup и rollback;
 - event-quality backtest без искусственного P&L.
-
-### Эксплуатация
-
-- для обновления VDS рекомендуется иметь не менее 1 ГБ свободного места на файловой системе `/opt`;
-- runtime-state в `/var/lib/fvg-alert-bot` и секреты в `/etc/fvg-alert-bot.env` сохраняются между обновлениями;
-- стабильную production-установку следует обновлять только при критической необходимости.
-
-## 1.0.0-rc10 — 2026-07-26
-
-Объединены новые функции управления доступом и автоматической регистрации пользователей поверх исправленного WebSocket-watchdog `rc9`.
-
-### Добавлено
-
-- переключатель приватного/публичного режима прямо в Telegram-админ-панели без перезапуска процесса;
-- атомарное сохранение runtime-режима в `data/runtime_settings.json`, переживающее обновление VDS и rollback;
-- автоматическая регистрация нового пользователя при первом `/start`;
-- подтверждённые FVG 15m для `BTCUSDT` включаются новому пользователю автоматически, а пред-FVG остаются выключенными;
-- повторный `/start` не перезаписывает ручной opt-out пользователя;
-- сохранённый профиль уровней TradingView Fibonacci в `fibonacci-settings.json`.
-
-### Проверено
-
-- CI для PR с переключателем доступа завершился успешно;
-- CI для PR с автоматическим включением FVG завершился успешно;
-- добавлены регрессионные тесты persistence, динамической авторизации и поведения повторного `/start`.
-
-## 1.0.0-rc9 — 2026-07-26
-
-Исправлена проверка watchdog при активном служебном WebSocket-трафике.
-
-### Исправлено
-
-- stale-проверка выполняется перед каждым чтением WebSocket, а не только после полного receive-timeout;
-- частые pong, subscription-ack и другие служебные сообщения больше не могут удерживать зависшую kline-сессию в состоянии `подключён`;
-- отдельный тест проверяет, что watchdog расположен до `ws.receive` и фиксирует `stale_ws_reconnects`;
-- `rc8` не рекомендуется устанавливать; production-исправление выпущено в `rc9`.
-
-## 1.0.0-rc8 — 2026-07-26
-
-Добавлен автоматический watchdog зависшего Bitunix WebSocket.
-
-### Исправлено
-
-- открытое, но переставшее передавать kline-свечи соединение больше не остаётся в ложном состоянии `подключён`;
-- при отсутствии успешно разобранных свечей 120 секунд поток принудительно разрывается и запускает существующий reconnect с повторной подпиской;
-- ping, subscription-ack и другие служебные сообщения не маскируют отсутствие рыночных данных;
-- REST recovery продолжает работать как независимая пятиминутная подстраховка;
-- добавлены регрессионные тесты порога 120 секунд и фактического production-интервала 1072 секунды.
-
-## 1.0.0-rc7 — 2026-07-26
-
-Исправлен масштаб live-ставок фандинга Bitunix.
-
-### Исправлено
-
-- `fundingRate` из live batch API отображается как уже готовое процентное значение;
-- значение `-1.514051` теперь показывается как `−1.5141%`, а не `−151.4051%`;
-- удалено ошибочное дополнительное умножение ставки на 100;
-- добавлен регрессионный тест на фактическое production-значение;
-- batch funding остаётся единственным источником ставки, а ticker добавляет только цены.
-
-## 1.0.0-rc6 — 2026-07-26
-
-Исправлено отображение ставки фандинга после объединения funding и ticker данных.
-
-### Исправлено
-
-- данные `/funding_rate/batch` остаются единственным источником ставки, знака и funding-метаданных;
-- ticker добавляет только `open`, `lastPrice` и `last`, поэтому одноимённое поле `fundingRate` больше не перезаписывает batch-ставку;
-- добавлен регрессионный тест, проверяющий приоритет batch-данных над ticker.
-
-## 1.0.0-rc5 — 2026-07-26
-
-Добавлен полноценный интерфейс ставок фандинга Bitunix.
-
-### Добавлено
-
-- команда `/funding` в системном меню команд Telegram;
-- кнопка `💸 Фандинг` в главной панели бота;
-- рейтинг топ-50 положительных и отрицательных ставок с пагинацией;
-- изменение цены инструмента за 24 часа рядом со ставкой;
-- обновление данных без выхода из funding-экрана;
-- публичные batch funding/ticker методы Bitunix и тесты их URL/форматов.
-
-### Исправлено
-
-- funding-функция вынесена из старого смешанного draft PR и реализована поверх актуального production-кода.
-
-## 1.0.0-rc4 — 2026-07-26
-
-Защита первой установки от переполнения диска и временного каталога.
-
-### Исправлено
-
-- установщик заранее проверяет свободное место и inode на файловой системе `/opt`;
-- зависимости устанавливаются с отключённым `pip`-кэшем;
-- временные файлы `pip`, SQLite-тестов и Matplotlib создаются внутри staging-каталога и удаляются вместе с ним;
-- ошибка `database or disk is full` больше не возникает посреди unit-тестов без понятной диагностики;
-- минимальные пороги можно переопределить через `FVG_INSTALL_MIN_FREE_MB` и `FVG_INSTALL_MIN_FREE_INODES`.
-
-## 1.0.0-rc3 — 2026-07-26
-
-Исправление первого развёртывания на чистом VDS.
-
-### Исправлено
-
-- pre-switch backup использует Python и код staging-релиза, пока `/opt/fvg-alert-bot` ещё не существует;
-- первая установка больше не останавливается с ошибкой `Python executable does not exist`;
-- добавлен регрессионный тест порядка backup и атомарного переключения релиза;
-- сохранённый `/etc/fvg-alert-bot.env` повторно используется после неудачной попытки rc1/rc2.
-
-## 1.0.0-rc2 — 2026-07-26
-
-Исправление первой установки на VDS с медленным диском или загруженным CPU.
-
-### Исправлено
-
-- корректностный unit-soak больше не отклоняет установку из-за скорости конкретного сервера;
-- строгий performance-порог сохранён в отдельном CI soak `500 × 10` с лимитом 180 секунд;
-- повторная установка использует уже сохранённые Telegram token и admin ID из `/etc/fvg-alert-bot.env`.
-
-## 1.0.0-rc1 — 2026-07-26
-
-Первый release candidate FVG Alert Bot.
-
-### Основные возможности
-
-- поток свечей Bitunix через WebSocket с периодическим REST recovery;
-- подтверждённые FVG и предварительные сигналы T−3;
-- индивидуальные символы, направления и фильтры цены/размера;
-- SQLite/WAL вместо перезаписи растущего JSON на горячем пути;
-- постоянный Telegram outbox с retry/backoff и восстановлением после рестарта;
-- закрытый production-доступ по allow-list, квоты и rate limiting;
-- systemd-установка с автозапуском, sandboxing, backup и rollback;
-- CI с unit-тестами, bounded soak и исследовательским smoke-тестом;
-- исторический анализ качества FVG без выдуманного P&L.
-
-### Эксплуатационные дополнения rc1
-
-- Linux-runner проверяет точные systemd units из установочного скрипта;
-- `pip-audit` проверяет закреплённые Python-зависимости;
-- админ-панель показывает состояние WebSocket, recovery, SQLite и outbox;
-- администраторы получают throttled-уведомления о сбоях и восстановлении;
-- Dependabot следит за Python и GitHub Actions зависимостями.
-
-### Перед production
-
-Release candidate должен пройти установку на Ubuntu/Debian VDS, reboot,
-backup/restore, имитацию сетевого сбоя и наблюдение 24–72 часа.
