@@ -81,6 +81,9 @@ class TBBotSniRouterTests(unittest.TestCase):
         self.assertIn('rm -f "${STREAM_CONFIG}"', self.script)
         self.assertNotIn("rm -rf /etc/nginx", self.script)
         self.assertIn("docker port", self.script)
+        rollback_body = self.script.split("rollback()", 1)[1].split("verify()", 1)[0]
+        self.assertLess(rollback_body.index("systemctl stop nginx"), rollback_body.index("recreate_container"))
+        self.assertLess(rollback_body.index("recreate_container"), rollback_body.index("systemctl start nginx"))
 
     def test_protected_production_surfaces_are_not_modified(self) -> None:
         lowered = self.script.lower()

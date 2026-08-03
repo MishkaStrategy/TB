@@ -263,11 +263,14 @@ PY
 rollback() {
   require_root; require_snapshot; verify_manifest "${SNAPSHOT}"
   set +e
+  # Removing a stream config does not release 443 from already loaded workers.
+  # Stop Nginx before restoring Xray's original public port binding.
+  systemctl stop nginx
   rm -f "${STREAM_CONFIG}" "${HTTPS_ENABLED}" "${HTTPS_CONFIG}" "${STREAM_INCLUDE}"
   cp -a "${SNAPSHOT}/payload/nginx/." /etc/nginx/
   recreate_container "${SNAPSHOT}" original
   nginx -t
-  if grep -Fxq active "${SNAPSHOT}/payload/nginx-was-active.txt"; then systemctl restart nginx; fi
+  if grep -Fxq active "${SNAPSHOT}/payload/nginx-was-active.txt"; then systemctl start nginx; fi
   docker port "${CONTAINER}" 443/tcp | grep -Eq '(^|:)443$'
   [[ "$(docker inspect -f '{{.State.Running}}' "${CONTAINER}")" == true ]]
   rc=$?
