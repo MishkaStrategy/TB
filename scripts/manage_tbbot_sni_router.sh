@@ -156,11 +156,12 @@ EOF
 recreate_container() {
   local snapshot="$1" mode="$2"
   python3 - "${snapshot}" "${mode}" <<'PY'
-import json, pathlib, subprocess, sys
+import json, pathlib, shutil, subprocess, sys, tempfile, uuid
 snap=pathlib.Path(sys.argv[1]); mode=sys.argv[2]
 d=json.loads((snap/'payload/container-inspect.json').read_text())[0]
 cfg=d['Config']; host=d['HostConfig']; name=d['Name'].lstrip('/')
-image=(snap/'payload/container-image-ref.txt').read_text().strip()
+payload_image=(snap/'payload/container-image-ref.txt').read_text().strip()
+image=d['Image']
 if host.get('NetworkMode') not in ('bridge','default'):
     raise SystemExit('unsupported NetworkMode: '+str(host.get('NetworkMode')))
 if d.get('Mounts'):
@@ -189,6 +190,16 @@ cmd += entrypoint[1:]
 cmd += cfg.get('Cmd') or []
 subprocess.run(['docker','rm','-f',name],check=False,stdout=subprocess.DEVNULL)
 subprocess.run(cmd,check=True)
+seed=f'tbbot-sni-seed-{uuid.uuid4().hex[:12]}'
+payload_dir=pathlib.Path(tempfile.mkdtemp(prefix='tbbot-sni-payload.',dir='/var/tmp'))
+payload_dir.chmod(0o700)
+try:
+    subprocess.run(['docker','create','--name',seed,payload_image],check=True,stdout=subprocess.DEVNULL)
+    subprocess.run(['docker','cp',f'{seed}:/opt/amnezia/.',str(payload_dir)],check=True)
+    subprocess.run(['docker','cp',str(payload_dir)+'/.',f'{name}:/opt/amnezia/'],check=True)
+finally:
+    subprocess.run(['docker','rm','-f',seed],check=False,stdout=subprocess.DEVNULL)
+    shutil.rmtree(payload_dir,ignore_errors=True)
 networks=d.get('NetworkSettings',{}).get('Networks',{})
 for network,meta in networks.items():
     if network == 'bridge': continue

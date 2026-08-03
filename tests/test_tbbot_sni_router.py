@@ -74,6 +74,9 @@ class TBBotSniRouterTests(unittest.TestCase):
     def test_recreation_changes_only_target_binding_and_rollback_restores_inspect(self) -> None:
         self.assertIn("container_port == '443/tcp' and mode == 'sni'", self.script)
         self.assertIn("hi,hp='127.0.0.1','2443'", self.script)
+        self.assertIn("image=d['Image']", self.script)
+        self.assertIn("payload_image", self.script)
+        self.assertIn("docker','cp", self.script)
         self.assertIn('recreate_container "${SNAPSHOT}" original', self.script)
         self.assertIn('rm -f "${STREAM_CONFIG}"', self.script)
         self.assertNotIn("rm -rf /etc/nginx", self.script)
