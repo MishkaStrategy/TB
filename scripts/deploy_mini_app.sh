@@ -5,9 +5,9 @@
 #   sudo MINI_APP_DOMAIN=example.duckdns.org bash scripts/deploy_mini_app.sh prepare
 #   sudo MINI_APP_DOMAIN=example.duckdns.org LETSENCRYPT_EMAIL=admin@example.com \
 #     bash scripts/deploy_mini_app.sh https
-#   sudo MINI_APP_DOMAIN=example.duckdns.org bash scripts/deploy_mini_app.sh verify
+#   MINI_APP_DOMAIN=example.duckdns.org bash scripts/deploy_mini_app.sh verify
 #
-# The script intentionally does not edit /etc/fvg-alert-bot.env, restart the bot,
+# This script deliberately does not edit /etc/fvg-alert-bot.env, restart the bot,
 # register a BotFather URL, or add a Mini App button to the production bot.
 
 set -euo pipefail
@@ -32,7 +32,7 @@ usage() {
 Usage:
   sudo MINI_APP_DOMAIN=<host> bash scripts/deploy_mini_app.sh prepare
   sudo MINI_APP_DOMAIN=<host> LETSENCRYPT_EMAIL=<email> bash scripts/deploy_mini_app.sh https
-  sudo MINI_APP_DOMAIN=<host> bash scripts/deploy_mini_app.sh verify
+  MINI_APP_DOMAIN=<host> bash scripts/deploy_mini_app.sh verify
 
 Commands:
   prepare  Build the frontend, install an atomic static release, and install the
@@ -103,51 +103,6 @@ build_frontend() {
   [[ -f "${BUILD_DIR}/dist/index.html" ]] || fail "frontend build не создал dist/index.html"
 }
 
-install_frontend_release() {
-  local release_id release_dir old_target
-  release_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  release_dir="${RELEASES_DIR}/${release_id}"
-  old_target="$(readlink -f "${CURRENT_LINK}" 2>/dev/null || true)"
-
-  install -d -o root -g root -m 0755 "${WEB_ROOT}" "${RELEASES_DIR}"
-  install -d -o root -g root -m 0755 "${release_dir}"
-  rsync -a --delete "${BUILD_DIR}/dist/" "${release_dir}/"
-  chown -R root:root "${release_dir}"
-  find "${release_dir}" -type d -exec chmod 0755 {} +
-  find "${release_dir}" -type f -exec chmod 0644 {} +
-
-  ln -sfn "${release_dir}" "${CURRENT_LINK}.new"
-  mv -Tf "${CURRENT_LINK}.new" "${CURRENT_LINK}"
-
-  if ! nginx -t; then
-    if [[ -n "${old_target}" && -d "${old_target}" ]]; then
-      ln -sfn "${old_target}" "${CURRENT_LINK}.rollback"
-      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
-    else
-      rm -f "${CURRENT_LINK}"
-    fi
-    fail "nginx -t завершился ошибкой; frontend symlink возвращён назад"
-  fi
-
-  if ! systemctl reload nginx; then
-    if [[ -n "${old_target}" && -d "${old_target}" ]]; then
-      ln -sfn "${old_target}" "${CURRENT_LINK}.rollback"
-      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
-      systemctl reload nginx || true
-    fi
-    fail "Nginx не перезагрузился; frontend symlink возвращён назад"
-  fi
-
-  find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
-    | sort -nr \
-    | awk -v keep="${KEEP_RELEASES}" 'NR > keep {sub(/^[^ ]+ /, ""); print}' \
-    | while IFS= read -r obsolete; do
-        [[ -n "${obsolete}" && "${obsolete}" != "$(readlink -f "${CURRENT_LINK}")" ]] && rm -rf "${obsolete}"
-      done
-
-  echo "Frontend release: ${release_dir}"
-}
-
 install_nginx_site_if_missing() {
   local rendered created=false
   require_command nginx
@@ -178,6 +133,54 @@ install_nginx_site_if_missing() {
   fi
 }
 
+install_frontend_release() {
+  local release_id release_dir old_target current_target
+  release_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  release_dir="${RELEASES_DIR}/${release_id}"
+  old_target="$(readlink -f "${CURRENT_LINK}" 2>/dev/null || true)"
+
+  install -d -o root -g root -m 0755 "${WEB_ROOT}" "${RELEASES_DIR}"
+  install -d -o root -g root -m 0755 "${release_dir}"
+  rsync -a --delete "${BUILD_DIR}/dist/" "${release_dir}/"
+  chown -R root:root "${release_dir}"
+  find "${release_dir}" -type d -exec chmod 0755 {} +
+  find "${release_dir}" -type f -exec chmod 0644 {} +
+
+  ln -sfn "${release_dir}" "${CURRENT_LINK}.new"
+  mv -Tf "${CURRENT_LINK}.new" "${CURRENT_LINK}"
+
+  if ! nginx -t; then
+    if [[ -n "${old_target}" && -d "${old_target}" ]]; then
+      ln -sfn "${old_target}" "${CURRENT_LINK}.rollback"
+      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
+    else
+      rm -f "${CURRENT_LINK}"
+    fi
+    fail "nginx -t завершился ошибкой; frontend symlink возвращён назад"
+  fi
+
+  if ! systemctl reload nginx; then
+    if [[ -n "${old_target}" && -d "${old_target}" ]]; then
+      ln -sfn "${old_target}" "${CURRENT_LINK}.rollback"
+      mv -Tf "${CURRENT_LINK}.rollback" "${CURRENT_LINK}"
+      systemctl reload nginx || true
+    else
+      rm -f "${CURRENT_LINK}"
+    fi
+    fail "Nginx не перезагрузился; frontend symlink возвращён назад"
+  fi
+
+  current_target="$(readlink -f "${CURRENT_LINK}")"
+  find "${RELEASES_DIR}" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+    | sort -nr \
+    | awk -v keep="${KEEP_RELEASES}" 'NR > keep {sub(/^[^ ]+ /, ""); print}' \
+    | while IFS= read -r obsolete; do
+        [[ -n "${obsolete}" && "${obsolete}" != "${current_target}" ]] && rm -rf "${obsolete}"
+      done
+
+  echo "Frontend release: ${release_dir}"
+}
+
 print_backend_environment() {
   cat <<EOF
 
@@ -196,8 +199,8 @@ prepare() {
   require_root
   validate_configuration
   require_command systemctl
-  install_nginx_site_if_missing
   build_frontend
+  install_nginx_site_if_missing
   install_frontend_release
   print_backend_environment
   echo
