@@ -58,9 +58,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: telegram-mini-app/package-lock.json
 
       - name: Install frontend dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Typecheck frontend
         run: npm run typecheck
@@ -70,9 +72,7 @@ jobs:
 
   tests:
     name: Python tests
-    runs-on:
-      - self-hosted
-      - fast
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
       # Existing handler tests exercise the explicitly public test fixture.
@@ -87,8 +87,11 @@ jobs:
         run: >-
           bash -n
           scripts/install_vds.sh
+          scripts/run_candidate_tests.sh
           scripts/backup_data.sh
           scripts/update_vds.sh
+          scripts/update_vds_bot_api_only.sh
+          scripts/deploy_mini_app.sh
 
       - name: Create isolated Python environment
         run: |
@@ -102,9 +105,24 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Audit Python dependencies
+        shell: bash
         run: |
+          set -euo pipefail
           python -m pip install pip-audit
-          pip-audit -r requirements.txt --progress-spinner off
+          audit_status=1
+          for attempt in 1 2 3; do
+            if pip-audit -r requirements.txt --progress-spinner off; then
+              audit_status=0
+              break
+            else
+              audit_status=$?
+            fi
+            if (( attempt < 3 )); then
+              echo "pip-audit failed on attempt ${attempt}; retrying after transient-network backoff" >&2
+              sleep $((attempt * 5))
+            fi
+          done
+          exit "${audit_status}"
 
       - name: Compile Python sources
         run: >-
@@ -121,14 +139,15 @@ jobs:
           set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
 
-      - name: Run bounded pipeline soak
+      # The full 500 x 10 release soak runs independently in release-audit.
+      - name: Run bounded pipeline smoke
         run: |
           python run_fvg_soak.py \
             --database "${RUNNER_TEMP}/fvg-soak.sqlite3" \
-            --events 500 \
-            --recipients 10 \
-            --batch-size 50 \
-            --max-seconds 180 \
+            --events 100 \
+            --recipients 5 \
+            --batch-size 25 \
+            --max-seconds 120 \
             --max-peak-memory-mb 256 \
             --reset \
             --output soak-report.json
@@ -165,10 +184,7 @@ jobs:
 
   vds-linux-verification:
     name: Linux VDS systemd verification
-    runs-on:
-      - self-hosted
-      - linux
-      - fast
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
