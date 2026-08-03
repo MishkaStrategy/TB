@@ -38,6 +38,7 @@ from handlers.settings import build_settings_handlers
 from handlers.start import start
 from localization import set_current_chat_id
 from localized_bot import LocalizedExtBot
+from mini_app_backend.lifecycle import start_mini_app_backend, stop_mini_app_backend
 from operations.fvg_history_retention import configure_fvg_history_retention
 from operations.process_restart import graceful_restart_requested
 from operations.runtime_lifecycle import RuntimeLifecycleCoordinator
@@ -125,6 +126,7 @@ async def post_init(application):
         schedule_fvg_alerts(application)
         await start_fvg_stream(application)
         await start_process_watchdog(application)
+        await start_mini_app_backend(application)
     except Exception as error:
         if coordinator is not None:
             coordinator.mark_startup_failed(error)
@@ -146,6 +148,7 @@ async def post_stop(application):
 
 
 async def post_shutdown(application):
+    await stop_mini_app_backend(application)
     coordinator = get_runtime_coordinator()
     if coordinator is not None:
         coordinator.mark_shutdown_complete()

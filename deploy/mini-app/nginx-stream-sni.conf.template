@@ -1,0 +1,21 @@
+map $ssl_preread_server_name $tbbot_upstream {
+    tbbot.duckdns.org mini_app_https;
+    default             amnezia_xray;
+}
+
+upstream mini_app_https {
+    server 127.0.0.1:8443;
+}
+
+upstream amnezia_xray {
+    server 127.0.0.1:2443;
+}
+
+server {
+    listen 0.0.0.0:443;
+    listen [::]:443;
+    proxy_pass $tbbot_upstream;
+    ssl_preread on;
+    proxy_connect_timeout 5s;
+    proxy_timeout 1h;
+}
