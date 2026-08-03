@@ -176,9 +176,16 @@ if d.get('Mounts'):
 cmd=['docker','create','--name',name]
 rp=(host.get('RestartPolicy') or {}).get('Name')
 if rp: cmd += ['--restart',rp]
+if host.get('Privileged'): cmd += ['--privileged']
+if host.get('ReadonlyRootfs'): cmd += ['--read-only']
 for cap in host.get('CapAdd') or []: cmd += ['--cap-add',cap]
 for cap in host.get('CapDrop') or []: cmd += ['--cap-drop',cap]
 for key,val in (host.get('Sysctls') or {}).items(): cmd += ['--sysctl',f'{key}={val}']
+for item in host.get('SecurityOpt') or []: cmd += ['--security-opt',item]
+for item in host.get('Dns') or []: cmd += ['--dns',item]
+log_config=host.get('LogConfig') or {}
+if log_config.get('Type'): cmd += ['--log-driver',log_config['Type']]
+for key,val in (log_config.get('Config') or {}).items(): cmd += ['--log-opt',f'{key}={val}']
 for item in cfg.get('Env') or []: cmd += ['--env',item]
 if cfg.get('User'): cmd += ['--user',cfg['User']]
 if cfg.get('WorkingDir'): cmd += ['--workdir',cfg['WorkingDir']]
@@ -314,6 +321,11 @@ checks={
     'networks': sorted(old.get('NetworkSettings',{}).get('Networks',{})) == sorted(new.get('NetworkSettings',{}).get('Networks',{})),
     'network_mode': old['HostConfig'].get('NetworkMode') == new['HostConfig'].get('NetworkMode'),
     'capabilities': old['HostConfig'].get('CapAdd') == new['HostConfig'].get('CapAdd'),
+    'privileged': old['HostConfig'].get('Privileged') == new['HostConfig'].get('Privileged'),
+    'security_options': old['HostConfig'].get('SecurityOpt') == new['HostConfig'].get('SecurityOpt'),
+    'log_config': old['HostConfig'].get('LogConfig') == new['HostConfig'].get('LogConfig'),
+    'dns': (old['HostConfig'].get('Dns') or []) == (new['HostConfig'].get('Dns') or []),
+    'read_only_rootfs': old['HostConfig'].get('ReadonlyRootfs') == new['HostConfig'].get('ReadonlyRootfs'),
     'devices': old['HostConfig'].get('Devices') == new['HostConfig'].get('Devices'),
     'sysctls': old['HostConfig'].get('Sysctls') == new['HostConfig'].get('Sysctls'),
 }
