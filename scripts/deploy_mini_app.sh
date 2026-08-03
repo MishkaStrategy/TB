@@ -138,15 +138,24 @@ prepare_artifact() {
 enable_https() {
   require_root
   validate_configuration
-  require_command certbot; require_command nginx; require_command getent; require_command curl
+  require_command certbot; require_command nginx; require_command getent; require_command openssl
   [[ -f "${NGINX_SITE}" ]] || fail "сначала выполните prepare-artifact"
   [[ -n "${LETSENCRYPT_EMAIL}" && "${LETSENCRYPT_EMAIL}" == *@*.* ]] || fail "задайте корректный LETSENCRYPT_EMAIL"
   getent ahostsv4 "${DOMAIN}" >/dev/null 2>&1 || fail "DNS ${DOMAIN} не разрешается"
-  certbot --nginx --non-interactive --agree-tos --redirect --email "${LETSENCRYPT_EMAIL}" -d "${DOMAIN}"
+  install -d -o root -g root -m 0755 /var/www/letsencrypt
   nginx -t
   systemctl reload nginx
-  curl --fail --silent --show-error --location --max-time 15 "https://${DOMAIN}/" >/dev/null
-  echo "HTTPS включён: https://${DOMAIN}"
+  certbot certonly \
+    --webroot \
+    --webroot-path /var/www/letsencrypt \
+    --domain "${DOMAIN}" \
+    --email "${LETSENCRYPT_EMAIL}" \
+    --agree-tos \
+    --non-interactive
+  openssl x509 \
+    -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" \
+    -noout -subject -issuer -dates
+  echo "Сертификат выпущен; HTTPS listener включается отдельным SNI-router этапом"
 }
 
 verify() {

@@ -47,6 +47,9 @@ class MiniAppDeploymentAssetsTests(unittest.TestCase):
         self.assertNotIn("/etc/fvg-alert-bot.env", script)
         self.assertNotIn("ufw", script.lower())
         self.assertNotIn("setmenubutton", script.lower())
+        self.assertIn("certbot certonly", script)
+        self.assertIn("--webroot-path /var/www/letsencrypt", script)
+        self.assertNotIn("certbot --nginx", script)
 
     def test_tbbot_profile_is_locked_to_approved_public_target(self) -> None:
         profile = TBBOT_PROFILE.read_text(encoding="utf-8")
