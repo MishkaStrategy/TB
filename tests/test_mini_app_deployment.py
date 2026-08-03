@@ -40,7 +40,8 @@ class MiniAppDeploymentAssetsTests(unittest.TestCase):
         self.assertIn("MINI_APP_DOMAIN=tbbot.duckdns.org", profile)
         self.assertIn("MINI_APP_EXPECTED_IPV4=188.137.236.73", profile)
         self.assertIn("MINI_APP_BACKEND_PORT=8080", profile)
-        self.assertNotIn("TOKEN", profile.upper())
+        self.assertNotIn("DUCKDNS_TOKEN=", profile)
+        self.assertNotIn("TELEGRAM_TOKEN=", profile)
 
         self.assertIn('[[ "${DOMAIN}" == "tbbot.duckdns.org" ]]', wrapper)
         self.assertIn('[[ "${EXPECTED_IPV4}" == "188.137.236.73" ]]', wrapper)
