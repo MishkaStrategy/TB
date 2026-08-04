@@ -16,7 +16,7 @@ concurrency:
 jobs:
   publish-release:
     name: Publish VERSION tag and release
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 10
 
     steps:
