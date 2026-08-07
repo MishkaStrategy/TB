@@ -1,4 +1,4 @@
-"""Pure FVG detection, aggregation and price-filter rules."""
+"""Pure confirmed 15-minute FVG detection and filter rules."""
 
 from __future__ import annotations
 
@@ -7,18 +7,10 @@ from decimal import Decimal, InvalidOperation
 from typing import Iterable
 
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType, event_id
-from exchanges.fvg_candles import is_bitcoin_symbol
 
 
 UTC = timezone.utc
 FIFTEEN_MINUTES = timedelta(minutes=15)
-ONE_MINUTE = timedelta(minutes=1)
-TIMEFRAME_STEPS = {
-    "15m": FIFTEEN_MINUTES,
-    "1h": timedelta(hours=1),
-    "4h": timedelta(hours=4),
-    "1d": timedelta(days=1),
-}
 
 
 def are_consecutive(candles: Iterable[Candle], step: timedelta) -> bool:
@@ -29,100 +21,29 @@ def are_consecutive(candles: Iterable[Candle], step: timedelta) -> bool:
     )
 
 
-def aggregate_current_15m(
-    symbol: str,
-    minute_candles: Iterable[Candle],
-    interval_open: datetime,
-    now: datetime,
-) -> Candle | None:
-    """Build a forming BTC 15m candle from consecutive, closed 1m candles."""
-    if not is_bitcoin_symbol(symbol):
-        return None
-    expected_count = int((now - interval_open).total_seconds() // 60)
-    minutes = sorted(
-        (
-            candle
-            for candle in minute_candles
-            if candle.symbol == symbol
-            and candle.timeframe == "1m"
-            and interval_open <= candle.open_time < interval_open + FIFTEEN_MINUTES
-            and candle.is_closed
-            and candle.is_complete
-        ),
-        key=lambda candle: candle.open_time,
-    )
-    if expected_count <= 0 or len(minutes) != expected_count:
-        return None
-    if minutes[0].open_time != interval_open or not are_consecutive(minutes, ONE_MINUTE):
-        return None
-    return Candle(
-        symbol=symbol,
-        timeframe="15m",
-        open_time=interval_open,
-        close_time=interval_open + FIFTEEN_MINUTES,
-        open=minutes[0].open,
-        high=max(candle.high for candle in minutes),
-        low=min(candle.low for candle in minutes),
-        close=minutes[-1].close,
-        is_closed=False,
-        is_complete=True,
-    )
-
-
 class FvgDetector:
     def detect_confirmed(
         self, candles: Iterable[Candle], detected_at: datetime | None = None
     ) -> FvgEvent | None:
+        """Return a confirmed FVG only for three closed consecutive 15m candles."""
         items = sorted(candles, key=lambda candle: candle.open_time)
         if len(items) != 3:
             return None
-        timeframes = {c.timeframe for c in items}
-        if len(timeframes) != 1:
-            return None
-        timeframe = next(iter(timeframes))
-        step = TIMEFRAME_STEPS.get(timeframe)
-        if step is None:
+        if not all(c.timeframe == "15m" for c in items):
             return None
         if not all(c.is_closed and c.is_complete for c in items):
             return None
-        if len({c.symbol for c in items}) != 1 or not are_consecutive(items, step):
+        if len({c.symbol for c in items}) != 1:
             return None
-        return self._event(
-            items[0], items[1], items[2], FvgEventType.CONFIRMED_FVG, detected_at
-        )
-
-    def detect_pre(
-        self,
-        candle_a: Candle,
-        candle_b: Candle,
-        current_c: Candle,
-        now: datetime,
-    ) -> FvgEvent | None:
-        if not is_bitcoin_symbol(current_c.symbol):
+        if not are_consecutive(items, FIFTEEN_MINUTES):
             return None
-        control_start = current_c.open_time + timedelta(minutes=12)
-        if not (control_start <= now < control_start + ONE_MINUTE):
-            return None
-        if not candle_a.is_closed or not candle_b.is_closed:
-            return None
-        if current_c.is_closed:
-            return None
-        if not all(c.is_complete for c in (candle_a, candle_b, current_c)):
-            return None
-        if not all(c.timeframe == "15m" for c in (candle_a, candle_b, current_c)):
-            return None
-        if len({c.symbol for c in (candle_a, candle_b, current_c)}) != 1:
-            return None
-        if not are_consecutive((candle_a, candle_b, current_c), FIFTEEN_MINUTES):
-            return None
-        return self._event(candle_a, candle_b, current_c, FvgEventType.PRE_FVG, now)
+        return self._event(items[0], items[1], items[2], detected_at)
 
     @staticmethod
     def _event(
         candle_a: Candle,
         candle_b: Candle,
         candle_c: Candle,
-        event_type: FvgEventType,
         detected_at: datetime | None,
     ) -> FvgEvent | None:
         if candle_c.low > candle_a.high:
@@ -137,14 +58,14 @@ class FvgDetector:
         return FvgEvent(
             event_id=event_id(
                 candle_c.symbol,
-                candle_c.timeframe,
+                "15m",
                 direction,
                 candle_c.open_time,
-                event_type,
+                FvgEventType.CONFIRMED_FVG,
             ),
-            event_type=event_type,
+            event_type=FvgEventType.CONFIRMED_FVG,
             symbol=candle_c.symbol,
-            timeframe=candle_c.timeframe,
+            timeframe="15m",
             direction=direction,
             candle_a_open_time=candle_a.open_time,
             candle_b_open_time=candle_b.open_time,
@@ -155,7 +76,7 @@ class FvgDetector:
             zone_size=zone_high - zone_low,
             signal_price=candle_c.close,
             detected_at=detected_at,
-            is_confirmed=event_type is FvgEventType.CONFIRMED_FVG,
+            is_confirmed=True,
             data_complete=True,
         )
 
