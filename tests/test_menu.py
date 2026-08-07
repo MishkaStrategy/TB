@@ -16,9 +16,6 @@ class EnabledSettings:
     def is_enabled(self, chat_id):
         return chat_id == 42
 
-    def is_pre_enabled(self, chat_id):
-        return False
-
 
 class MenuTests(unittest.TestCase):
     def test_main_menu_contains_supported_actions(self):
@@ -75,7 +72,6 @@ class MenuTests(unittest.TestCase):
                 return {
                     "enabled": True,
                     "notify_confirmed_fvg": True,
-                    "notify_pre_fvg": True,
                     "bullish_enabled": True,
                     "bearish_enabled": True,
                     "symbols": {
@@ -93,8 +89,10 @@ class MenuTests(unittest.TestCase):
         self.assertIn("⏸️ 📏 Размер FVG", labels)
         self.assertIn("📌 Инструменты", labels)
         self.assertIn("❓ FAQ по FVG", labels)
-        self.assertIn("fvg-inst:open", callbacks)
-        self.assertIn("fvg-inst:faq:main", callbacks)
+        self.assertIn("✅ Подтверждённые 15м", labels)
+        self.assertNotIn("Пред-FVG BTC", labels)
+        self.assertIn("fvg15:open", callbacks)
+        self.assertIn("fvg15:faq:main", callbacks)
 
     def test_real_price_and_size_changes_refresh_settings_menu_status(self):
         with TemporaryDirectory() as directory:
@@ -143,6 +141,7 @@ class TelegramMenuButtonTests(unittest.IsolatedAsyncioTestCase):
         commands = [command.command for command in BOT_COMMANDS]
         self.assertIn("funding", commands)
         self.assertIn("donate", commands)
+        self.assertNotIn("fvg_pre_alert", commands)
 
 
 class PublicAccessTests(unittest.IsolatedAsyncioTestCase):
