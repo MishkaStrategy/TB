@@ -15,11 +15,22 @@ UTC = timezone.utc
 class FvgAlertService(BaseFvgAlertService):
     """Disable pre-FVG and keep every active FVG data path on closed 15m candles."""
 
-    def __init__(self, *args, settings=None, **kwargs):
+    def __init__(
+        self,
+        client=None,
+        detector=None,
+        settings=None,
+        event_store=None,
+        delivery_registry=None,
+        suppress_unavailable_users=None,
+    ):
         super().__init__(
-            *args,
+            client=client,
+            detector=detector,
             settings=settings or FvgAlertSettings(),
-            **kwargs,
+            event_store=event_store,
+            delivery_registry=delivery_registry,
+            suppress_unavailable_users=suppress_unavailable_users,
         )
 
     def recover(self, symbol: str, now: datetime | None = None):
