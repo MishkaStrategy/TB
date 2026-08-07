@@ -392,14 +392,12 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             service = FvgAlertService(
                 settings=settings,
                 event_store=FvgEventStore(events_path),
-                delivery_registry=object(),
                 suppress_unavailable_users=False,
             )
             await service.deliver(bot, [event, event])
             restarted = FvgAlertService(
                 settings=FvgAlertSettings(settings_path),
                 event_store=FvgEventStore(events_path),
-                delivery_registry=object(),
                 suppress_unavailable_users=False,
             )
             await restarted.deliver(bot, [event])
