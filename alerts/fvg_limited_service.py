@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from alerts.fvg_service import FvgAlertService as BaseFvgAlertService
 from alerts.fvg_service import parse_rest_candle
+from alerts.fvg_settings_15m import FvgAlertSettings
 
 
 UTC = timezone.utc
@@ -13,6 +14,13 @@ UTC = timezone.utc
 
 class FvgAlertService(BaseFvgAlertService):
     """Disable pre-FVG and keep every active FVG data path on closed 15m candles."""
+
+    def __init__(self, *args, settings=None, **kwargs):
+        super().__init__(
+            *args,
+            settings=settings or FvgAlertSettings(),
+            **kwargs,
+        )
 
     def recover(self, symbol: str, now: datetime | None = None):
         now = (now or datetime.now(UTC)).astimezone(UTC)
