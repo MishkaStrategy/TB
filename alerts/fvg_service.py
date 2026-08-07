@@ -1,4 +1,4 @@
-"""Application service for FVG detection, filtering and Telegram delivery."""
+"""Application service for confirmed 15-minute FVG detection and delivery."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
-from alerts.fvg_detector import FvgDetector, aggregate_current_15m
+from alerts.fvg_detector import FvgDetector
 from alerts.fvg_models import Candle, FvgDirection, FvgEvent, FvgEventType
 from alerts.fvg_store import FvgAlertSettings, FvgEventStore
 from alerts.telegram_errors import TelegramErrorKind, classify_telegram_error
@@ -25,7 +25,7 @@ from exchanges.funding import exchange_label
 
 logger = logging.getLogger(__name__)
 UTC = timezone.utc
-INTERVALS = {"1m": timedelta(minutes=1), "15m": timedelta(minutes=15)}
+FIFTEEN_MINUTES = timedelta(minutes=15)
 OUTBOX_BATCH_SIZE = 200
 OUTBOX_MAX_BATCHES_PER_PASS = 50
 
@@ -40,8 +40,9 @@ def floor_time(value: datetime, minutes: int) -> datetime:
 
 
 def parse_rest_candle(raw: dict, symbol: str, timeframe: str, now: datetime) -> Candle:
+    if timeframe != "15m":
+        raise ValueError("Only 15m FVG candles are supported")
     try:
-        step = INTERVALS[timeframe]
         open_time = datetime.fromtimestamp(int(raw["time"]) / 1000, UTC)
         prices = {
             key: Decimal(str(raw[key]))
@@ -53,12 +54,12 @@ def parse_rest_candle(raw: dict, symbol: str, timeframe: str, now: datetime) -> 
     if not all(value.is_finite() and value > 0 for value in prices.values()):
         raise ValueError("Bitunix candle contains non-finite or non-positive prices")
 
-    close_time = open_time + step
+    close_time = open_time + FIFTEEN_MINUTES
     prices["high"] = max(prices["high"], prices["open"], prices["close"])
     prices["low"] = min(prices["low"], prices["open"], prices["close"])
     return Candle(
         symbol=symbol,
-        timeframe=timeframe,
+        timeframe="15m",
         open_time=open_time,
         close_time=close_time,
         is_closed=close_time <= now,
@@ -68,19 +69,12 @@ def parse_rest_candle(raw: dict, symbol: str, timeframe: str, now: datetime) -> 
 
 
 def parse_ws_candle(payload: dict, now: datetime) -> Candle:
-    channel = payload["ch"]
-    if channel.endswith("_1min"):
-        timeframe = "1m"
-        step_minutes = 1
-    elif channel.endswith("_15min"):
-        timeframe = "15m"
-        step_minutes = 15
-    else:
-        raise ValueError(f"Unsupported Bitunix kline channel: {channel}")
-
+    channel = str(payload["ch"])
+    if not channel.endswith("_15min"):
+        raise ValueError(f"Unsupported Bitunix FVG kline channel: {channel}")
     open_time = floor_time(
         datetime.fromtimestamp(int(payload["ts"]) / 1000, UTC),
-        step_minutes,
+        15,
     )
     data = payload["data"]
     raw = {
@@ -90,7 +84,7 @@ def parse_ws_candle(payload: dict, now: datetime) -> Candle:
         "low": data["l"],
         "close": data["c"],
     }
-    return parse_rest_candle(raw, payload["symbol"], timeframe, now)
+    return parse_rest_candle(raw, payload["symbol"], "15m", now)
 
 
 class CandleCache:
@@ -173,17 +167,16 @@ class FvgAlertService:
             self.delivery_registry.record_success(chat_id)
 
     def recover(self, symbol: str, now: datetime | None = None) -> list[FvgEvent]:
-        """Restore recent data and return only timely pre/current confirmed events."""
+        """Restore recent closed 15m data and return only a timely confirmed event."""
         now = (now or datetime.now(UTC)).astimezone(UTC)
-        for timeframe, limit in (("15m", 20), ("1m", 25)):
-            response = self.client.get_candles(symbol, timeframe, limit)
-            for raw in response.get("data", []):
-                try:
-                    candle = parse_rest_candle(raw, symbol, timeframe, now)
-                except (ValueError, KeyError, TypeError):
-                    self.event_store.increment_health("invalid_candles")
-                    continue
-                self.cache.put(candle)
+        response = self.client.get_candles(symbol, "15m", 20)
+        for raw in response.get("data", []):
+            try:
+                candle = parse_rest_candle(raw, symbol, "15m", now)
+            except (ValueError, KeyError, TypeError):
+                self.event_store.increment_health("invalid_candles")
+                continue
+            self.cache.put(candle)
         self.event_store.update_health(
             last_rest_recovery=now.isoformat(),
             last_error=None,
@@ -209,39 +202,19 @@ class FvgAlertService:
         now: datetime,
         recovery: bool = False,
     ) -> list[FvgEvent]:
-        events = []
         closed = [
             candle
             for candle in self.cache.series(symbol, "15m", now)
             if candle.is_closed and candle.is_complete
         ]
-        if len(closed) >= 3:
-            event = self.detector.detect_confirmed(closed[-3:], now)
-            if event and (
-                not recovery
-                or now - event.candle_c_close_time <= timedelta(minutes=15)
-            ):
-                events.append(event)
-
-        interval_open = floor_time(now, 15)
-        if interval_open + timedelta(minutes=12) <= now < interval_open + timedelta(minutes=13):
-            current = aggregate_current_15m(
-                symbol,
-                self.cache.series(symbol, "1m", now),
-                interval_open,
-                now,
-            )
-            previous = [candle for candle in closed if candle.open_time < interval_open]
-            if current is not None and len(previous) >= 2:
-                event = self.detector.detect_pre(
-                    previous[-2],
-                    previous[-1],
-                    current,
-                    now,
-                )
-                if event:
-                    events.append(event)
-        return events
+        if len(closed) < 3:
+            return []
+        event = self.detector.detect_confirmed(closed[-3:], now)
+        if event is None:
+            return []
+        if recovery and now - event.candle_c_close_time > FIFTEEN_MINUTES:
+            return []
+        return [event]
 
     async def deliver(self, bot, events: list[FvgEvent]) -> None:
         """Persist recipients first, then drain due outbox pages."""
@@ -318,11 +291,11 @@ class FvgAlertService:
         completed = 0
         for item in items:
             chat_id = item["chat_id"]
-            event_id = item["event_id"]
+            current_event_id = item["event_id"]
             attempts = int(item.get("attempts", 0))
 
             if not self._delivery_allowed(chat_id):
-                self.event_store.abandon_delivery(chat_id, event_id)
+                self.event_store.abandon_delivery(chat_id, current_event_id)
                 self.event_store.increment_health(
                     "delivery_suppressed_inactive_users"
                 )
@@ -339,7 +312,7 @@ class FvgAlertService:
                 log(
                     "Telegram delivery failed chat=%s event=%s code=%s attempt=%s: %s",
                     chat_id,
-                    event_id,
+                    current_event_id,
                     decision.code,
                     attempts + 1,
                     error,
@@ -347,7 +320,7 @@ class FvgAlertService:
 
                 if decision.kind is TelegramErrorKind.IGNORABLE:
                     self._record_delivery_success(chat_id)
-                    self.event_store.mark_delivered(chat_id, event_id)
+                    self.event_store.mark_delivered(chat_id, current_event_id)
                     self.event_store.increment_health("delivery_ignored")
                     completed += 1
                     continue
@@ -356,7 +329,7 @@ class FvgAlertService:
                 self.event_store.update_health(last_error=str(error))
 
                 if not decision.retryable:
-                    self.event_store.abandon_delivery(chat_id, event_id)
+                    self.event_store.abandon_delivery(chat_id, current_event_id)
                     self.event_store.increment_health(
                         "delivery_permanent_failures"
                     )
@@ -367,7 +340,7 @@ class FvgAlertService:
                     delay = min(300, 5 * (2 ** min(attempts, 6)))
                 self.event_store.mark_delivery_failed(
                     chat_id,
-                    event_id,
+                    current_event_id,
                     str(error),
                     retry_after_seconds=max(1, delay),
                 )
@@ -378,7 +351,7 @@ class FvgAlertService:
                 self.event_store.increment_health("delivery_retries")
             else:
                 self._record_delivery_success(chat_id)
-                self.event_store.mark_delivered(chat_id, event_id)
+                self.event_store.mark_delivered(chat_id, current_event_id)
                 self.event_store.increment_health("notifications_sent")
                 completed += 1
         return completed
@@ -446,12 +419,17 @@ def format_fvg_message(event: FvgEvent) -> str:
     bullish = event.direction is FvgDirection.BULLISH
     icon = "🟢🐮" if bullish else "🔴🐻"
     direction = "Бычий" if bullish else "Медвежий"
-    if event.event_type is FvgEventType.PRE_FVG:
-        title = f"{icon} Возможный {direction.lower()} FVG"
-        status = "Предварительный сигнал: свеча C ещё не закрыта"
-    else:
-        title = f"{icon} Подтверждённый {direction.lower()} FVG"
-        status = "Подтверждён закрытием свечи C"
+    historical_pre = event.event_type is FvgEventType.PRE_FVG
+    title = (
+        f"{icon} Архивный предварительный {direction.lower()} FVG"
+        if historical_pre
+        else f"{icon} Подтверждённый {direction.lower()} FVG"
+    )
+    status = (
+        "Историческое событие пред-FVG; новые такие сигналы отключены"
+        if historical_pre
+        else "Подтверждён закрытием свечи C"
+    )
     time_text = event.candle_c_close_time.astimezone(UTC).strftime(
         "%Y-%m-%d %H:%M UTC"
     )

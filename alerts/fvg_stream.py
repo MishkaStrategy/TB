@@ -1,4 +1,4 @@
-"""One shared reconnecting Bitunix public WebSocket for all active symbols."""
+"""One shared reconnecting Bitunix public WebSocket for 15-minute FVG candles."""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import aiohttp
 import certifi
 
 from config import FVG_DELIVERY_QUEUE_SIZE, MAX_ACTIVE_SYMBOLS
-from exchanges.fvg_candles import is_bitcoin_symbol
 
 
 logger = logging.getLogger(__name__)
@@ -53,8 +52,7 @@ class BitunixFvgStream:
 
     @staticmethod
     def _channels_for(symbol: str) -> tuple[str, ...]:
-        if is_bitcoin_symbol(symbol):
-            return ("market_kline_1min", "market_kline_15min")
+        del symbol
         return ("market_kline_15min",)
 
     def _raise_if_kline_stale(
@@ -206,9 +204,6 @@ class BitunixFvgStream:
                             )
                         try:
                             while not self._stopping:
-                                # Check before every receive, not only after a timeout.
-                                # Frequent pong/ack/control messages must not conceal a
-                                # market stream that has stopped producing candles.
                                 self._check_kline_watchdog(last_kline_at)
 
                                 current = set(self._active_symbols())
