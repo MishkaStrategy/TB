@@ -83,6 +83,11 @@ def _register_background_tasks() -> list:
             DATABASE_OBSERVABILITY_INTERVAL_SECONDS
         )
     registry = scheduler_multi.get_background_task_registry()
+    registry.register(
+        "fvg-pre-control-t-minus-3",
+        task_kind="retired",
+        expected_interval_seconds=None,
+    )
     return [
         registry.register(
             task_name,
