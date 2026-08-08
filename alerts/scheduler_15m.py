@@ -1,24 +1,27 @@
-"""Production FVG scheduling with one confirmed 15-minute data path."""
+"""Production FVG scheduling with 15m-only exchange data and local aggregation."""
 
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from alerts import scheduler as scheduler_base
 from alerts import scheduler_multi as scheduler_multi
 from alerts.funding_quarter_hour import next_quarter_hour
+from alerts.fvg_stream_15m import FifteenMinuteBitunixFvgStream
 from config import (
     DATABASE_OBSERVABILITY_ENABLED,
     DATABASE_OBSERVABILITY_INTERVAL_SECONDS,
     GRACEFUL_SHUTDOWN_ENABLED,
     HEALTH_ALERT_INTERVAL_SECONDS,
 )
-from alerts.fvg_stream_15m import FifteenMinuteBitunixFvgStream
+from exchanges.fvg_candles import timeframe_due
 from operations.graceful_fvg_stream_15m import FifteenMinuteGracefulBitunixFvgStream
 
 
 async def _run_confirmed_15m(context):
+    """Run due confirmed FVG timeframes using one shared 15m download per market."""
     service = context.job.data["fvg_service"]
     poller = context.job.data.get("fvg_poller") or scheduler_base.get_fvg_poller()
     clock = context.job.data.get("clock")
@@ -27,27 +30,34 @@ async def _run_confirmed_15m(context):
     if now.minute % 15 != 0:
         return None
 
-    markets = {
-        (exchange, symbol)
-        for exchange, symbol, _timeframe in service.settings.active_markets()
-    }
+    due_by_market: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for exchange, symbol, timeframe in service.settings.active_markets():
+        if timeframe_due(timeframe, now):
+            due_by_market[(exchange, symbol)].add(timeframe)
+
     all_events = []
-    for exchange, symbol in sorted(markets):
+    for (exchange, symbol), timeframes in sorted(due_by_market.items()):
+        ordered = tuple(
+            timeframe
+            for timeframe in ("15m", "1h", "4h", "1d")
+            if timeframe in timeframes
+        )
         try:
             events = await asyncio.to_thread(
-                poller.confirmed,
+                poller.confirmed_many,
                 exchange,
                 symbol,
-                "15m",
+                ordered,
                 now,
             )
         except asyncio.CancelledError:
             raise
         except Exception as error:
             scheduler_base.logger.warning(
-                "Confirmed 15m FVG control point failed for %s %s: %s",
+                "Confirmed FVG control point failed for %s %s %s: %s",
                 exchange,
                 symbol,
+                ",".join(ordered),
                 error,
             )
             service.event_store.update_health(last_error=str(error))
@@ -99,7 +109,7 @@ def _register_background_tasks() -> list:
 
 
 def schedule_fvg_alerts(application):
-    """Register confirmed FVG, delivery, health and funding jobs without pre-FVG."""
+    """Register confirmed multi-timeframe FVG jobs without pre-FVG."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
 

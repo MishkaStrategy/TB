@@ -1,7 +1,8 @@
-"""Telegram JobQueue integration for confirmed 15-minute FVG and funding alerts."""
+"""Telegram JobQueue integration for confirmed multi-timeframe FVG and funding alerts."""
 
 import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from alerts.funding_alerts import FundingAlertService
@@ -17,6 +18,7 @@ from config import (
     HEALTH_ALERT_OUTBOX_THRESHOLD,
     HEALTH_ALERT_STALE_WS_SECONDS,
 )
+from exchanges.fvg_candles import timeframe_due
 from handlers.funding import CACHE_KEY as FUNDING_CACHE_KEY
 
 
@@ -52,7 +54,7 @@ def get_funding_service():
 
 
 async def run_fvg_recovery(context):
-    """Periodic Bitunix REST safety net using only 15m candles."""
+    """Periodic Bitunix REST safety net using only 15m source candles."""
     service = context.job.data["fvg_service"]
     for symbol in sorted(service.settings.active_symbols()):
         try:
@@ -67,7 +69,7 @@ async def run_fvg_recovery(context):
 
 
 async def run_fvg_control_point(context):
-    """Evaluate one shared confirmed 15m calculation per exchange and symbol."""
+    """Evaluate all due FVG timeframes from one shared 15m source download per market."""
     service = context.job.data["fvg_service"]
     poller = context.job.data.get("fvg_poller") or get_fvg_poller()
     clock = context.job.data.get("clock")
@@ -76,18 +78,24 @@ async def run_fvg_control_point(context):
     if now.minute % 15 != 0:
         return []
 
-    markets = {
-        (exchange, symbol)
-        for exchange, symbol, _timeframe in service.settings.active_markets()
-    }
+    due_by_market: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for exchange, symbol, timeframe in service.settings.active_markets():
+        if timeframe_due(timeframe, now):
+            due_by_market[(exchange, symbol)].add(timeframe)
+
     all_events = []
-    for exchange, symbol in sorted(markets):
+    for (exchange, symbol), timeframes in sorted(due_by_market.items()):
+        ordered = tuple(
+            timeframe
+            for timeframe in ("15m", "1h", "4h", "1d")
+            if timeframe in timeframes
+        )
         try:
             events = await asyncio.to_thread(
-                poller.confirmed,
+                poller.confirmed_many,
                 exchange,
                 symbol,
-                "15m",
+                ordered,
                 now,
             )
             all_events.extend(events)
@@ -95,9 +103,10 @@ async def run_fvg_control_point(context):
             raise
         except Exception as error:
             logger.warning(
-                "Confirmed 15m FVG control point failed for %s %s: %s",
+                "Confirmed FVG control point failed for %s %s %s: %s",
                 exchange,
                 symbol,
+                ",".join(ordered),
                 error,
             )
             service.event_store.update_health(last_error=str(error))
@@ -177,7 +186,7 @@ async def run_funding_alerts(context):
 
 
 def schedule_fvg_alerts(application):
-    """Register confirmed 15m FVG, funding, outbox, health and REST recovery."""
+    """Register confirmed FVG, funding, outbox, health and REST recovery."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()

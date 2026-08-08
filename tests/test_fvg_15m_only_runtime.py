@@ -12,12 +12,12 @@ from alerts.fvg_stream_15m import FifteenMinuteBitunixFvgStream
 from alerts.scheduler_15m import _run_confirmed_15m
 from bot import BOT_COMMANDS
 from handlers.fvg_filter_ui import build_filter_menu
-from handlers.fvg_instruments_15m import FAQ_TEXTS, format_instruments_text
+from handlers.fvg_instruments_15m import FAQ_TEXTS, build_timeframe_menu, format_instruments_text
 from operations.graceful_fvg_stream_15m import FifteenMinuteGracefulBitunixFvgStream
 
 
 UTC = timezone.utc
-NOW = datetime(2026, 8, 7, 12, 15, 5, tzinfo=UTC)
+NOW = datetime(2026, 8, 7, 12, 0, 5, tzinfo=UTC)
 
 
 class FakeEventStore:
@@ -43,7 +43,7 @@ class FakeBitunixClient:
 
 
 class SettingsCompatibilityTests(unittest.TestCase):
-    def test_legacy_timeframes_and_pre_flag_are_normalized(self):
+    def test_legacy_timeframes_are_preserved_while_pre_is_retired(self):
         with TemporaryDirectory() as directory:
             path = f"{directory}/settings.json"
             with open(path, "w", encoding="utf-8") as target:
@@ -74,7 +74,7 @@ class SettingsCompatibilityTests(unittest.TestCase):
             settings = FvgAlertSettings(path)
             user = settings.user(1)
             self.assertFalse(user["notify_pre_fvg"])
-            self.assertEqual(user["symbols"]["BTCUSDT"]["timeframes"], ["15m"])
+            self.assertEqual(user["symbols"]["BTCUSDT"]["timeframes"], ["1h", "4h", "1d"])
             self.assertEqual(settings.pre_active_markets(), ())
             self.assertEqual(settings.pre_enabled_chat_ids(), frozenset())
 
@@ -103,7 +103,7 @@ class ActiveServiceTests(unittest.TestCase):
 
 
 class MultiExchangePollingTests(unittest.TestCase):
-    def test_non_15m_request_is_rejected_before_exchange_call(self):
+    def test_higher_timeframe_request_still_downloads_only_15m(self):
         class CandleClient:
             def __init__(self):
                 self.calls = []
@@ -114,10 +114,12 @@ class MultiExchangePollingTests(unittest.TestCase):
 
         client = CandleClient()
         poller = MultiExchangeFvgPoller(candle_client=client)
-        self.assertEqual(poller.confirmed("binance", "BTCUSDT", "1h", NOW), [])
-        self.assertEqual(client.calls, [])
-        self.assertEqual(poller.confirmed("binance", "BTCUSDT", "15m", NOW), [])
-        self.assertEqual(client.calls[0][0][2], "15m")
+        with self.assertRaisesRegex(RuntimeError, "No closed 15m"):
+            poller.confirmed("binance", "ETHUSDT", "1h", NOW)
+        self.assertEqual(len(client.calls), 1)
+        args, kwargs = client.calls[0]
+        self.assertEqual(args[:3], ("binance", "ETHUSDT", "15m"))
+        self.assertEqual(kwargs["limit"], 16)
 
 
 class StreamPolicyTests(unittest.TestCase):
@@ -133,21 +135,22 @@ class StreamPolicyTests(unittest.TestCase):
 
 
 class SchedulerPolicyTests(unittest.IsolatedAsyncioTestCase):
-    async def test_legacy_market_timeframes_are_deduplicated_to_15m(self):
+    async def test_due_timeframes_are_grouped_per_market(self):
         class Settings:
             def active_markets(self):
                 return (
                     ("binance", "BTCUSDT", "15m"),
                     ("binance", "BTCUSDT", "1h"),
                     ("bybit", "ETHUSDT", "4h"),
+                    ("bybit", "ETHUSDT", "1d"),
                 )
 
         class Poller:
             def __init__(self):
                 self.calls = []
 
-            def confirmed(self, exchange, symbol, timeframe, now):
-                self.calls.append((exchange, symbol, timeframe))
+            def confirmed_many(self, exchange, symbol, timeframes, now):
+                self.calls.append((exchange, symbol, tuple(timeframes)))
                 return []
 
         poller = Poller()
@@ -162,7 +165,7 @@ class SchedulerPolicyTests(unittest.IsolatedAsyncioTestCase):
                 data={
                     "fvg_service": service,
                     "fvg_poller": poller,
-                    "clock": lambda: NOW.replace(second=0),
+                    "clock": lambda: NOW,
                 }
             ),
         )
@@ -170,11 +173,63 @@ class SchedulerPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             poller.calls,
             [
-                ("binance", "BTCUSDT", "15m"),
-                ("bybit", "ETHUSDT", "15m"),
+                ("binance", "BTCUSDT", ("15m", "1h")),
+                ("bybit", "ETHUSDT", ("4h",)),
             ],
         )
         service.deliver.assert_not_awaited()
+
+    async def test_failed_market_does_not_block_other_instruments(self):
+        delivered_event = object()
+
+        class Settings:
+            def active_markets(self):
+                return (
+                    ("binance", "ETHUSDT", "15m"),
+                    ("bybit", "SOLUSDT", "15m"),
+                )
+
+        class Poller:
+            def __init__(self):
+                self.calls = []
+
+            def confirmed_many(self, exchange, symbol, timeframes, now):
+                self.calls.append((exchange, symbol, tuple(timeframes)))
+                if exchange == "binance":
+                    raise RuntimeError("No closed 15m FVG candles returned")
+                return [delivered_event]
+
+        event_store = FakeEventStore()
+        poller = Poller()
+        service = SimpleNamespace(
+            settings=Settings(),
+            event_store=event_store,
+            deliver=AsyncMock(),
+        )
+        context = SimpleNamespace(
+            bot=object(),
+            job=SimpleNamespace(
+                data={
+                    "fvg_service": service,
+                    "fvg_poller": poller,
+                    "clock": lambda: NOW,
+                }
+            ),
+        )
+
+        result = await _run_confirmed_15m(context)
+
+        self.assertEqual(
+            poller.calls,
+            [
+                ("binance", "ETHUSDT", ("15m",)),
+                ("bybit", "SOLUSDT", ("15m",)),
+            ],
+        )
+        self.assertEqual(result, [delivered_event])
+        self.assertEqual(event_store.health["control_point_failures"], 1)
+        self.assertIn("No closed 15m", event_store.health["last_error"])
+        service.deliver.assert_awaited_once_with(context.bot, [delivered_event])
 
 
 class UserInterfacePolicyTests(unittest.TestCase):
@@ -183,13 +238,23 @@ class UserInterfacePolicyTests(unittest.TestCase):
         self.assertNotIn("fvg_pre_alert", commands)
         all_faq = " ".join(FAQ_TEXTS.values()).lower()
         self.assertNotIn("пред-fvg", all_faq)
-        self.assertNotIn("предварительн", all_faq.replace("предварительных сигналов", ""))
 
-    def test_instrument_screen_states_fixed_15m(self):
+    def test_instrument_screen_explains_source_and_target_timeframes(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
             text = format_instruments_text(1, settings)
-            self.assertIn("Таймфрейм: <b>15 минут</b>", text)
+            self.assertIn("только закрытые 15м", text)
+            self.assertIn("15м / 1ч / 4ч / 1д", text)
+
+    def test_timeframe_menu_contains_all_supported_timeframes(self):
+        markup = build_timeframe_menu(
+            {"exchange": "binance", "symbol": "ETHUSDT", "timeframes": ["15m", "4h"]}
+        )
+        labels = [button.text for row in markup.inline_keyboard for button in row]
+        self.assertTrue(any("15 минут" in label for label in labels))
+        self.assertTrue(any("1 час" in label for label in labels))
+        self.assertTrue(any("4 часа" in label for label in labels))
+        self.assertTrue(any("1 день" in label for label in labels))
 
     def test_filter_menu_has_no_pre_or_event_type_toggle(self):
         class Settings:

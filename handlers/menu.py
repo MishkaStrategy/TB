@@ -1,4 +1,4 @@
-"""Button-based Telegram interface for confirmed 15m FVG controls and main menu."""
+"""Button-based Telegram interface for confirmed multi-timeframe FVG controls."""
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
 from telegram.ext import ContextTypes
@@ -67,7 +67,7 @@ def build_fvg_settings_menu(chat_id, settings=None):
             callback_data="menu:fvg-toggle",
         )],
         [InlineKeyboardButton(
-            f"{mark(user['notify_confirmed_fvg'])} Подтверждённые 15м",
+            f"{mark(user['notify_confirmed_fvg'])} Подтверждённые FVG",
             callback_data="menu:fvg-confirmed-toggle",
         )],
         [
@@ -117,7 +117,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if action == "fvg-settings":
         settings = FvgAlertSettings()
         await message.edit_text(
-            "FVG работает только по закрытым 15-минутным свечам.",
+            "С бирж загружаются только закрытые 15м свечи. "
+            "FVG рассчитывается на 15м, 1ч, 4ч и 1д.",
             reply_markup=build_fvg_settings_menu(chat_id, settings),
         )
     elif action == "fvg-toggle":
