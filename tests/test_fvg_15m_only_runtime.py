@@ -114,7 +114,8 @@ class MultiExchangePollingTests(unittest.TestCase):
 
         client = CandleClient()
         poller = MultiExchangeFvgPoller(candle_client=client)
-        self.assertEqual(poller.confirmed("binance", "ETHUSDT", "1h", NOW), [])
+        with self.assertRaisesRegex(RuntimeError, "No closed 15m"):
+            poller.confirmed("binance", "ETHUSDT", "1h", NOW)
         self.assertEqual(len(client.calls), 1)
         args, kwargs = client.calls[0]
         self.assertEqual(args[:3], ("binance", "ETHUSDT", "15m"))
