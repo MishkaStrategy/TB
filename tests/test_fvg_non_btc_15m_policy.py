@@ -9,35 +9,41 @@ from alerts.fvg_stream_15m import FifteenMinuteBitunixFvgStream
 
 
 UTC = timezone.utc
-NOW = datetime(2026, 8, 7, 12, 15, tzinfo=UTC)
+NOW = datetime(2026, 8, 7, 12, 0, tzinfo=UTC)
 
 
-class FifteenMinuteCandlePolicyTests(unittest.TestCase):
-    def test_multi_exchange_skips_higher_timeframes_before_request_for_all_assets(self):
+class FifteenMinuteSourcePolicyTests(unittest.TestCase):
+    def test_higher_timeframes_for_all_assets_still_request_only_15m(self):
         for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT"):
-            with self.subTest(symbol=symbol):
-                candle_client = Mock()
-                poller = MultiExchangeFvgPoller(candle_client=candle_client)
-                self.assertEqual(
-                    poller.confirmed("binance", symbol, "1h", NOW),
-                    [],
-                )
-                candle_client.load.assert_not_called()
+            for timeframe in ("1h", "4h", "1d"):
+                with self.subTest(symbol=symbol, timeframe=timeframe):
+                    candle_client = Mock()
+                    candle_client.load.return_value = []
+                    poller = MultiExchangeFvgPoller(candle_client=candle_client)
+                    self.assertEqual(
+                        poller.confirmed("binance", symbol, timeframe, NOW),
+                        [],
+                    )
+                    args, kwargs = candle_client.load.call_args
+                    self.assertEqual(args[:3], ("binance", symbol, "15m"))
+                    self.assertGreaterEqual(kwargs["limit"], 16)
 
-    def test_multi_exchange_loads_only_15m(self):
+    def test_multiple_due_timeframes_share_one_15m_download(self):
         candle_client = Mock()
         candle_client.load.return_value = []
         poller = MultiExchangeFvgPoller(candle_client=candle_client)
 
-        poller.confirmed("binance", "BTCUSDT", "15m", NOW)
-
-        candle_client.load.assert_called_once_with(
+        poller.confirmed_many(
             "binance",
-            "BTCUSDT",
-            "15m",
-            limit=3,
-            now=NOW,
+            "ETHUSDT",
+            ("15m", "1h", "4h"),
+            NOW,
         )
+
+        candle_client.load.assert_called_once()
+        args, kwargs = candle_client.load.call_args
+        self.assertEqual(args[:3], ("binance", "ETHUSDT", "15m"))
+        self.assertEqual(kwargs["limit"], 64)
 
     def test_bitunix_rest_recovery_loads_only_15m_for_every_asset(self):
         for symbol in ("BTCUSDT", "SOLUSDT"):
