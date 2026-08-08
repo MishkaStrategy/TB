@@ -214,6 +214,12 @@ class MultiExchangeFvgPoller:
             required_15m_candles(selected),
             now,
         )
+        if not source:
+            normalized_exchange = normalize_exchange(exchange)
+            raise RuntimeError(
+                "No closed 15m FVG candles returned for "
+                f"{normalized_exchange} {symbol}"
+            )
         events = []
         for timeframe in selected:
             candles = aggregate_15m_candles(source, timeframe, now)
