@@ -2,6 +2,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from alerts.fvg_models import Candle
 from alerts.fvg_multi_exchange import MultiExchangeFvgPoller
@@ -227,6 +228,34 @@ class NonBitcoinEndToEndTests(unittest.TestCase):
                 settings.user(42)["symbols"],
             )
             self.assertEqual(settings.recipients(event), [42])
+
+
+class ActiveInstrumentCapTests(unittest.TestCase):
+    def test_one_instrument_keeps_all_selected_timeframes_inside_cap(self):
+        with TemporaryDirectory() as directory:
+            settings = FvgAlertSettings(f"{directory}/settings.json")
+            settings.remove_symbol(1, "BTCUSDT")
+            settings.add_instrument(
+                1,
+                "binance",
+                "ETHUSDT",
+                ("15m", "1h", "4h", "1d"),
+            )
+            settings.add_instrument(1, "bybit", "SOLUSDT", ("15m",))
+            settings.set_enabled(1, True)
+
+            with patch("alerts.fvg_settings_15m.MAX_ACTIVE_SYMBOLS", 1):
+                markets = settings.active_markets()
+
+            self.assertEqual(
+                markets,
+                (
+                    ("binance", "ETHUSDT", "15m"),
+                    ("binance", "ETHUSDT", "1h"),
+                    ("binance", "ETHUSDT", "4h"),
+                    ("binance", "ETHUSDT", "1d"),
+                ),
+            )
 
 
 if __name__ == "__main__":
