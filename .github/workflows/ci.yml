@@ -19,7 +19,7 @@ concurrency:
 jobs:
   funding-storage-stdlib:
     name: Funding storage stdlib verification
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 5
 
     steps:
@@ -44,7 +44,7 @@ jobs:
 
   tests:
     name: Python tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, backtester]
     timeout-minutes: 20
     env:
       # Existing handler tests exercise the explicitly public test fixture.
@@ -155,7 +155,7 @@ jobs:
 
   vds-linux-verification:
     name: Linux VDS systemd verification
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, docker]
     timeout-minutes: 10
 
     steps:
