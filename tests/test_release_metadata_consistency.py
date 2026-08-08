@@ -71,6 +71,15 @@ class ReleaseMetadataConsistencyTests(unittest.TestCase):
             workflow,
         )
 
+    def test_release_workflow_does_not_republish_existing_tag(self):
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("existingRef.data.object.sha !== context.sha", workflow)
+        self.assertIn("refusing to republish it from", workflow)
+        self.assertNotIn("--clobber", workflow)
+        self.assertIn("steps.publish.outputs.release_created == 'true'", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
