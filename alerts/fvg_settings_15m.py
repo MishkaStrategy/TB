@@ -1,4 +1,4 @@
-"""15-minute-only compatibility facade for persisted FVG preferences."""
+"""Compatibility facade: confirmed FVG only, with 15m as the sole market-data source."""
 
 from __future__ import annotations
 
@@ -6,14 +6,13 @@ from alerts.fvg_store import FvgAlertSettings as BaseFvgAlertSettings
 
 
 class FvgAlertSettings(BaseFvgAlertSettings):
-    """Interpret all existing subscriptions as confirmed 15m subscriptions."""
+    """Preserve confirmed timeframe choices while retiring every pre-FVG switch."""
 
     def _read(self) -> dict:
         data = super()._read()
         for user in data.get("users", {}).values():
             user["notify_pre_fvg"] = False
             for config in user.get("symbols", {}).values():
-                config["timeframes"] = ["15m"]
                 for filter_name in ("price_filter", "size_filter"):
                     filter_config = config.get(filter_name)
                     if isinstance(filter_config, dict):
