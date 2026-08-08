@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.3.4 — 2026-08-09
+
+Patch-релиз мультибиржевого FVG runtime после повторного production-аудита.
+
+### Исправлено
+
+- восстановлены подтверждённые FVG на `15m`, `1h`, `4h`, `1d` при единственном биржевом источнике закрытых `15m` свечей;
+- `1h/4h/1d` агрегируются локально из `15m` по UTC-границам, без прямых запросов старших свечей;
+- пред-FVG и минутные `1m` свечи остаются удалёнными;
+- сохранённые `1h/4h/1d` больше не перезаписываются в `15m`;
+- исправлен Gate Futures parser для объектного payload `t/o/h/l/c`;
+- `MAX_ACTIVE_SYMBOLS` теперь ограничивает уникальные `exchange + symbol`, а не отдельные timeframe rows;
+- один источник `15m` переиспользуется для всех due-таймфреймов одного рынка;
+- пустой candle source становится observable operational failure вместо молчаливого «FVG нет»;
+- сбой одного рынка не останавливает остальные;
+- возвращён выбор `15m / 1h / 4h / 1d` в Telegram UI без возврата пред-FVG.
+
+### Проверено
+
+- payload contracts Bitunix, Binance, Bybit, BingX, Bitget и Gate;
+- non-BTC end-to-end путь `15m source → FVG event → recipient`;
+- локальная агрегация `1h/4h/1d` и неполные source buckets;
+- dependency audit, compilation и полный unit suite;
+- bounded pipeline smoke и `500 × 10` notification soak;
+- VDS candidate isolation и production systemd verification.
+
+### Релизная безопасность
+
+- `v1.3.4` публикуется отдельным immutable patch-тегом;
+- release workflow больше не должен перезаписывать assets уже существующего тега новым содержимым `main`;
+- production deployment выполняется отдельно по точному audited SHA.
+
 ## 1.3.3 — 2026-07-30
 
 Кроссплатформенный hotfix verified backup для macOS.

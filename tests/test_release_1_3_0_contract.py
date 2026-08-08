@@ -10,11 +10,12 @@ from database.process_restart_guard_status import read_restart_guard_status
 from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
 
 
-class Release133ContractTests(unittest.TestCase):
+class Release134ContractTests(unittest.TestCase):
     def test_release_version_and_vds_default(self):
-        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.3")
+        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.4")
         updater = Path("scripts/update_vds.sh").read_text(encoding="utf-8")
-        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.3}"', updater)
+        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.4}"', updater)
+        self.assertIn("TARGET_REF=v1.3.4 EXPECTED_VERSION=1.3.4", updater)
 
     def test_candidate_tests_are_isolated_from_production_env(self):
         installer = Path("scripts/install_vds.sh").read_text(encoding="utf-8")
@@ -37,6 +38,12 @@ class Release133ContractTests(unittest.TestCase):
         self.assertEqual(MAX_FVG_INSTRUMENTS_PER_USER, 10)
         self.assertLessEqual(MAX_SYMBOLS_PER_USER, 10)
         self.assertTrue(issubclass(OutboxV2FvgAlertService, LimitedFvgAlertService))
+
+    def test_release_workflow_is_immutable(self):
+        workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("refusing to republish it from", workflow)
+        self.assertNotIn("--clobber", workflow)
+        self.assertIn("release_created", workflow)
 
     def test_admin_operations_readers_are_available(self):
         self.assertTrue(callable(read_restart_guard_status))
