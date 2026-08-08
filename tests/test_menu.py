@@ -89,7 +89,7 @@ class MenuTests(unittest.TestCase):
         self.assertIn("⏸️ 📏 Размер FVG", labels)
         self.assertIn("📌 Инструменты", labels)
         self.assertIn("❓ FAQ по FVG", labels)
-        self.assertIn("✅ Подтверждённые 15м", labels)
+        self.assertIn("✅ Подтверждённые FVG", labels)
         self.assertNotIn("Пред-FVG BTC", labels)
         self.assertIn("fvg15:open", callbacks)
         self.assertIn("fvg15:faq:main", callbacks)
