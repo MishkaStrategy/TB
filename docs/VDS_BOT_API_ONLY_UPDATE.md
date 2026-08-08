@@ -34,7 +34,7 @@ The first `v1.3.0` production attempt stopped during candidate tests before `sys
 
 The confirmed cause was production environment contamination: a stale `MAX_SYMBOLS_PER_USER=20` override affected candidate unit tests. Releases `1.3.1` and later isolate candidate tests with `env -i`, retain a complete test log and cap the effective FVG instrument limit at 10.
 
-`v1.3.3` is the current audited deployment target. It also prevents macOS BSD tar from adding AppleDouble `._*` metadata files to verified backup archives. Telegram Mini App PR #53 is excluded.
+`v1.3.4` is the current audited deployment target. It restores multi-timeframe confirmed FVG from a `15m`-only exchange data source, keeps pre-FVG and `1m` disabled, fixes the Gate candle adapter and makes empty multi-exchange sources observable. Telegram Mini App PR #53 is excluded.
 
 ## Preflight
 
@@ -48,7 +48,17 @@ git status --short
 
 `git status --short` must be empty. Also verify both runtime SQLite databases with `PRAGMA quick_check`, record the current `NRestarts`, and confirm at least 1 GB free space plus 5000 inode on `/opt`.
 
-## Update to 1.3.3
+Before changing production, record the currently installed code and active configuration:
+
+```bash
+cat /opt/fvg-alert-bot/VERSION
+cat /opt/fvg-alert-bot/BUILD_COMMIT
+sudo grep -E '^(MAX_ACTIVE_SYMBOLS|MAX_SYMBOLS_PER_USER)=' /etc/fvg-alert-bot.env || true
+```
+
+Do not print `TELEGRAM_TOKEN` or other secret values.
+
+## Update to 1.3.4
 
 Use the published tag and exact audited commit from the production deployment issue:
 
@@ -59,8 +69,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.3 \
-  EXPECTED_VERSION=1.3.3 \
+  TARGET_REF=v1.3.4 \
+  EXPECTED_VERSION=1.3.4 \
   EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -85,6 +95,17 @@ The installed service continues to read the external production file through sys
 
 The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from the runtime snapshot and runs tar with `COPYFILE_DISABLE=1`. This prevents macOS from synthesizing unmanifested AppleDouble members after the manifest is built. Archive verification remains strict for all ordinary unmanifested members.
 
+## FVG 1.3.4 production contract
+
+- the exchange data source is always closed `15m` candles;
+- confirmed target timeframes are `15m`, `1h`, `4h`, `1d`;
+- `1h`, `4h`, `1d` are aggregated locally from `15m` on UTC boundaries;
+- no `1m` data and no pre-FVG job/UI are active;
+- one source download is shared by all due target timeframes of one `exchange + symbol`;
+- `MAX_ACTIVE_SYMBOLS` counts unique instruments, not timeframe rows;
+- a completely empty candle source for an active multi-exchange market is an operational failure and must be visible in journal/health counters;
+- a failure on one market must not stop processing of the remaining markets.
+
 ## Post-deploy
 
 ```bash
@@ -101,7 +122,7 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
-- installed version is `1.3.3`;
+- installed version is `1.3.4`;
 - installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - `NRestarts` does not grow during observation;
@@ -109,15 +130,21 @@ Expected results:
 - no startup traceback or Telegram polling conflict appears;
 - no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`.
 
-## 1.3.3 smoke checks
+## 1.3.4 smoke checks
 
 - FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
-- existing schema-v2 FVG settings appear as Bitunix `15m` without losing filters;
-- legacy settings above 10 instruments are preserved but cannot grow;
+- pre-FVG is absent from UI and commands;
+- verify existing instrument timeframe selections because the previous `15m`-only compatibility layer could persist normalized `15m` settings after a write;
+- configure at least one non-BTC instrument on `15m` and confirm it remains configured after reopening the menu;
+- configure or verify at least one instrument on a non-Bitunix exchange;
+- after a 15-minute control point, inspect journal for multi-exchange source failures;
+- `No closed 15m FVG candles returned for <exchange> <symbol>` must be treated as a visible data-source failure, not as proof that no FVG exists;
 - `⚙️ Операции` shows restart circuit-breaker status;
 - `⚙️ Операции` shows read-only FVG archive status;
 - Telegram Mini App is not deployed or required;
 - operational feature flags remain default-off for the first launch.
+
+A market does not need to produce an FVG on every control point. The production smoke validates that every configured market is actually scanned and that failures are visible; it must not manufacture test alerts.
 
 ## Secret-safe credential check
 
