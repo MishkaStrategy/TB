@@ -179,6 +179,58 @@ class SchedulerPolicyTests(unittest.IsolatedAsyncioTestCase):
         )
         service.deliver.assert_not_awaited()
 
+    async def test_failed_market_does_not_block_other_instruments(self):
+        delivered_event = object()
+
+        class Settings:
+            def active_markets(self):
+                return (
+                    ("binance", "ETHUSDT", "15m"),
+                    ("bybit", "SOLUSDT", "15m"),
+                )
+
+        class Poller:
+            def __init__(self):
+                self.calls = []
+
+            def confirmed_many(self, exchange, symbol, timeframes, now):
+                self.calls.append((exchange, symbol, tuple(timeframes)))
+                if exchange == "binance":
+                    raise RuntimeError("No closed 15m FVG candles returned")
+                return [delivered_event]
+
+        event_store = FakeEventStore()
+        poller = Poller()
+        service = SimpleNamespace(
+            settings=Settings(),
+            event_store=event_store,
+            deliver=AsyncMock(),
+        )
+        context = SimpleNamespace(
+            bot=object(),
+            job=SimpleNamespace(
+                data={
+                    "fvg_service": service,
+                    "fvg_poller": poller,
+                    "clock": lambda: NOW,
+                }
+            ),
+        )
+
+        result = await _run_confirmed_15m(context)
+
+        self.assertEqual(
+            poller.calls,
+            [
+                ("binance", "ETHUSDT", ("15m",)),
+                ("bybit", "SOLUSDT", ("15m",)),
+            ],
+        )
+        self.assertEqual(result, [delivered_event])
+        self.assertEqual(event_store.health["control_point_failures"], 1)
+        self.assertIn("No closed 15m", event_store.health["last_error"])
+        service.deliver.assert_awaited_once_with(context.bot, [delivered_event])
+
 
 class UserInterfacePolicyTests(unittest.TestCase):
     def test_pre_fvg_is_removed_from_commands_and_faq(self):
