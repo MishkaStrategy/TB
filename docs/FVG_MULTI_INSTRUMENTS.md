@@ -147,3 +147,16 @@ FAQ отдельно поясняет, что с бирж загружаются
 6. Раньше полностью пустой распарсенный candle source мог выглядеть как обычное отсутствие FVG. Теперь это явная ошибка с health counter и журналированием.
 
 Регрессионное покрытие включает payload-контракты всех шести адаптеров, end-to-end non-BTC `15m -> event -> recipient`, локальную агрегацию `1h/4h/1d`, сохранение всех выбранных TF внутри одного global instrument slot и продолжение обработки остальных рынков при сбое одного рынка.
+
+## Проверка фактической версии на VDS
+
+Файл `VERSION` недостаточен для различения промежуточных изменений в `main`: updater допускает `TARGET_REF=main` при том же `EXPECTED_VERSION`. После успешной установки точный commit SHA записывается в `/opt/fvg-alert-bot/BUILD_COMMIT`.
+
+При расследовании production-инцидента источником истины должны быть одновременно:
+
+- `/opt/fvg-alert-bot/BUILD_COMMIT` — точный установленный commit;
+- `/opt/fvg-alert-bot/VERSION` — release version;
+- `/var/lib/fvg-alert-bot/fvg_alert_settings.json` — фактические инструменты и выбранные TF;
+- `/etc/fvg-alert-bot.env` — operational feature flags и лимиты без публикации секретов;
+- journal `fvg-alert-bot` — ошибки `Confirmed FVG control point failed` и task overlap;
+- SQLite health/background-task state — `control_point_failures`, outbox и состояние `fvg-confirmed-control`.
