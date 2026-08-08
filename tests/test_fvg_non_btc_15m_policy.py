@@ -20,10 +20,8 @@ class FifteenMinuteSourcePolicyTests(unittest.TestCase):
                     candle_client = Mock()
                     candle_client.load.return_value = []
                     poller = MultiExchangeFvgPoller(candle_client=candle_client)
-                    self.assertEqual(
-                        poller.confirmed("binance", symbol, timeframe, NOW),
-                        [],
-                    )
+                    with self.assertRaisesRegex(RuntimeError, "No closed 15m"):
+                        poller.confirmed("binance", symbol, timeframe, NOW)
                     args, kwargs = candle_client.load.call_args
                     self.assertEqual(args[:3], ("binance", symbol, "15m"))
                     self.assertGreaterEqual(kwargs["limit"], 16)
@@ -33,12 +31,13 @@ class FifteenMinuteSourcePolicyTests(unittest.TestCase):
         candle_client.load.return_value = []
         poller = MultiExchangeFvgPoller(candle_client=candle_client)
 
-        poller.confirmed_many(
-            "binance",
-            "ETHUSDT",
-            ("15m", "1h", "4h"),
-            NOW,
-        )
+        with self.assertRaisesRegex(RuntimeError, "No closed 15m"):
+            poller.confirmed_many(
+                "binance",
+                "ETHUSDT",
+                ("15m", "1h", "4h"),
+                NOW,
+            )
 
         candle_client.load.assert_called_once()
         args, kwargs = candle_client.load.call_args
