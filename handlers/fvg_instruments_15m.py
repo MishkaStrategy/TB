@@ -1,4 +1,4 @@
-"""Button-driven FVG instrument management for confirmed 15m alerts only."""
+"""Button-driven FVG instrument management with 15m-only exchange data."""
 
 from __future__ import annotations
 
@@ -12,34 +12,49 @@ from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, fil
 from alerts.fvg_store import FvgAlertSettings, instrument_key
 from config import MAX_SYMBOLS_PER_USER
 from exchanges.funding import EXCHANGE_LABELS, EXCHANGE_ORDER, exchange_label
-from exchanges.fvg_candles import PublicCandleClient, normalize_fvg_symbol
+from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES, PublicCandleClient, normalize_fvg_symbol
 from handlers.auth import authorized
 
 
 FLOW_KEY = "fvg_instrument_flow"
+TIMEFRAME_LABELS = {
+    "15m": "15 минут",
+    "1h": "1 час",
+    "4h": "4 часа",
+    "1d": "1 день",
+}
+TIMEFRAME_SHORT = {
+    "15m": "15м",
+    "1h": "1ч",
+    "4h": "4ч",
+    "1d": "1д",
+}
 FAQ_TEXTS = {
     "main": (
         "❓ <b>FAQ по FVG</b>\n\n"
-        "Модуль работает только по закрытым 15-минутным свечам. "
-        "Выберите раздел ниже."
+        "FVG рассчитывается на 15м, 1ч, 4ч и 1д. Для снижения нагрузки "
+        "с бирж загружаются только 15-минутные свечи; старшие таймфреймы "
+        "собираются локально."
     ),
     "add": (
         "➕ <b>Как добавить инструмент</b>\n\n"
         "1. Выберите биржу.\n"
         "2. Введите пару: BTC, BTCUSDT или BTC/USDT.\n"
-        "3. Проверьте настройки и подтвердите добавление.\n\n"
-        "Таймфрейм фиксированный — 15 минут. Одинаковая пара на разных "
-        "биржах считается разными инструментами."
+        "3. Отметьте нужные таймфреймы.\n"
+        "4. Проверьте настройки и подтвердите сохранение.\n\n"
+        "Одинаковая пара на разных биржах считается разными инструментами."
     ),
     "confirmed": (
-        "✅ <b>Когда приходит FVG</b>\n\n"
-        "FVG определяется по трём последовательным 15-минутным свечам. "
-        "Уведомление отправляется только после закрытия свечи C, которая "
-        "подтверждает зону. Предварительных сигналов до закрытия свечи нет."
+        "✅ <b>FVG и подтверждение</b>\n\n"
+        "Уведомление приходит только после закрытия свечи C, подтверждающей FVG.\n\n"
+        "Доступные таймфреймы: 15 минут, 1 час, 4 часа и 1 день. "
+        "1ч/4ч/1д строятся внутри бота из закрытых 15-минутных свечей. "
+        "Предварительных FVG до закрытия свечи нет."
     ),
     "limits": (
         "⚙️ <b>Лимиты и настройки</b>\n\n"
         f"Можно отслеживать не более {MAX_SYMBOLS_PER_USER} инструментов. "
+        "Несколько таймфреймов одной пары занимают одно место.\n\n"
         "Отключённый инструмент сохраняется и занимает место в лимите. "
         "Удаление освобождает одно место."
     ),
@@ -60,6 +75,15 @@ def _clear_state(context):
     context.chat_data.pop(FLOW_KEY, None)
 
 
+def _display_timeframes(values) -> str:
+    selected = set(values or ())
+    return ", ".join(
+        TIMEFRAME_SHORT[item]
+        for item in CONFIRMED_TIMEFRAMES
+        if item in selected
+    ) or "не выбраны"
+
+
 def _instrument_label(config: dict) -> str:
     return (
         f"{config['symbol']} · "
@@ -74,11 +98,12 @@ def format_instruments_text(chat_id: int, settings=None) -> str:
     lines = [
         "📉 <b>FVG-уведомления</b>",
         "",
-        "Таймфрейм: <b>15 минут</b>",
+        "Источник данных: <b>только закрытые 15м свечи</b>",
+        "Расчёт FVG: <b>15м / 1ч / 4ч / 1д</b>",
         f"Добавлено инструментов: <b>{len(instruments)} из {MAX_SYMBOLS_PER_USER}</b>",
     ]
     if not instruments:
-        lines.extend(("", "У вас пока нет инструментов. Добавьте биржу и торговую пару."))
+        lines.extend(("", "У вас пока нет инструментов. Добавьте биржу, пару и таймфреймы."))
         return "\n".join(lines)
     for index, config in enumerate(instruments, 1):
         status = "✅" if config.get("enabled", True) else "⏸️"
@@ -86,7 +111,7 @@ def format_instruments_text(chat_id: int, settings=None) -> str:
             "",
             f"{index}. {status} <b>{escape(config['symbol'])}</b> · "
             f"{escape(EXCHANGE_LABELS.get(config['exchange'], config['exchange']))}",
-            "   Подтверждение: после закрытия 15м свечи",
+            f"   Таймфреймы: {_display_timeframes(config.get('timeframes'))}",
         ))
     return "\n".join(lines)
 
@@ -126,22 +151,58 @@ def build_exchange_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def build_timeframe_menu(state: dict) -> InlineKeyboardMarkup:
+    selected = set(state.get("timeframes", ()))
+    rows = []
+    for index in range(0, len(CONFIRMED_TIMEFRAMES), 2):
+        row = []
+        for timeframe in CONFIRMED_TIMEFRAMES[index:index + 2]:
+            mark = "✅" if timeframe in selected else "⬜"
+            row.append(
+                InlineKeyboardButton(
+                    f"{mark} {TIMEFRAME_LABELS[timeframe]}",
+                    callback_data=f"fvg15:tf:{timeframe}",
+                )
+            )
+        rows.append(row)
+    rows.extend((
+        [InlineKeyboardButton("Выбрать все", callback_data="fvg15:tf-all")],
+        [InlineKeyboardButton("Продолжить", callback_data="fvg15:save")],
+        [InlineKeyboardButton("Отмена", callback_data="fvg15:cancel")],
+    ))
+    return InlineKeyboardMarkup(rows)
+
+
 def build_confirmation_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✅ Подтвердить", callback_data="fvg15:confirm")],
+        [InlineKeyboardButton("✏️ Изменить", callback_data="fvg15:change")],
         [InlineKeyboardButton("Отмена", callback_data="fvg15:cancel")],
     ])
 
 
-def format_confirmation_text(state: dict) -> str:
+def format_timeframe_text(state: dict) -> str:
+    action = "Изменение" if state.get("action") == "edit" else "Добавление"
     return (
-        "🔎 <b>Проверьте настройки</b>\n\n"
+        f"🕒 <b>{action} FVG-инструмента</b>\n\n"
         f"Биржа: {escape(exchange_label(state['exchange']))}\n"
         f"Инструмент: <code>{escape(state['symbol'])}</code>\n"
-        "Таймфрейм: 15 минут\n"
+        f"Таймфреймы: {_display_timeframes(state.get('timeframes'))}\n\n"
+        "Выберите хотя бы один таймфрейм. Старшие свечи будут собраны "
+        "локально из 15-минутных данных."
+    )
+
+
+def format_confirmation_text(state: dict) -> str:
+    action = "изменение" if state.get("action") == "edit" else "добавление"
+    return (
+        "🔎 <b>Проверьте настройки</b>\n\n"
+        f"Действие: {action}\n"
+        f"Биржа: {escape(exchange_label(state['exchange']))}\n"
+        f"Инструмент: <code>{escape(state['symbol'])}</code>\n"
+        f"Таймфреймы: {_display_timeframes(state.get('timeframes'))}\n"
         "Уведомления: включены\n\n"
-        "Сигнал будет отправлен только после закрытия 15-минутной свечи, "
-        "подтверждающей FVG."
+        "Сигнал отправляется только после закрытия подтверждающей свечи."
     )
 
 
@@ -152,8 +213,9 @@ def format_detail_text(chat_id: int, exchange: str, symbol: str, settings=None) 
         raise ValueError("Инструмент уже удалён или не найден.")
     return (
         f"📌 <b>{escape(config['symbol'])} · {escape(exchange_label(config['exchange']))}</b>\n\n"
-        "Таймфрейм: 15 минут\n"
+        f"Таймфреймы: {_display_timeframes(config.get('timeframes'))}\n"
         f"Уведомления: {'включены' if config.get('enabled', True) else 'выключены'}\n"
+        "Источник свечей: только 15м\n"
         "Тип сигнала: только подтверждённый FVG"
     )
 
@@ -164,6 +226,10 @@ def build_detail_menu(chat_id: int, exchange: str, symbol: str, settings=None):
     if config is None:
         return build_instruments_menu(chat_id, settings)
     return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "🕒 Изменить таймфреймы",
+            callback_data=f"fvg15:edit:{exchange}:{symbol}",
+        )],
         [InlineKeyboardButton(
             "⏸️ Отключить уведомления" if config.get("enabled", True) else "▶️ Включить уведомления",
             callback_data=f"fvg15:toggle:{exchange}:{symbol}",
@@ -212,6 +278,22 @@ async def show_fvg_instruments(message, chat_id: int, *, edit=False):
         await message.reply_text(text, reply_markup=markup, parse_mode="HTML")
 
 
+def _persist_state(settings: FvgAlertSettings, chat_id: int, state: dict) -> None:
+    if state.get("action") == "edit":
+        settings.update_instrument_timeframes(
+            chat_id,
+            instrument_key(state["exchange"], state["symbol"]),
+            state["timeframes"],
+        )
+    else:
+        settings.add_instrument(
+            chat_id,
+            state["exchange"],
+            state["symbol"],
+            state["timeframes"],
+        )
+
+
 @authorized
 async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -227,6 +309,7 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
         _clear_state(context)
         await show_fvg_instruments(query.message, chat_id, edit=True)
         return
+
     if action == "add":
         if len(settings.user(chat_id).get("symbols", {})) >= MAX_SYMBOLS_PER_USER:
             await _edit(
@@ -237,12 +320,13 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
                 build_instruments_menu(chat_id, settings),
             )
             return
-        _set_state(context, {"stage": "exchange"})
+        _set_state(context, {"action": "add", "stage": "exchange"})
         await _edit(query.message, "🏦 <b>Выберите биржу</b>", build_exchange_menu())
         return
+
     if action == "exchange" and len(parts) == 3:
         exchange = parts[2]
-        _set_state(context, {"stage": "symbol", "exchange": exchange})
+        _set_state(context, {"action": "add", "stage": "symbol", "exchange": exchange})
         await _edit(
             query.message,
             f"🔎 <b>{escape(exchange_label(exchange))}: торговая пара</b>\n\n"
@@ -250,18 +334,49 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
             InlineKeyboardMarkup([[InlineKeyboardButton("Отмена", callback_data="fvg15:cancel")]]),
         )
         return
-    if action == "confirm":
+
+    if action in {"tf", "tf-all", "save"}:
+        state = _state(context)
+        if not state or state.get("stage") != "timeframes":
+            await query.message.reply_text("Эта кнопка устарела. Откройте инструмент ещё раз.")
+            return
+        if action == "tf" and len(parts) == 3:
+            timeframe = parts[2]
+            selected = set(state.get("timeframes", ()))
+            if timeframe in selected:
+                selected.remove(timeframe)
+            elif timeframe in CONFIRMED_TIMEFRAMES:
+                selected.add(timeframe)
+            state["timeframes"] = [
+                item for item in CONFIRMED_TIMEFRAMES if item in selected
+            ]
+            _set_state(context, state)
+        elif action == "tf-all":
+            state["timeframes"] = list(CONFIRMED_TIMEFRAMES)
+            _set_state(context, state)
+        elif action == "save":
+            if not state.get("timeframes"):
+                await query.message.reply_text("Выберите хотя бы один таймфрейм.")
+                return
+            state["stage"] = "confirm"
+            _set_state(context, state)
+            await _edit(query.message, format_confirmation_text(state), build_confirmation_menu())
+            return
+        await _edit(query.message, format_timeframe_text(state), build_timeframe_menu(state))
+        return
+
+    if action in {"confirm", "change"}:
         state = _state(context)
         if not state or state.get("stage") != "confirm":
-            await query.message.reply_text("Эта кнопка устарела. Откройте добавление инструмента ещё раз.")
+            await query.message.reply_text("Эта кнопка устарела. Откройте инструмент ещё раз.")
+            return
+        if action == "change":
+            state["stage"] = "timeframes"
+            _set_state(context, state)
+            await _edit(query.message, format_timeframe_text(state), build_timeframe_menu(state))
             return
         try:
-            settings.add_instrument(
-                chat_id,
-                state["exchange"],
-                state["symbol"],
-                ("15m",),
-            )
+            _persist_state(settings, chat_id, state)
         except ValueError as error:
             await query.message.reply_text(str(error))
             return
@@ -273,11 +388,13 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
             build_detail_menu(chat_id, exchange, symbol, settings),
         )
         return
+
     if action == "faq" and len(parts) == 3:
         section = parts[2] if parts[2] in FAQ_TEXTS else "main"
         _clear_state(context)
         await _edit(query.message, FAQ_TEXTS[section], build_faq_menu(section))
         return
+
     if len(parts) != 4:
         await query.message.reply_text("Эта кнопка устарела. Откройте настройки FVG ещё раз.")
         return
@@ -287,12 +404,25 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
     if key not in settings.user(chat_id).get("symbols", {}):
         await show_fvg_instruments(query.message, chat_id, edit=True)
         return
+
     if action == "detail":
+        _clear_state(context)
         await _edit(
             query.message,
             format_detail_text(chat_id, exchange, symbol, settings),
             build_detail_menu(chat_id, exchange, symbol, settings),
         )
+    elif action == "edit":
+        config = settings.user(chat_id)["symbols"][key]
+        state = {
+            "action": "edit",
+            "stage": "timeframes",
+            "exchange": exchange,
+            "symbol": symbol,
+            "timeframes": list(config.get("timeframes", ("15m",))),
+        }
+        _set_state(context, state)
+        await _edit(query.message, format_timeframe_text(state), build_timeframe_menu(state))
     elif action == "toggle":
         config = settings.user(chat_id)["symbols"][key]
         settings.set_instrument_enabled(chat_id, key, not config.get("enabled", True))
@@ -305,7 +435,7 @@ async def fvg_instrument_callback(update: Update, context: ContextTypes.DEFAULT_
         await _edit(
             query.message,
             f"🗑 <b>Удалить инструмент?</b>\n\n"
-            f"{escape(symbol)} на {escape(exchange_label(exchange))} будет удалён из отслеживания.",
+            f"{escape(symbol)} на {escape(exchange_label(exchange))} будет удалён вместе с настройками таймфреймов.",
             build_delete_menu(exchange, symbol),
         )
     elif action == "delete-confirm":
@@ -328,7 +458,9 @@ async def receive_fvg_instrument_symbol(update: Update, context: ContextTypes.DE
     chat_id = update.effective_chat.id
     key = instrument_key(state["exchange"], symbol)
     if key in settings.user(chat_id).get("symbols", {}):
-        await update.effective_message.reply_text("Этот инструмент уже добавлен.")
+        await update.effective_message.reply_text(
+            "Этот инструмент уже добавлен. Измените его таймфреймы в настройках."
+        )
         return
     try:
         exists = await asyncio.to_thread(
@@ -346,11 +478,11 @@ async def receive_fvg_instrument_symbol(update: Update, context: ContextTypes.DE
             "Инструмент не найден на выбранной бирже. Проверьте название и попробуйте ещё раз."
         )
         return
-    state.update({"stage": "confirm", "symbol": symbol, "timeframes": ["15m"]})
+    state.update({"stage": "timeframes", "symbol": symbol, "timeframes": ["15m"]})
     _set_state(context, state)
     await update.effective_message.reply_text(
-        format_confirmation_text(state),
-        reply_markup=build_confirmation_menu(),
+        format_timeframe_text(state),
+        reply_markup=build_timeframe_menu(state),
         parse_mode="HTML",
     )
 
@@ -365,8 +497,13 @@ def build_fvg_instrument_handlers():
 __all__ = [
     "FAQ_TEXTS",
     "FLOW_KEY",
+    "TIMEFRAME_LABELS",
+    "build_confirmation_menu",
     "build_fvg_instrument_handlers",
     "build_instruments_menu",
+    "build_timeframe_menu",
+    "format_confirmation_text",
     "format_instruments_text",
+    "format_timeframe_text",
     "show_fvg_instruments",
 ]
