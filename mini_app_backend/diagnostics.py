@@ -7,6 +7,7 @@ import resource
 import shutil
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -72,7 +73,7 @@ def _sqlite_status(path: Path | None) -> tuple[str, int]:
     if path is None or not path.exists():
         return "unknown", 0
     try:
-        with sqlite3.connect(path, timeout=5) as connection:
+        with closing(sqlite3.connect(path, timeout=5)) as connection:
             row = connection.execute("PRAGMA quick_check").fetchone()
         status = "ok" if row and row[0] == "ok" else "warning"
     except (OSError, sqlite3.Error):
