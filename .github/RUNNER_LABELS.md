@@ -1,26 +1,33 @@
-# Self-hosted runner label policy
+# Self-hosted runner selector policy
 
-Every job that targets a self-hosted GitHub Actions runner **must declare the capabilities it actually needs**. A bare `runs-on: self-hosted` or `runs-on: [self-hosted]` is forbidden.
+Workflow jobs use capability selectors, never physical runner names. The project allowlist is intentionally exact so CI routing stays reproducible and auditable.
 
-GitHub treats a label array as an intersection: a runner must match every specified label before it can accept the job.
+## Allowed selectors
 
-## Required selection patterns
+Only these self-hosted selectors are permitted:
 
-- Docker required: `runs-on: [self-hosted, docker]`
-- macOS required: `runs-on: [self-hosted, macos]`
-- Any general-purpose fast self-hosted machine: `runs-on: [self-hosted, fast]`
-- Multiple hard requirements: `runs-on: [self-hosted, fast, docker]`
+```yaml
+runs-on: [self-hosted, fast]
+runs-on: [self-hosted, docker]
+runs-on: [self-hosted, backtester]
+runs-on: [self-hosted, Linux]
+runs-on: [self-hosted, macOS, ARM64]
+```
 
-Add other capability labels only when they are real requirements, for example `linux`, `windows`, `arm64`, `x64`, `gpu`, or a project-specific toolchain label.
+Use them as follows:
 
-Do not select a physical machine by name unless the workflow truly cannot run anywhere else. Prefer capability labels so jobs can move between suitable runners.
+- `[self-hosted, fast]` — linters, type checks, unit tests, documentation and fast application checks;
+- `[self-hosted, docker]` — Docker, Compose and container integration checks;
+- `[self-hosted, backtester]` — long-running backtests, benchmarks and load checks;
+- `[self-hosted, Linux]` — checks that specifically require a native Linux/systemd environment;
+- `[self-hosted, macOS, ARM64]` — Apple Silicon/macOS or Apple API checks.
 
-GitHub-hosted runners such as `ubuntu-latest`, `macos-latest`, and `windows-latest` remain allowed when intentionally used.
+Bare `self-hosted`, arbitrary capability combinations, machine names and undocumented labels are forbidden. GitHub-hosted runners are not a convenience fallback; if a future job genuinely requires a Linux dependency unavailable on the self-hosted fleet, that exception must be reviewed and documented together with the workflow change.
 
 ## Runner registration
 
-Each self-hosted runner must carry all labels that describe its available capabilities. For example, a fast Linux runner with Docker should have at least `self-hosted`, `fast`, `linux`, and `docker`.
+Each runner must carry the exact capability labels needed by one of the selectors above. Labels describe capabilities, not individual machines.
 
 ## Enforcement
 
-`.github/workflows/runner-label-policy.yml` checks all workflow files and fails when a self-hosted job has no additional capability label.
+`.github/scripts/check_runner_selectors.py` scans every workflow and rejects any `runs-on` value outside the allowlist. `.github/workflows/runner-label-policy.yml` runs the check on runner-policy/workflow changes and on manual dispatch.
