@@ -92,11 +92,19 @@ export interface AdminDiagnostics {
   pythonVersion: string;
 }
 
+export interface AdminCapabilities {
+  accessWrite: boolean;
+  allowlistWrite: boolean;
+  backup: boolean;
+  restart: boolean;
+}
+
 export interface AdminSettings {
   available: boolean;
   publicAccessEnabled: boolean;
   allowedUsers: AllowedUser[];
   diagnostics: AdminDiagnostics;
+  capabilities?: AdminCapabilities;
 }
 
 export interface AppSettings {
@@ -126,4 +134,27 @@ export interface SettingsEnvelope {
 
 export interface SaveSettingsRequest {
   settings: AppSettings;
+}
+
+export type MarketSnapshotSource = "ticker" | "candles" | "unavailable";
+
+export interface MarketInstrumentSnapshot {
+  key: string;
+  exchange: Exchange;
+  symbol: string;
+  price: number | null;
+  priceChange24hPct: number | null;
+  source: MarketSnapshotSource;
+}
+
+export interface MarketOverviewEnvelope {
+  instruments: MarketInstrumentSnapshot[];
+  updatedAt: string;
+}
+
+export interface AdminConfirmation {
+  token: string;
+  action: string;
+  confirmationText: string;
+  expiresAt: string;
 }
