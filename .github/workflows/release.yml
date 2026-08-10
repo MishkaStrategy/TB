@@ -16,18 +16,27 @@ concurrency:
 jobs:
   publish-release:
     name: Publish VERSION tag and release
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
 
-      - name: Validate VERSION
+      - name: Validate merge commit and VERSION
         id: version
         shell: bash
         run: |
           set -euo pipefail
+          parent_count="$(git rev-list --parents -n 1 HEAD | awk '{print NF - 1}')"
+          if [[ "${parent_count}" -ne 2 ]]; then
+            echo "Release publication is allowed only from a two-parent merge commit on main; HEAD has ${parent_count} parent(s)." >&2
+            exit 1
+          fi
+
           version="$(tr -d '\r\n' < VERSION)"
           if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid VERSION value: ${version}" >&2
@@ -37,28 +46,49 @@ jobs:
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
           echo "archive=fvg-alert-bot-${version}.tar.gz" >> "${GITHUB_OUTPUT}"
 
-      - name: Build source archive and checksum
+      - name: Build and audit source archive
         shell: bash
         env:
           VERSION: ${{ steps.version.outputs.version }}
           ARCHIVE: ${{ steps.version.outputs.archive }}
         run: |
           set -euo pipefail
+          prefix="fvg-alert-bot-${VERSION}/"
           git archive \
             --format=tar.gz \
-            --prefix="fvg-alert-bot-${VERSION}/" \
+            --prefix="${prefix}" \
             --output="${ARCHIVE}" \
             HEAD
           sha256sum "${ARCHIVE}" > "${ARCHIVE}.sha256"
           test -s "${ARCHIVE}"
           test -s "${ARCHIVE}.sha256"
 
-      - name: Create immutable tag and GitHub Release when missing
+          members="$(mktemp)"
+          tar -tzf "${ARCHIVE}" > "${members}"
+          grep -Fx "${prefix}mini_app_backend/service.py" "${members}"
+          grep -Fx "${prefix}mini_app_backend/auth.py" "${members}"
+          grep -Fx "${prefix}telegram-mini-app/package.json" "${members}"
+          grep -Fx "${prefix}telegram-mini-app/src/api.ts" "${members}"
+          grep -Fx "${prefix}bot.py" "${members}"
+
+          if grep -Eq '(^|/)\.env$|\.sqlite(3)?($|[-.])|(^|/)node_modules/|(^|/)dist/|(^|/)__pycache__/|(^|/)\._|(^|/)\.DS_Store$' "${members}"; then
+            echo "Release archive contains forbidden runtime/build metadata:" >&2
+            grep -E '(^|/)\.env$|\.sqlite(3)?($|[-.])|(^|/)node_modules/|(^|/)dist/|(^|/)__pycache__/|(^|/)\._|(^|/)\.DS_Store$' "${members}" >&2
+            exit 1
+          fi
+
+          if git grep -nEi '[0-9]{8,10}:[A-Za-z0-9_-]{30,}' -- . ':!tests' ':!docs' ':!README.md'; then
+            echo "Potential Telegram bot token found in release source tree." >&2
+            exit 1
+          fi
+
+      - name: Create or verify immutable tag and GitHub Release
         id: publish
         uses: actions/github-script@v9
         env:
           VERSION: ${{ steps.version.outputs.version }}
           TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
         with:
           retries: 3
           script: |
@@ -67,6 +97,8 @@ jobs:
             const repo = context.repo.repo;
             const version = process.env.VERSION;
             const tag = process.env.TAG;
+            const archive = process.env.ARCHIVE;
+            const checksum = `${archive}.sha256`;
 
             let tagExists = false;
             try {
@@ -97,50 +129,48 @@ jobs:
               core.info(`Created tag ${tag} at ${context.sha}.`);
             }
 
+            let release;
             try {
-              const existing = await github.rest.repos.getReleaseByTag({
-                owner,
-                repo,
-                tag,
-              });
-              core.info(`Release ${tag} already exists: ${existing.data.html_url}`);
-              core.setOutput('release_created', 'false');
-              return;
+              release = (await github.rest.repos.getReleaseByTag({ owner, repo, tag })).data;
+              core.info(`Release ${tag} already exists: ${release.html_url}`);
             } catch (error) {
               if (error.status !== 404) throw error;
-            }
 
-            const releaseDocument = `docs/RELEASE_${version}.md`;
-            let body;
-            if (fs.existsSync(releaseDocument)) {
-              body = fs.readFileSync(releaseDocument, 'utf8').trim();
-            } else {
-              const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-              const heading = `## ${version}`;
-              const start = changelog.indexOf(heading);
-              body = 'See CHANGELOG.md for details.';
-              if (start >= 0) {
-                const next = changelog.indexOf('\n## ', start + heading.length);
-                body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+              const releaseDocument = `docs/RELEASE_${version}.md`;
+              let body;
+              if (fs.existsSync(releaseDocument)) {
+                body = fs.readFileSync(releaseDocument, 'utf8').trim();
+              } else {
+                const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+                const heading = `## ${version}`;
+                const start = changelog.indexOf(heading);
+                body = 'See CHANGELOG.md for details.';
+                if (start >= 0) {
+                  const next = changelog.indexOf('\n## ', start + heading.length);
+                  body = changelog.slice(start, next >= 0 ? next : undefined).trim();
+                }
               }
+
+              release = (await github.rest.repos.createRelease({
+                owner,
+                repo,
+                tag_name: tag,
+                target_commitish: context.sha,
+                name: `FVG Alert Bot ${version}`,
+                body,
+                draft: false,
+                prerelease: version.includes('-'),
+                generate_release_notes: false,
+              })).data;
+              core.info(`Created release: ${release.html_url}`);
             }
 
-            const release = (await github.rest.repos.createRelease({
-              owner,
-              repo,
-              tag_name: tag,
-              target_commitish: context.sha,
-              name: `FVG Alert Bot ${version}`,
-              body,
-              draft: false,
-              prerelease: version.includes('-'),
-              generate_release_notes: false,
-            })).data;
-            core.info(`Created release: ${release.html_url}`);
-            core.setOutput('release_created', 'true');
+            const assetNames = new Set((release.assets || []).map((asset) => asset.name));
+            core.setOutput('archive_missing', assetNames.has(archive) ? 'false' : 'true');
+            core.setOutput('checksum_missing', assetNames.has(checksum) ? 'false' : 'true');
 
-      - name: Upload release archive
-        if: steps.publish.outputs.release_created == 'true'
+      - name: Upload release archive when missing
+        if: steps.publish.outputs.archive_missing == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -148,6 +178,15 @@ jobs:
           ARCHIVE: ${{ steps.version.outputs.archive }}
         run: |
           set -euo pipefail
-          gh release upload "${TAG}" \
-            "${ARCHIVE}" \
-            "${ARCHIVE}.sha256"
+          gh release upload "${TAG}" "${ARCHIVE}"
+
+      - name: Upload release checksum when missing
+        if: steps.publish.outputs.checksum_missing == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          ARCHIVE: ${{ steps.version.outputs.archive }}
+        run: |
+          set -euo pipefail
+          gh release upload "${TAG}" "${ARCHIVE}.sha256"
