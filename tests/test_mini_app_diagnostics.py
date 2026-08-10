@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -37,7 +38,7 @@ class MiniAppDiagnosticsTests(unittest.TestCase):
             event_path = data / "events.sqlite3"
             funding_path = data / "funding.sqlite3"
             for path in (event_path, funding_path):
-                with sqlite3.connect(path) as connection:
+                with closing(sqlite3.connect(path)) as connection:
                     connection.execute("CREATE TABLE sample(id INTEGER PRIMARY KEY)")
             (data / "user_preferences.json").write_text("{}", encoding="utf-8")
             (data / "runtime_settings.json").write_text("{\"x\": true}", encoding="utf-8")
