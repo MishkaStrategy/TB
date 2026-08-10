@@ -24,7 +24,7 @@ class MenuTests(unittest.TestCase):
         callbacks = [row[0].callback_data for row in keyboard]
         self.assertEqual(
             labels,
-            ["🔔 Настройки FVG", "📊 Статистика FVG", "💸 Фандинг", "⚙️ Настройки"],
+            ["✅ FVG", "📊 Статистика", "💸 Фандинг", "⚙️ Настройки"],
         )
         self.assertIn("menu:fvg-settings", callbacks)
         self.assertIn("menu:fvg-stats", callbacks)
@@ -86,10 +86,10 @@ class MenuTests(unittest.TestCase):
         labels = [button.text for row in rows for button in row]
         callbacks = [button.callback_data for row in rows for button in row]
         self.assertIn("✅ Цена", labels)
-        self.assertIn("⏸️ 📏 Размер FVG", labels)
+        self.assertIn("⏸ 📏 Размер FVG", labels)
         self.assertIn("📌 Инструменты", labels)
         self.assertIn("❓ FAQ по FVG", labels)
-        self.assertIn("✅ Подтверждённые FVG", labels)
+        self.assertIn("✅ Подтверждённые", labels)
         self.assertNotIn("Пред-FVG BTC", labels)
         self.assertIn("fvg15:open", callbacks)
         self.assertIn("fvg15:faq:main", callbacks)
@@ -105,7 +105,7 @@ class MenuTests(unittest.TestCase):
                 for button in row
             ]
             self.assertIn("✅ Цена", labels)
-            self.assertIn("⏸️ 📏 Размер FVG", labels)
+            self.assertIn("⏸ 📏 Размер FVG", labels)
             settings.set_size_filter(42, "BTCUSDT", "0.1", None, unit="PERCENT")
             labels = [
                 button.text
