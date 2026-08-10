@@ -8,6 +8,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 
@@ -141,7 +142,7 @@ class RuntimeBackupTests(unittest.TestCase):
                 path = extract_dir / database
                 self.assertTrue(path.is_file())
                 self.assertEqual(manifest_files[database]["quick_check"], "ok")
-                with sqlite3.connect(path) as connection:
+                with closing(sqlite3.connect(path)) as connection:
                     self.assertEqual(
                         connection.execute("SELECT value FROM backup_probe").fetchone()[0],
                         expected,
@@ -153,7 +154,7 @@ class RuntimeBackupTests(unittest.TestCase):
 
             history_path = backup_dir / "backup_history.sqlite3"
             self.assertTrue(history_path.is_file())
-            with sqlite3.connect(history_path) as connection:
+            with closing(sqlite3.connect(history_path)) as connection:
                 connection.row_factory = sqlite3.Row
                 rows = connection.execute("SELECT * FROM backup_runs").fetchall()
             self.assertEqual(len(rows), 1)
@@ -258,7 +259,7 @@ exec "${REAL_TAR}" "$@"
                 list(backup_dir.glob("fvg-alert-bot-*.tar.gz.sha256")),
                 [],
             )
-            with sqlite3.connect(backup_dir / "backup_history.sqlite3") as connection:
+            with closing(sqlite3.connect(backup_dir / "backup_history.sqlite3")) as connection:
                 connection.row_factory = sqlite3.Row
                 row = connection.execute("SELECT * FROM backup_runs").fetchone()
             self.assertIsNotNone(row)
