@@ -19,7 +19,7 @@ concurrency:
 jobs:
   funding-storage-stdlib:
     name: Funding storage stdlib verification
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 5
 
     steps:
@@ -44,7 +44,7 @@ jobs:
 
   mini-app-frontend:
     name: Telegram Mini App frontend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 10
     defaults:
       run:
@@ -95,7 +95,7 @@ jobs:
 
   tests:
     name: Python tests
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 20
     env:
       PUBLIC_ACCESS_ENABLED: "true"
@@ -203,7 +203,7 @@ jobs:
 
   vds-linux-verification:
     name: Linux VDS systemd verification
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux]
     timeout-minutes: 10
 
     steps:
