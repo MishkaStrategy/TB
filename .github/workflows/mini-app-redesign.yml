@@ -32,6 +32,8 @@ jobs:
     steps:
       - name: Check out exact commit
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Verify runner toolchain
         shell: bash
@@ -70,6 +72,8 @@ jobs:
     steps:
       - name: Check out exact commit
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Create isolated Python environment
         shell: bash
