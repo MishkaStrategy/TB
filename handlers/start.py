@@ -1,3 +1,5 @@
+import asyncio
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -30,8 +32,9 @@ def _enable_confirmed_fvg_for_new_user(chat_id: int, settings: FvgAlertSettings 
 @authorized
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    auto_enabled = _enable_confirmed_fvg_for_new_user(chat_id)
-    language = PREFERENCES.user(chat_id).get("language", "ru")
+    auto_enabled = await asyncio.to_thread(_enable_confirmed_fvg_for_new_user, chat_id)
+    preferences = await asyncio.to_thread(PREFERENCES.user, chat_id)
+    language = preferences.get("language", "ru")
 
     if language == "en":
         activation_note = (
