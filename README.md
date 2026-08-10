@@ -1,6 +1,6 @@
 # FVG Alert Bot
 
-![Version](https://img.shields.io/badge/version-1.3.7-2ea44f)
+![Version](https://img.shields.io/badge/version-1.3.8-2ea44f)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab)
 ![Telegram](https://img.shields.io/badge/interface-Telegram-2aabee)
 ![Status](https://img.shields.io/badge/status-stable-2ea44f)
@@ -9,7 +9,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Текущий релиз: **1.3.7**. Это immutable patch-релиз, который сохраняет внешний Telegram Mini App Menu Button при запуске бота. Бот обновляет команды, но больше не заменяет настроенную через Bot API/BotFather Web App кнопку стандартной кнопкой команд. Production update сохраняет env, SQLite, пользовательские настройки, Xray и сетевую конфигурацию.
+Текущий релиз: **1.3.8**. Это immutable UI/UX patch-релиз: persistent Telegram keyboard следует выбранному RU/EN языку, `/start` стал компактнее, Mini App получил более читаемую типографику, touch targets не меньше 44px для прямых controls, явные focus/selected states и reduced-motion support. Поведение `1.3.7`, сохраняющее внешнюю Telegram Mini App Menu Button, остаётся неизменным. Production update сохраняет env, SQLite, пользовательские настройки, Xray и сетевую конфигурацию.
 
 ## Что входит в 1.3.x
 
@@ -56,11 +56,11 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - `⚙️ Настройки`;
 - `❤️ Донат`.
 
-Для каждого Telegram ID отдельно сохраняются язык RU/EN, compact/detailed формат, FVG-инструменты и фильтры, funding alerts и выбранные биржи.
+Для каждого Telegram ID отдельно сохраняются язык RU/EN, compact/detailed формат, FVG-инструменты и фильтры, funding alerts и выбранные биржи. Начиная с `1.3.8`, нижнее меню сразу следует выбранному языку и обновляется после смены RU/EN.
 
 ### Telegram Mini App
 
-Официальный `v1.3.7` содержит `telegram-mini-app/` и `mini_app_backend/`.
+Официальный `v1.3.8` содержит `telegram-mini-app/` и `mini_app_backend/`.
 
 - frontend: React 19 + TypeScript + Vite;
 - новый `TradingApp`: Главная, FVG, Funding, Уведомления, Настройки и защищённый Admin;
@@ -78,6 +78,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - funding, RU/EN, compact/detailed и административная диагностика используют существующие stores;
 - admin access/allowlist writes требуют одноразового challenge;
 - backup/restart остаются fail-closed без production callbacks;
+- критический secondary text не опускается до прежних 8–10px, прямые mobile controls имеют target не меньше 44px, selection/focus states доступны не только через цвет, а reduced-motion отключает необязательную анимацию;
 - Mini App не удаляет и не заменяет существующий Telegram UI.
 
 Для production Mini App зарезервирован `https://tbbot.mstrategy.com.ru`, но runtime-код не привязан к домену жёстко. Публичный HTTPS reverse proxy, регистрация URL в BotFather/menu button и включение backend выполняются отдельным deployment-этапом. Релиз не изменяет Amnezia/Xray и внешний port `443`.
@@ -128,6 +129,7 @@ Operational readers открывают SQLite через `mode=ro` и `PRAGMA qu
 
 Подробности:
 
+- [`docs/RELEASE_1.3.8.md`](docs/RELEASE_1.3.8.md);
 - [`docs/RELEASE_1.3.7.md`](docs/RELEASE_1.3.7.md);
 - [`docs/RELEASE_1.3.4.md`](docs/RELEASE_1.3.4.md);
 - [`docs/RELEASE_1.3.3.md`](docs/RELEASE_1.3.3.md);
@@ -174,15 +176,15 @@ apt update && apt install -y git
 git clone https://github.com/MishkaStrategy/TB.git /root/TB
 cd /root/TB
 git checkout main
-test "$(cat VERSION)" = "1.3.7"
+test "$(cat VERSION)" = "1.3.8"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 Установщик собирает staging-релиз и запускает unit suite в чистом окружении до остановки работающего процесса. Production `.env` не копируется в staging. Затем создаётся backup, выполняется атомарное переключение, а при ошибке запуска автоматически возвращается предыдущая версия.
 
-## Обновление существующего VDS до 1.3.7
+## Обновление существующего VDS до 1.3.8
 
-Production обновляется только после публикации проверенного тега `v1.3.7` и точного SHA из deployment issue. Релизный архив называется `fvg-alert-bot-1.3.7.tar.gz`.
+Production обновляется только после публикации проверенного тега `v1.3.8` и точного SHA из deployment issue. Релизный архив называется `fvg-alert-bot-1.3.8.tar.gz`.
 
 ```bash
 cd /root/TB
@@ -192,8 +194,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.7 \
-  EXPECTED_VERSION=1.3.7 \
+  TARGET_REF=v1.3.8 \
+  EXPECTED_VERSION=1.3.8 \
   EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -215,11 +217,12 @@ sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
 sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 ```
 
-Ожидается версия `1.3.7`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
+Ожидается версия `1.3.8`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
 
 Telegram smoke:
 
 - `/start`, `/menu`, `/funding`, `/admin`, `/donate`;
+- проверить RU/EN persistent keyboard и её обновление после смены языка;
 - проверить список сохранённых FVG-инструментов и нужные `15m/1h/4h/1d`;
 - добавить non-BTC инструмент минимум на `15m` и убедиться, что он присутствует в настройках после повторного открытия;
 - проверить instrument на другой бирже, а не только BTC/Bitunix;
@@ -327,4 +330,4 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
 
 Общий CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, exchange-adapter contracts, FVG multi-timeframe aggregation, non-BTC end-to-end delivery, Mini App auth/service/runtime/web/admin regressions, backup portability regression, полный unit suite, bounded `500 × 10` soak и production systemd verification.
 
-Release workflow для версии 1.3.7 создаёт `v1.3.7` только из merge commit `main`, сохраняет immutable tag/assets, создаёт `fvg-alert-bot-1.3.7.tar.gz` и SHA-256 checksum, а повторный запуск при уже корректном tag/release является идемпотентным.
+Release workflow для версии 1.3.8 создаёт `v1.3.8` только из merge commit `main`, сохраняет immutable tag/assets, создаёт `fvg-alert-bot-1.3.8.tar.gz` и SHA-256 checksum, а повторный запуск при уже корректном tag/release является идемпотентным.

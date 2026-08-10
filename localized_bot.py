@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from telegram.ext import ExtBot
 
+from button_localization import translate_button_label
 from database.user_preferences import UserPreferences
-from localization import CURRENT_CHAT_ID, localize_text, translate_label
+from localization import CURRENT_CHAT_ID, localize_text
 
 
 class LocalizedExtBot(ExtBot):
@@ -32,7 +33,7 @@ class LocalizedExtBot(ExtBot):
             for row in data.get(key, []):
                 for button in row:
                     if isinstance(button, dict) and isinstance(button.get("text"), str):
-                        button["text"] = translate_label(button["text"], language)
+                        button["text"] = translate_button_label(button["text"], language)
         try:
             return type(reply_markup).de_json(data, self)
         except Exception:

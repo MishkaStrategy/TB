@@ -73,7 +73,7 @@ export function PageHeader({ eyebrow, title, description, trailing }: { eyebrow?
 }
 
 export function Chip({ active = false, children, onClick, tone = "default", disabled = false }: { active?: boolean; children: ReactNode; onClick?: () => void; tone?: "default" | "positive" | "negative"; disabled?: boolean }) {
-  return <button type="button" className={`chip ${active ? "active" : ""} ${tone}`} disabled={disabled} onClick={() => { impact("light"); onClick?.(); }}>{active ? <Icon name="check" size={14} /> : null}{children}</button>;
+  return <button type="button" className={`chip ${active ? "active" : ""} ${tone}`} aria-pressed={onClick ? active : undefined} disabled={disabled} onClick={() => { impact("light"); onClick?.(); }}>{active ? <Icon name="check" size={14} /> : null}{children}</button>;
 }
 
 export function PriceChange({ value }: { value: number | null | undefined }) {
