@@ -5,6 +5,7 @@ import type { AppSettings, SaveSettingsRequest, SettingsEnvelope } from "./types
 
 const CONFIGURED_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 const MOCK_MODE = String(import.meta.env.VITE_MOCK_MODE ?? "false").toLowerCase() === "true";
+const REQUEST_TIMEOUT_MS = 10_000;
 
 function announceLanguage(envelope: SettingsEnvelope): SettingsEnvelope {
   setUiLanguage(envelope.settings.general.language);
@@ -21,27 +22,48 @@ function mockEnvelope(settings: AppSettings = mockSettings): SettingsEnvelope {
   });
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${CONFIGURED_API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Telegram-Init-Data": getInitData(),
-      ...init?.headers,
-    },
-  });
-
-  if (!response.ok) {
-    const payload = await response.json().catch(() => null) as {
-      error?: { message?: string; field?: string };
-    } | null;
-    const field = payload?.error?.field ? ` (${payload.error.field})` : "";
-    throw new Error(
-      `${payload?.error?.message ?? `API request failed with status ${response.status}`}${field}`,
-    );
+function requestFailureMessage(error: unknown): string {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return "Сервер настроек не отвечает. Проверьте соединение и откройте Mini App ещё раз.";
   }
+  if (error instanceof TypeError) {
+    return "Не удалось подключиться к серверу настроек. Проверьте соединение и повторите попытку.";
+  }
+  return error instanceof Error ? error.message : "Не удалось выполнить запрос к серверу настроек.";
+}
 
-  return response.json() as Promise<T>;
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${CONFIGURED_API_BASE_URL}${path}`, {
+      ...init,
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        "X-Telegram-Init-Data": getInitData(),
+        ...init?.headers,
+      },
+    });
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null) as {
+        error?: { message?: string; field?: string };
+      } | null;
+      const field = payload?.error?.field ? ` (${payload.error.field})` : "";
+      throw new Error(
+        `${payload?.error?.message ?? `API request failed with status ${response.status}`}${field}`,
+      );
+    }
+
+    return await response.json() as T;
+  } catch (error: unknown) {
+    throw new Error(requestFailureMessage(error));
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 export async function loadSettings(): Promise<SettingsEnvelope> {
