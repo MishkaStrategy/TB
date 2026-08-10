@@ -1,0 +1,46 @@
+name: Publish canonical evidence to GitHub Release
+description: Publish immutable exact-head evidence directly from the current job without Actions artifact storage.
+inputs:
+  evidence_path:
+    description: Path to the evidence file or archive.
+    required: true
+  evidence_name:
+    description: Immutable asset name in the GitHub Release.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Publish immutable release evidence
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        EVIDENCE_PATH: ${{ inputs.evidence_path }}
+        EVIDENCE_NAME: ${{ inputs.evidence_name }}
+      run: |
+        set -euo pipefail
+        test -f "$EVIDENCE_PATH"
+        tag="evidence-${GITHUB_SHA}"
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+        digest_file="$tmp/${EVIDENCE_NAME}.sha256"
+        if command -v shasum >/dev/null 2>&1; then
+          shasum -a 256 "$EVIDENCE_PATH" | sed "s#  .*#  ${EVIDENCE_NAME}#" > "$digest_file"
+        else
+          sha256sum "$EVIDENCE_PATH" | sed "s#  .*#  ${EVIDENCE_NAME}#" > "$digest_file"
+        fi
+        if ! gh release view "$tag" >/dev/null 2>&1; then
+          gh release create "$tag" --target "$GITHUB_SHA" --title "Evidence ${GITHUB_SHA}" --notes "Canonical immutable CI evidence for ${GITHUB_REPOSITORY}@${GITHUB_SHA}."
+        fi
+        upload_immutable() {
+          local src="$1" name="$2"
+          if gh release view "$tag" --json assets --jq '.assets[].name' | grep -Fxq "$name"; then
+            mkdir -p "$tmp/existing"
+            gh release download "$tag" --pattern "$name" --dir "$tmp/existing"
+            cmp "$src" "$tmp/existing/$name" || { echo "Existing release asset differs: $name" >&2; exit 1; }
+            echo "Immutable asset already present and identical: $name"
+          else
+            gh release upload "$tag" "$src#$name"
+          fi
+        }
+        upload_immutable "$EVIDENCE_PATH" "$EVIDENCE_NAME"
+        upload_immutable "$digest_file" "${EVIDENCE_NAME}.sha256"
