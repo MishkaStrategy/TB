@@ -1,0 +1,124 @@
+name: Mini App redesign verification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "telegram-mini-app/**"
+      - "mini_app_backend/**"
+      - "exchanges/funding.py"
+      - "exchanges/fvg_candles.py"
+      - "tests/test_mini_app*.py"
+      - ".github/workflows/mini-app-redesign.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mini-app-redesign-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Mini App frontend / fast
+    runs-on: [self-hosted, fast]
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: telegram-mini-app
+
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify runner toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build same-origin production bundle
+        env:
+          VITE_MOCK_MODE: "false"
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build
+          test -f dist/index.html
+          grep -R -F '/api/mini-app/market-overview' dist
+          if find dist -type f -name '*.map' -print -quit | grep -q .; then
+            echo 'Production frontend must not publish source maps' >&2
+            exit 1
+          fi
+
+  backend:
+    name: Mini App backend / fast
+    runs-on: [self-hosted, fast]
+    timeout-minutes: 15
+    env:
+      PUBLIC_ACCESS_ENABLED: "true"
+
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Create isolated Python environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m venv .venv-mini-app
+          echo "$PWD/.venv-mini-app/bin" >> "$GITHUB_PATH"
+
+      - name: Install project dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile Mini App sources and tests
+        run: >-
+          python -m compileall -q
+          mini_app_backend
+          telegram-mini-app
+          tests/test_mini_app_api_timeout.py
+          tests/test_mini_app_market_overview.py
+          tests/test_mini_app_market_web.py
+          tests/test_mini_app_service.py
+          tests/test_mini_app_web.py
+          tests/test_mini_app_runtime_service.py
+          tests/test_mini_app_admin_actions.py
+          tests/test_mini_app_admin_web.py
+          tests/test_mini_app_navigation.py
+          tests/test_mini_app_design_audit.py
+
+      - name: Run Mini App regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest -v \
+            tests.test_mini_app_auth \
+            tests.test_mini_app_api_timeout \
+            tests.test_mini_app_service \
+            tests.test_mini_app_web \
+            tests.test_mini_app_runtime_service \
+            tests.test_mini_app_admin_actions \
+            tests.test_mini_app_admin_web \
+            tests.test_mini_app_market_overview \
+            tests.test_mini_app_market_web \
+            tests.test_mini_app_navigation \
+            tests.test_mini_app_design_audit

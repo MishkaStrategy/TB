@@ -37,8 +37,10 @@ export function initTelegram(): void {
   if (!webApp) return;
   webApp.ready();
   webApp.expand();
-  webApp.setHeaderColor?.("#07111f");
-  webApp.setBackgroundColor?.("#07111f");
+  // TB intentionally keeps its own dark trading surface while still using
+  // Telegram viewport, safe-area, initData and haptic integrations.
+  webApp.setHeaderColor?.("#070b12");
+  webApp.setBackgroundColor?.("#070b12");
 }
 
 export function getInitData(): string {

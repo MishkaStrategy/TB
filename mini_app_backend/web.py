@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import Iterable
@@ -11,6 +12,7 @@ from aiohttp import web
 
 from .admin_actions import AdminActionError, MiniAppAdminActions
 from .auth import TelegramInitDataError, TelegramUser, validate_init_data
+from .market_overview import MarketOverviewService
 from .runtime_service import MiniAppSettingsService
 from .service import SettingsValidationError
 
@@ -48,6 +50,7 @@ def create_mini_app_application(
     *,
     bot_token: str,
     service: MiniAppSettingsService | None = None,
+    market_overview: MarketOverviewService | None = None,
     admin_actions: MiniAppAdminActions | None = None,
     backup_callback: Callable[[TelegramUser], Any] | None = None,
     restart_callback: Callable[[TelegramUser], Any] | None = None,
@@ -70,6 +73,7 @@ def create_mini_app_application(
         raise ValueError("client_max_size must be positive")
 
     settings_service = service or MiniAppSettingsService()
+    market_service = market_overview or MarketOverviewService(settings_service)
     action_service = admin_actions or MiniAppAdminActions.from_settings_service(
         settings_service,
         backup_callback=backup_callback,
@@ -139,6 +143,7 @@ def create_mini_app_application(
     app["mini_app_bot_token"] = bot_token
     app["mini_app_auth_max_age_seconds"] = int(auth_max_age_seconds)
     app["mini_app_settings_service"] = settings_service
+    app["mini_app_market_overview"] = market_service
     app["mini_app_admin_actions"] = action_service
 
     def authenticated_user(request: web.Request) -> TelegramUser:
@@ -183,6 +188,14 @@ def create_mini_app_application(
         user = authenticated_user(request)
         envelope = request.app["mini_app_settings_service"].read_settings(user)
         return web.json_response(enriched_envelope(user, envelope))
+
+    async def get_market_overview(request: web.Request) -> web.Response:
+        user = authenticated_user(request)
+        overview = await asyncio.to_thread(
+            request.app["mini_app_market_overview"].read_overview,
+            user,
+        )
+        return web.json_response(overview)
 
     async def put_settings(request: web.Request) -> web.Response:
         user = authenticated_user(request)
@@ -269,6 +282,7 @@ def create_mini_app_application(
 
     app.router.add_get("/healthz", health)
     app.router.add_get("/api/mini-app/settings", get_settings)
+    app.router.add_get("/api/mini-app/market-overview", get_market_overview)
     app.router.add_put("/api/mini-app/settings", put_settings)
     app.router.add_post(
         "/api/mini-app/admin/confirmations", create_confirmation
