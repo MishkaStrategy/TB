@@ -34,6 +34,7 @@ const makeInstrumentKey = (exchange: Exchange, symbol: string) => (
 );
 
 type Tab = "overview" | "general" | "notifications" | "fvg" | "funding" | "admin";
+type PrimaryTab = "overview" | "fvg" | "funding";
 
 type ToggleProps = {
   checked: boolean;
@@ -189,6 +190,7 @@ function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [baseline, setBaseline] = useState("");
   const [tab, setTab] = useState<Tab>("overview");
+  const [profileOpen, setProfileOpen] = useState(false);
   const [selectedInstrumentKey, setSelectedInstrumentKey] = useState("");
   const [newSymbol, setNewSymbol] = useState("");
   const [newExchange, setNewExchange] = useState<Exchange>("bitunix");
@@ -277,6 +279,13 @@ function App() {
     }));
   };
 
+  const navigate = (next: Tab) => {
+    setTab(next);
+    setProfileOpen(false);
+    impact("light");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   const save = async () => {
     if (!settings || saving || !dirty) return;
     setSaving(true);
@@ -323,6 +332,7 @@ function App() {
   }
 
   const maxSymbols = envelope.limits?.maxFvgSymbols ?? 10;
+  const atInstrumentLimit = settings.fvg.symbols.length >= maxSymbols;
   const selected = settings.fvg.symbols.find((item) => item.key === selectedInstrumentKey)
     ?? settings.fvg.symbols[0];
 
@@ -339,7 +349,7 @@ function App() {
       setNewSymbol("");
       return;
     }
-    if (settings.fvg.symbols.length >= maxSymbols) {
+    if (atInstrumentLimit) {
       setToast(`Достигнут лимит: ${maxSymbols} инструментов`);
       notify("warning");
       return;
@@ -457,45 +467,45 @@ function App() {
 
   const renderOverview = () => (
     <div className="screen-stack">
-      <section className="hero-card">
-        <div className="hero-orbit orbit-one" />
-        <div className="hero-orbit orbit-two" />
-        <div className="hero-content">
+      <section className="dashboard-hero">
+        <div className="dashboard-copy">
           <span className="eyebrow">Центр управления</span>
           <h1>Настройки торговых сигналов</h1>
-          <p>
-            Все персональные фильтры собраны в одном месте. Бот продолжает
-            отвечать за сигналы, статистику и рыночные данные.
-          </p>
-          <div className="hero-stats">
-            <div><strong>{settings.fvg.symbols.length}</strong><span>инструментов</span></div>
-            <div><strong>{settings.funding.exchanges.length}</strong><span>бирж фандинга</span></div>
-            <div><strong>{formatInterval(settings.funding.intervalMinutes)}</strong><span>частота</span></div>
+          <p>Все персональные фильтры собраны в одном месте. Бот продолжает отвечать за сигналы, статистику и рыночные данные.</p>
+        </div>
+        <div className="dashboard-status-grid">
+          <div className="dashboard-stat">
+            <span>FVG</span>
+            <strong>{settings.fvg.enabled ? "Включён" : "Выключен"}</strong>
+            <small>{settings.fvg.symbols.length} / {maxSymbols}</small>
+          </div>
+          <div className="dashboard-stat">
+            <span>Фандинг</span>
+            <strong>{settings.funding.enabled ? "Включён" : "Выключен"}</strong>
+            <small>{settings.funding.exchanges.length} бирж</small>
+          </div>
+          <div className="dashboard-stat">
+            <span>Формат сообщений</span>
+            <strong>{settings.general.messageMode === "compact" ? "Компактный" : "Подробный"}</strong>
+            <small>{settings.general.language === "ru" ? "Русский" : "English"}</small>
           </div>
         </div>
       </section>
 
       <div className="module-grid">
-        <button type="button" className="module-card fvg" onClick={() => setTab("fvg")}>
+        <button type="button" className="module-card fvg" onClick={() => navigate("fvg")}>
           <div className="module-top">
             <span>◫</span>
-            <StatusPill active={settings.fvg.enabled}>
-              {settings.fvg.enabled ? "Активен" : "Пауза"}
-            </StatusPill>
+            <StatusPill active={settings.fvg.enabled}>{settings.fvg.enabled ? "Активен" : "Пауза"}</StatusPill>
           </div>
           <h3>Fair Value Gap</h3>
-          <p>15m-источник, подтверждённые 15m/1h/4h/1d, биржи и персональные фильтры.</p>
-          <div className="module-footer">
-            <span>{settings.fvg.notifyConfirmedFvg ? "Подтверждённые включены" : "Сигналы выключены"}</span>
-            <b>→</b>
-          </div>
+          <p>Инструменты, биржи, таймфреймы, направления и персональные фильтры.</p>
+          <div className="module-footer"><span>{settings.fvg.symbols.length} из {maxSymbols} инструментов</span><b>→</b></div>
         </button>
-        <button type="button" className="module-card funding" onClick={() => setTab("funding")}>
+        <button type="button" className="module-card funding" onClick={() => navigate("funding")}>
           <div className="module-top">
             <span>≋</span>
-            <StatusPill active={settings.funding.enabled}>
-              {settings.funding.enabled ? "Активен" : "Пауза"}
-            </StatusPill>
+            <StatusPill active={settings.funding.enabled}>{settings.funding.enabled ? "Активен" : "Пауза"}</StatusPill>
           </div>
           <h3>Фандинг</h3>
           <p>Порог, направления, периодичность и шесть фьючерсных бирж.</p>
@@ -520,6 +530,9 @@ function App() {
             onChange={(messageMode) => updateGeneral({ messageMode })}
           />
         </SettingRow>
+        <SettingRow icon="🔎" title="Активные уведомления" description="Сводка всех действующих правил">
+          <button type="button" className="text-button" onClick={() => navigate("notifications")}>Открыть</button>
+        </SettingRow>
       </Card>
     </div>
   );
@@ -543,20 +556,12 @@ function App() {
       </Card>
       <Card title="Формат уведомлений" description="Выберите объём информации в каждом сигнале">
         <div className="choice-cards">
-          <button
-            type="button"
-            className={settings.general.messageMode === "compact" ? "choice active" : "choice"}
-            onClick={() => updateGeneral({ messageMode: "compact" })}
-          >
+          <button type="button" className={settings.general.messageMode === "compact" ? "choice active" : "choice"} onClick={() => updateGeneral({ messageMode: "compact" })}>
             <span className="choice-icon">⚡</span>
             <strong>Компактный</strong>
             <small>Инструмент, значение и статус. Быстро читается в потоке сообщений.</small>
           </button>
-          <button
-            type="button"
-            className={settings.general.messageMode === "detailed" ? "choice active" : "choice"}
-            onClick={() => updateGeneral({ messageMode: "detailed" })}
-          >
+          <button type="button" className={settings.general.messageMode === "detailed" ? "choice active" : "choice"} onClick={() => updateGeneral({ messageMode: "detailed" })}>
             <span className="choice-icon">▤</span>
             <strong>Подробный</strong>
             <small>Все доступные поля сигнала, фильтров и рыночного состояния.</small>
@@ -582,7 +587,7 @@ function App() {
         </div>
         <Card title="Формат сообщений" description="Единый формат для FVG и фандинга">
           <SettingRow icon="📱" title={settings.general.messageMode === "compact" ? "Компактный" : "Подробный"} description={`Язык: ${settings.general.language === "ru" ? "Русский" : "English"}`}>
-            <button type="button" className="text-button" onClick={() => setTab("general")}>Изменить</button>
+            <button type="button" className="text-button" onClick={() => navigate("general")}>Изменить</button>
           </SettingRow>
         </Card>
         <Card title="Fair Value Gap" description="Текущая конфигурация подтверждённых сигналов" accent="#23d5ab">
@@ -594,7 +599,7 @@ function App() {
             <Metric label="Бычьи" value={settings.fvg.bullishEnabled ? "Да" : "Нет"} />
             <Metric label="Медвежьи" value={settings.fvg.bearishEnabled ? "Да" : "Нет"} />
           </div>
-          <button type="button" className="text-button" onClick={() => setTab("fvg")}>Открыть настройки FVG</button>
+          <button type="button" className="text-button" onClick={() => navigate("fvg")}>Открыть настройки FVG</button>
         </Card>
         <Card title="Фандинг" description="Текущие правила мультибиржевой рассылки" accent="#ffb545">
           <div className="diagnostic-grid">
@@ -605,7 +610,7 @@ function App() {
             <Metric label="Биржи" value={settings.funding.exchanges.length} hint={settings.funding.exchanges.map((item) => exchangeLabels[item]).join(", ")} />
             <Metric label="Следующая проверка" value={formatDate(settings.funding.nextCheckAt)} />
           </div>
-          <button type="button" className="text-button" onClick={() => setTab("funding")}>Открыть настройки фандинга</button>
+          <button type="button" className="text-button" onClick={() => navigate("funding")}>Открыть настройки фандинга</button>
         </Card>
       </div>
     );
@@ -637,33 +642,40 @@ function App() {
         </div>
       </Card>
       <Card title="Инструменты" description={`Добавлено ${settings.fvg.symbols.length} из ${maxSymbols}`}>
-        <div className="symbol-add">
-          <input
-            value={newSymbol}
-            onChange={(event) => setNewSymbol(event.target.value.toUpperCase())}
-            onKeyDown={(event) => event.key === "Enter" && addInstrument()}
-            placeholder="Например, ETHUSDT"
-            maxLength={20}
-          />
-          <button type="button" onClick={addInstrument}>Добавить</button>
+        <div className="instrument-limit">
+          <div><span>Инструменты</span><strong>{settings.fvg.symbols.length} / {maxSymbols}</strong></div>
+          <div className="instrument-limit-track"><span style={{ width: `${Math.min(100, (settings.fvg.symbols.length / Math.max(1, maxSymbols)) * 100)}%` }} /></div>
         </div>
-        <div className="exchange-grid">
-          {exchangeOrder.map((exchange) => (
-            <button
-              type="button"
-              key={exchange}
-              className={newExchange === exchange ? "exchange-card active" : "exchange-card"}
-              onClick={() => setNewExchange(exchange)}
-            >
-              <span>{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><i>{newExchange === exchange ? "✓" : ""}</i>
-            </button>
-          ))}
-        </div>
+
+        {!atInstrumentLimit ? (
+          <div className="add-instrument-block">
+            <div className="filter-header"><div><strong>Биржа</strong><small>Выберите источник рыночных данных</small></div></div>
+            <div className="exchange-grid compact-exchanges">
+              {exchangeOrder.map((exchange) => (
+                <button type="button" key={exchange} className={newExchange === exchange ? "exchange-card active" : "exchange-card"} onClick={() => setNewExchange(exchange)}>
+                  <span>{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><i>{newExchange === exchange ? "✓" : ""}</i>
+                </button>
+              ))}
+            </div>
+            <div className="symbol-add">
+              <input value={newSymbol} onChange={(event) => setNewSymbol(event.target.value.toUpperCase())} onKeyDown={(event) => event.key === "Enter" && addInstrument()} placeholder="Например, ETHUSDT" maxLength={20} />
+              <button type="button" onClick={addInstrument}>Добавить</button>
+            </div>
+          </div>
+        ) : (
+          <div className="limit-notice">Достигнут технический лимит: {maxSymbols} инструментов. Удалите один инструмент, чтобы добавить новый.</div>
+        )}
+
         {settings.fvg.symbols.length ? (
-          <div className="symbol-tabs">
+          <div className="instrument-list">
             {settings.fvg.symbols.map((item) => (
-              <button type="button" key={item.key} className={selected?.key === item.key ? "active" : ""} onClick={() => setSelectedInstrumentKey(item.key)}>
-                <span className={item.enabled ? "dot active" : "dot"} />{item.symbol} · {exchangeLabels[item.exchange]}
+              <button type="button" key={item.key} className={selected?.key === item.key ? "instrument-item active" : "instrument-item"} onClick={() => setSelectedInstrumentKey(item.key)}>
+                <span className={item.enabled ? "dot active" : "dot"} />
+                <div>
+                  <strong>{item.symbol}</strong>
+                  <small>{exchangeLabels[item.exchange]} · {item.timeframes.join(" · ")}</small>
+                </div>
+                <b>›</b>
               </button>
             ))}
           </div>
@@ -689,7 +701,7 @@ function App() {
 
           <div className="filter-panel">
             <div className="filter-header"><div><strong>Таймфреймы</strong><small>15m источник; старшие интервалы агрегируются локально</small></div></div>
-            <div className="scope-grid">
+            <div className="scope-grid timeframe-grid">
               {timeframeOrder.map((timeframe) => {
                 const active = selected.timeframes.includes(timeframe);
                 return (
@@ -869,27 +881,65 @@ function App() {
           : tab === "funding" ? renderFunding()
             : renderAdmin();
 
-  const navItems: Array<[Tab, string, string]> = [
+  const primaryNavItems: Array<[PrimaryTab, string, string]> = [
     ["overview", "⌂", "Главная"],
-    ["general", "⚙", "Общие"],
-    ["notifications", "🔔", "Сводка"],
     ["fvg", "◫", "FVG"],
     ["funding", "≋", "Фандинг"],
-    ["admin", "◇", "Админ"],
   ];
+
+  const secondaryTitle = tab === "general"
+    ? "Общие настройки"
+    : tab === "notifications"
+      ? "Сводка"
+      : tab === "admin"
+        ? "Администрирование"
+        : "";
+  const secondary = Boolean(secondaryTitle);
 
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">T</span>
-          <div><strong>TB Settings</strong><small>{envelope.source === "mock" ? "Демо-режим" : "Подключено к боту"}</small></div>
-        </div>
-        <div className="profile">
+        {secondary ? (
+          <button type="button" className="top-back" onClick={() => navigate("overview")} aria-label="Главная">
+            <span>←</span><div><strong>{secondaryTitle}</strong><small>Главная</small></div>
+          </button>
+        ) : (
+          <div className="brand">
+            <span className="brand-mark">T</span>
+            <div><strong>TB Settings</strong><small>{envelope.source === "mock" ? "Демо-режим" : "Подключено к боту"}</small></div>
+          </div>
+        )}
+        <button type="button" className="profile-trigger" onClick={() => { setProfileOpen((value) => !value); impact("light"); }} aria-expanded={profileOpen}>
           <span>{envelope.user.firstName.slice(0, 1).toUpperCase()}</span>
           <div><strong>{envelope.user.firstName}</strong>{envelope.user.username ? <small>@{envelope.user.username}</small> : null}</div>
-        </div>
+          <b>⌄</b>
+        </button>
       </header>
+
+      {profileOpen ? (
+        <>
+          <button type="button" className="profile-backdrop" aria-label="Главная" onClick={() => setProfileOpen(false)} />
+          <aside className="profile-sheet" role="dialog" aria-modal="true">
+            <div className="profile-sheet-header">
+              <span>{envelope.user.firstName.slice(0, 1).toUpperCase()}</span>
+              <div><strong>{envelope.user.firstName}</strong>{envelope.user.username ? <small>@{envelope.user.username}</small> : null}</div>
+            </div>
+            <div className="profile-menu">
+              <button type="button" onClick={() => navigate("general")} className={tab === "general" ? "active" : ""}>
+                <span>⚙</span><div><strong>Общие настройки</strong><small>{settings.general.language === "ru" ? "Русский" : "English"} · {settings.general.messageMode === "compact" ? "Компактный" : "Подробный"}</small></div><b>›</b>
+              </button>
+              <button type="button" onClick={() => navigate("notifications")} className={tab === "notifications" ? "active" : ""}>
+                <span>🔔</span><div><strong>Активные уведомления</strong><small>FVG · Фандинг</small></div><b>›</b>
+              </button>
+              {settings.admin.available ? (
+                <button type="button" onClick={() => navigate("admin")} className={tab === "admin" ? "active" : ""}>
+                  <span>◇</span><div><strong>Администрирование</strong><small>{settings.admin.publicAccessEnabled ? "Публичный доступ" : "Приватный доступ"}</small></div><b>›</b>
+                </button>
+              ) : null}
+            </div>
+          </aside>
+        </>
+      ) : null}
 
       <main className="content">{content}</main>
 
@@ -901,9 +951,9 @@ function App() {
         <button type="button" onClick={save} disabled={saving}>{saving ? "Сохраняем…" : "Сохранить"}</button>
       </div>
 
-      <nav className="bottom-nav">
-        {navItems.map(([value, icon, label]) => (
-          <button type="button" key={value} className={tab === value ? "active" : ""} onClick={() => { setTab(value); impact("light"); }}>
+      <nav className="bottom-nav" aria-label="Главная">
+        {primaryNavItems.map(([value, icon, label]) => (
+          <button type="button" key={value} className={tab === value ? "active" : ""} onClick={() => navigate(value)}>
             <span>{icon}</span><small>{label}</small>
           </button>
         ))}
