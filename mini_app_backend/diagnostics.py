@@ -128,7 +128,7 @@ def collect_admin_diagnostics(
     provider = event_store_provider
     if provider is None:
         def provider():
-            from alerts.scheduler_multi import get_fvg_service
+            from alerts.scheduler_15m import get_fvg_service
 
             return get_fvg_service().event_store
 
