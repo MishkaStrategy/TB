@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import threading
 import unittest
 from datetime import datetime, timezone
 from urllib.parse import urlencode
@@ -32,6 +33,8 @@ def signed_init_data(user_id=42):
 class StubSettingsService:
     def __init__(self):
         self.saved = None
+        self.read_thread_ids = []
+        self.save_thread_ids = []
 
     @staticmethod
     def _envelope(user, settings=None):
@@ -43,9 +46,11 @@ class StubSettingsService:
         }
 
     def read_settings(self, user):
+        self.read_thread_ids.append(threading.get_ident())
         return self._envelope(user)
 
     def save_settings(self, user, settings):
+        self.save_thread_ids.append(threading.get_ident())
         self.saved = settings
         return self._envelope(user, settings)
 
@@ -76,14 +81,18 @@ class MiniAppWebTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["error"]["code"], "MISSING_INIT_DATA")
 
     async def test_get_settings_uses_verified_user(self):
+        event_loop_thread = threading.get_ident()
         response = await self.client.get(
             "/api/mini-app/settings",
             headers={"X-Telegram-Init-Data": signed_init_data(42)},
         )
         self.assertEqual(response.status, 200)
         self.assertEqual((await response.json())["user"]["id"], 42)
+        self.assertEqual(len(self.service.read_thread_ids), 1)
+        self.assertNotEqual(self.service.read_thread_ids[0], event_loop_thread)
 
     async def test_put_settings_forwards_only_settings_object(self):
+        event_loop_thread = threading.get_ident()
         settings = {"general": {"language": "en"}}
         response = await self.client.put(
             "/api/mini-app/settings",
@@ -92,6 +101,8 @@ class MiniAppWebTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status, 200)
         self.assertEqual(self.service.saved, settings)
+        self.assertEqual(len(self.service.save_thread_ids), 1)
+        self.assertNotEqual(self.service.save_thread_ids[0], event_loop_thread)
 
     async def test_invalid_json_returns_structured_error(self):
         response = await self.client.put(
