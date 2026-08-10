@@ -127,6 +127,7 @@ class FundingAlertStoreTests(unittest.TestCase):
                 "UPDATE funding_alert_crossings SET last_seen_at = ? WHERE chat_id = '10'",
                 (old.isoformat(),),
             )
+            connection.commit()
         result = self.store.cleanup(self.now, force=True)
         self.assertEqual(result["settings"], 1)
         self.assertEqual(result["crossings"], 1)
