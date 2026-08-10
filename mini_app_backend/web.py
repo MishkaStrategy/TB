@@ -20,6 +20,12 @@ LOGGER = logging.getLogger(__name__)
 INIT_DATA_HEADER = "X-Telegram-Init-Data"
 DEFAULT_CLIENT_MAX_SIZE = 256 * 1024
 
+BOT_TOKEN_KEY = web.AppKey("mini_app.bot_token", str)
+AUTH_MAX_AGE_SECONDS_KEY = web.AppKey("mini_app.auth_max_age_seconds", int)
+SETTINGS_SERVICE_KEY = web.AppKey("mini_app.settings_service", object)
+MARKET_OVERVIEW_KEY = web.AppKey("mini_app.market_overview", object)
+ADMIN_ACTIONS_KEY = web.AppKey("mini_app.admin_actions", object)
+
 
 def _error_response(
     status: int,
@@ -140,17 +146,17 @@ def create_mini_app_application(
         middlewares=[error_middleware, cors_middleware],
         client_max_size=client_max_size,
     )
-    app["mini_app_bot_token"] = bot_token
-    app["mini_app_auth_max_age_seconds"] = int(auth_max_age_seconds)
-    app["mini_app_settings_service"] = settings_service
-    app["mini_app_market_overview"] = market_service
-    app["mini_app_admin_actions"] = action_service
+    app[BOT_TOKEN_KEY] = bot_token
+    app[AUTH_MAX_AGE_SECONDS_KEY] = int(auth_max_age_seconds)
+    app[SETTINGS_SERVICE_KEY] = settings_service
+    app[MARKET_OVERVIEW_KEY] = market_service
+    app[ADMIN_ACTIONS_KEY] = action_service
 
     def authenticated_user(request: web.Request) -> TelegramUser:
         return validate_init_data(
             request.headers.get(INIT_DATA_HEADER, ""),
-            request.app["mini_app_bot_token"],
-            max_age_seconds=request.app["mini_app_auth_max_age_seconds"],
+            request.app[BOT_TOKEN_KEY],
+            max_age_seconds=request.app[AUTH_MAX_AGE_SECONDS_KEY],
         )
 
     async def json_object(request: web.Request) -> dict:
@@ -187,7 +193,7 @@ def create_mini_app_application(
     async def get_settings(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         envelope = await asyncio.to_thread(
-            request.app["mini_app_settings_service"].read_settings,
+            request.app[SETTINGS_SERVICE_KEY].read_settings,
             user,
         )
         return web.json_response(enriched_envelope(user, envelope))
@@ -195,7 +201,7 @@ def create_mini_app_application(
     async def get_market_overview(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         overview = await asyncio.to_thread(
-            request.app["mini_app_market_overview"].read_overview,
+            request.app[MARKET_OVERVIEW_KEY].read_overview,
             user,
         )
         return web.json_response(overview)
@@ -211,7 +217,7 @@ def create_mini_app_application(
                 field="settings",
             )
         envelope = await asyncio.to_thread(
-            request.app["mini_app_settings_service"].save_settings,
+            request.app[SETTINGS_SERVICE_KEY].save_settings,
             user,
             body["settings"],
         )
