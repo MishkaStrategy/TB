@@ -24,6 +24,7 @@ const ENGLISH: Record<string, string> = {
   "Активен": "Active",
   "Пауза": "Paused",
   "15-минутные зоны, направления, инструменты и персональные фильтры.": "15-minute zones, directions, instruments and personal filters.",
+  "Инструменты, биржи, таймфреймы, направления и персональные фильтры.": "Instruments, exchanges, timeframes, directions and personal filters.",
   "T−3 включён": "T−3 enabled",
   "Только подтверждённые": "Confirmed only",
   "Фандинг": "Funding",
@@ -37,6 +38,8 @@ const ENGLISH: Record<string, string> = {
   "Компактный или со всеми полями": "Compact or with all fields",
   "Кратко": "Compact",
   "Подробно": "Detailed",
+  "Сводка всех действующих правил": "Summary of all active rules",
+  "Открыть": "Open",
   "Персонализация": "Personalization",
   "Общие настройки": "General settings",
   "Интерфейс и формат уведомлений сохраняются отдельно для вашего Telegram ID.": "The interface and notification format are saved separately for your Telegram ID.",
@@ -66,6 +69,8 @@ const ENGLISH: Record<string, string> = {
   "Частота": "Frequency",
   "Направления": "Directions",
   "Биржи": "Exchanges",
+  "Биржа": "Exchange",
+  "Таймфреймы": "Timeframes",
   "Следующая проверка": "Next check",
   "Открыть настройки фандинга": "Open funding settings",
   "Оба направления": "Both directions",
@@ -75,10 +80,12 @@ const ENGLISH: Record<string, string> = {
   "Управляйте типами сигналов и точными фильтрами отдельно для каждого инструмента.": "Manage signal types and precise filters separately for each instrument.",
   "Основные параметры": "Core settings",
   "Главный статус и типы событий": "Main status and event types",
+  "Главный статус подтверждённых FVG": "Main confirmed FVG status",
   "Модуль FVG": "FVG module",
   "Отключает все FVG-уведомления": "Disables all FVG notifications",
   "Подтверждённые FVG": "Confirmed FVG",
   "Сигнал после закрытия 15-минутной свечи": "Signal after the 15-minute candle closes",
+  "Сигнал только после закрытия свечи C": "Signal only after candle C closes",
   "Предварительный сигнал до подтверждения зоны": "Preliminary signal before the zone is confirmed",
   "Можно оставить одно или оба направления": "Keep one or both directions enabled",
   "Бычьи зоны": "Bullish zones",
@@ -90,9 +97,14 @@ const ENGLISH: Record<string, string> = {
   "Например, ETHUSDT": "For example, ETHUSDT",
   "Добавить": "Add",
   "Добавьте первый инструмент для настройки фильтров.": "Add your first instrument to configure filters.",
+  "Выберите источник рыночных данных": "Choose the market-data source",
+  "Биржа, таймфреймы и персональные фильтры": "Exchange, timeframes and personal filters",
   "Персональные фильтры инструмента": "Personal instrument filters",
   "Инструмент активен": "Instrument enabled",
   "Учитывается при поиске FVG": "Included in FVG detection",
+  "Учитывается при поиске подтверждённых FVG": "Included in confirmed FVG detection",
+  "Источник закрытых 15m свечей": "Source of closed 15m candles",
+  "15m источник; старшие интервалы агрегируются локально": "15m source; higher timeframes are aggregated locally",
   "💰 Фильтр цены": "💰 Price filter",
   "Диапазон цены сигнала": "Signal price range",
   "Минимальная цена": "Minimum price",
@@ -174,7 +186,8 @@ const ENGLISH: Record<string, string> = {
   "Нужно выбрать хотя бы одну биржу.": "Select at least one exchange.",
   "Минимальная цена не может быть выше максимальной.": "The minimum price cannot be greater than the maximum price.",
   "Значение должно быть числом.": "The value must be a number.",
-  "Значение должно быть конечным неотрицательным числом.": "The value must be a finite non-negative number."
+  "Значение должно быть конечным неотрицательным числом.": "The value must be a finite non-negative number.",
+  "FVG · Фандинг": "FVG · Funding"
 };
 
 const textState = new WeakMap<Text, { original: string; rendered: string }>();
@@ -237,11 +250,20 @@ function translateCore(text: string): string {
   const added = text.match(/^Добавлено\s+(\d+)\s+из\s+(\d+)$/);
   if (added) return `Added ${added[1]} of ${added[2]}`;
 
+  const instrumentUsage = text.match(/^(\d+)\s+из\s+(\d+)\s+инструментов$/);
+  if (instrumentUsage) return `${instrumentUsage[1]} of ${instrumentUsage[2]} instruments`;
+
+  const exchangeCount = text.match(/^(\d+)\s+бирж$/);
+  if (exchangeCount) return `${exchangeCount[1]} exchanges`;
+
   const remove = text.match(/^Удалить\s+(.+)$/);
   if (remove) return `Remove ${remove[1]}`;
 
   const limit = text.match(/^Достигнут лимит:\s+(\d+)\s+инструментов$/);
   if (limit) return `Limit reached: ${limit[1]} instruments`;
+
+  const technicalLimit = text.match(/^Достигнут технический лимит:\s+(\d+)\s+инструментов\.\s+Удалите один инструмент, чтобы добавить новый\.$/);
+  if (technicalLimit) return `Technical limit reached: ${technicalLimit[1]} instruments. Remove one instrument to add another.`;
 
   const allowedUsers = text.match(/^(\d+)\s+разрешённых пользователей$/);
   if (allowedUsers) return `${allowedUsers[1]} allowed users`;
