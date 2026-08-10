@@ -150,8 +150,8 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertFalse(stored_instrument["price_filter"]["apply_to_pre_fvg"])
 
     def test_same_symbol_on_multiple_exchanges_round_trips_independently(self):
-        self.fvg.add_instrument(42, "bitunix", "BTCUSDT", ["15m", "1h"])
-        # Default BTCUSDT already exists on Bitunix; update it instead of adding twice.
+        # Default BTCUSDT already exists on Bitunix; preserve it and add the
+        # same symbol on another exchange to exercise the stable instrument key.
         self.fvg.update_instrument_timeframes(42, "BTCUSDT", ["15m", "1h"])
         self.fvg.add_instrument(42, "binance", "BTCUSDT", ["4h", "1d"])
 
