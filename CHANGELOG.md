@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.6 — 2026-08-11
+
+### Telegram Mini App
+
+- добавлен новый тёмный trading dashboard на `TradingApp` с вкладками Главная, FVG, Funding, Уведомления и Настройки;
+- добавлены отдельный защищённый Admin screen и единая SVG-система интерфейсных иконок;
+- добавлен аутентифицированный `GET /api/mini-app/market-overview` с exchange-aware изменением цены за 24 часа;
+- недоступные market data отображаются как `—`, а сбой одной биржи не ломает весь overview;
+- production frontend использует real same-origin API, mock mode остаётся только для изолированных visual staging builds.
+
+### Надёжность и безопасность
+
+- сохранены HMAC-проверка Telegram `initData`, admin challenge и существующие settings/API contracts;
+- production env, SQLite, пользовательские настройки, operational flags, BotFather, Xray и сетевые порты автоматически не меняются;
+- релиз публикуется отдельным immutable tag `v1.3.6`; `v1.3.5` и более ранние теги не перемещаются.
+
 ## 1.3.5 — 2026-08-10
 
 Immutable patch-релиз, синхронизирующий `main`, `VERSION` и новый официальный tag после merge Telegram Mini App.

@@ -30,9 +30,9 @@ The update wrapper validates this without printing the bot token.
 
 ## Release history relevant to deployment
 
-`v1.3.4` remains the currently deployed immutable production release at commit `f568f2282435099e2b12718de45e4bbe802a0b79`. It must not be moved or rewritten.
+`v1.3.5` remains the currently deployed immutable production release at commit `e9fdaae934a083b1f1bd054d6f0c8fff04776581`. It must not be moved or rewritten.
 
-`v1.3.5` is the next immutable patch release. It publishes the Telegram Mini App backend and frontend that were merged into `main` after `v1.3.4`, while keeping the backend disabled by default. The existing Telegram UI remains the primary and fallback interface. Release publication does not modify production env, SQLite, runtime state, BotFather settings, Xray, or port 443.
+`v1.3.6` is the next immutable patch release. It publishes the audited dark trading dashboard and its compatible authenticated market-overview backend. The existing Telegram UI remains the primary fallback interface. Release publication does not modify production env, SQLite, runtime state, BotFather settings, Xray, or port 443.
 
 ## Preflight
 
@@ -56,7 +56,7 @@ sudo grep -E '^(MAX_ACTIVE_SYMBOLS|MAX_SYMBOLS_PER_USER|MINI_APP_BACKEND_ENABLED
 
 Do not print `TELEGRAM_TOKEN` or other secret values.
 
-## Update to 1.3.5
+## Update to 1.3.6
 
 Deploy only the published immutable tag and exact audited commit from the deployment issue:
 
@@ -67,8 +67,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.5 \
-  EXPECTED_VERSION=1.3.5 \
+  TARGET_REF=v1.3.6 \
+  EXPECTED_VERSION=1.3.6 \
   EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -95,7 +95,7 @@ The installed service continues to read the external production file through sys
 
 The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from the runtime snapshot and runs tar with `COPYFILE_DISABLE=1`. This prevents macOS from synthesizing unmanifested AppleDouble members after the manifest is built. Archive verification remains strict for all ordinary unmanifested members.
 
-## FVG 1.3.5 production contract
+## FVG 1.3.6 production contract
 
 - the exchange data source is always closed `15m` candles;
 - confirmed target timeframes are `15m`, `1h`, `4h`, `1d`;
@@ -108,7 +108,9 @@ The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from
 
 ## Telegram Mini App release contract
 
-The official `v1.3.5` source archive contains both `mini_app_backend/` and `telegram-mini-app/`, plus the backend lifecycle wiring in `bot.py`.
+The official `v1.3.6` source archive contains both `mini_app_backend/` and `telegram-mini-app/`, plus the backend lifecycle wiring in `bot.py`.
+
+The frontend entrypoint mounts `TradingApp`, provides five bottom tabs and loads exchange-aware `priceChange24hPct` through authenticated `GET /api/mini-app/market-overview`. Unavailable market values remain `null` in the API and render as `—` rather than `0%`.
 
 Production-safe defaults remain:
 
@@ -142,7 +144,7 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
-- installed version is `1.3.5`;
+- installed version is `1.3.6`;
 - installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - `NRestarts` does not grow during observation;
@@ -151,7 +153,7 @@ Expected results:
 - no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`;
 - Mini App backend remains disabled unless the deployment owner explicitly enabled it in a separate step.
 
-## 1.3.5 smoke checks
+## 1.3.6 smoke checks
 
 - FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
 - pre-FVG is absent from UI and commands;

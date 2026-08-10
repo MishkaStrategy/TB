@@ -74,8 +74,10 @@ class ReleaseMetadataConsistencyTests(unittest.TestCase):
             f'EXPECTED_VERSION="${{EXPECTED_VERSION:-{self.version}}}"',
             workflow,
         )
-        self.assertIn("tests.test_release_1_3_5_contract", workflow)
+        self.assertIn("tests.test_release_1_3_6_contract", workflow)
         self.assertIn("VITE_MOCK_MODE", workflow)
+        self.assertIn('"/api/mini-app/market-overview"', workflow)
+        self.assertIn("<TradingApp />", workflow)
 
     def test_release_workflow_is_immutable_and_idempotent(self):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
