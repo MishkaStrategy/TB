@@ -2,7 +2,7 @@ import io
 import json
 import sqlite3
 import unittest
-from contextlib import redirect_stdout
+from contextlib import closing, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -18,7 +18,7 @@ UTC = timezone.utc
 def create_archive(path: Path) -> FvgHistoryArchive:
     archive = FvgHistoryArchive(path)
     now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC).isoformat()
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute(
             """
@@ -51,7 +51,7 @@ def create_archive(path: Path) -> FvgHistoryArchive:
 
 
 def create_runtime_health(path: Path, **values):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute(
             "CREATE TABLE health(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)"
         )
@@ -101,7 +101,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
     def test_missing_schema_is_a_failure(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "archive.sqlite3"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute("CREATE TABLE unrelated(id INTEGER PRIMARY KEY)")
 
             result = audit_fvg_archive(path)
@@ -113,7 +113,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "archive.sqlite3"
             create_archive(path)
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute(
                     "UPDATE archived_fvg_events SET payload_json=? WHERE event_id='event-1'",
                     (json.dumps({"event_id": "different"}),),
@@ -130,7 +130,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
             path = Path(directory) / "archive.sqlite3"
             create_archive(path)
             now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC).isoformat()
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute("PRAGMA foreign_keys=OFF")
                 connection.execute(
                     """
@@ -152,7 +152,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
             path = Path(directory) / "archive.sqlite3"
             create_archive(path)
             now = datetime(2026, 7, 29, 12, 1, tzinfo=UTC).isoformat()
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute(
                     """
                     INSERT INTO fvg_archive_runs(
