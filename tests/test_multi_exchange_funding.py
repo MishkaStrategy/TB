@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -243,6 +244,37 @@ class FundingExchangeStoreTests(unittest.TestCase):
                 store.toggle(10, "bingx"),
                 ("bitunix", "bingx"),
             )
+
+    def test_context_managed_connections_are_closed(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "funding.sqlite3"
+            FundingAlertStore(path)
+            store = FundingExchangeStore(path)
+            with store._connect() as connection:
+                self.assertEqual(connection.execute("SELECT 1").fetchone()[0], 1)
+            with self.assertRaises(sqlite3.ProgrammingError):
+                connection.execute("SELECT 1")
+
+    def test_selection_change_clears_exchange_crossings(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            path = Path(tempdir) / "funding.sqlite3"
+            base = FundingAlertStore(path)
+            base.set_enabled(
+                10,
+                True,
+                now=datetime(2026, 7, 28, tzinfo=UTC),
+            )
+            store = FundingExchangeStore(path)
+            store.replace_crossings(
+                10,
+                {("bitunix", "BTCUSDT", "positive"): Decimal("0.4")},
+            )
+            self.assertTrue(store.crossing_values(10))
+
+            selected = store.set_selected(10, ("bitunix", "bingx"))
+
+            self.assertEqual(selected, ("bitunix", "bingx"))
+            self.assertEqual(store.crossing_values(10), {})
 
     def test_migrates_existing_bitunix_crossings(self):
         with tempfile.TemporaryDirectory() as tempdir:
