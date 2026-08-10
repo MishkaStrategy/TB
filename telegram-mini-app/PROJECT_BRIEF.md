@@ -2,243 +2,184 @@
 
 ## Цель
 
-Создать отдельное Telegram Mini App, которое станет единым мобильным интерфейсом для всех пользовательских настроек бота TB. Бот продолжает отвечать за сигналы, фандинг, статистику, уведомления, донат и служебные команды.
-
-## Неподвижное правило миграции
-
-До полного завершения, тестирования и отдельного подтверждения владельца проекта:
-
-- не удалять существующие настройки из Telegram-бота;
-- не упрощать текущее меню;
-- не удалять обработчики и графические элементы;
-- не подключать незавершённое Mini App к боевому меню;
-- не выполнять несовместимые миграции пользовательских данных;
-- сохранять старый интерфейс как полностью рабочий резервный путь;
-- не объединять draft PR без отдельного разрешения.
+Telegram Mini App — дополнительный mobile-first интерфейс персональных и административных настроек TB. После интеграции в кодовую базу он не заменяет существующий Telegram UI: старые команды, кнопки и настройки остаются рабочим резервным путём.
 
 ## Архитектура
 
-- Frontend находится в `telegram-mini-app/`.
-- Backend-адаптер находится в `mini_app_backend/`.
-- HTTPS deploy assets находятся в `deploy/mini-app/` и `scripts/deploy_mini_app.sh`.
-- Mini App не создаёт отдельную базу пользовательских настроек.
-- Backend использует существующие `UserPreferences`, `FvgAlertSettings`, `FundingAlertStore`, `FundingExchangeStore`, `RuntimeSettings`, `AccessRegistry` и `UserActivityRegistry`.
-- Frontend работает с единым camelCase JSON-контрактом; backend преобразует его в текущие форматы Python-хранилищ.
-- Production API запускается в процессе бота, чтобы не создавать второго конкурирующего писателя для JSON-файлов.
-- API выключен по умолчанию и активируется только явной переменной окружения.
-- Общий settings PUT сохраняет только персональные настройки.
-- Административные записи вынесены в отдельные одноразово подтверждаемые endpoints.
-- Backup и restart выполняются только через переданные production callbacks; API не запускает shell или `systemctl` самостоятельно.
-- Production frontend и API публикуются через один HTTPS origin; backend остаётся на `127.0.0.1`.
+- Frontend: `telegram-mini-app/`.
+- Backend: `mini_app_backend/`.
+- Backend запускается внутри основного bot process, чтобы существующие JSON/SQLite stores не получили второго конкурирующего writer.
+- API выключен по умолчанию (`MINI_APP_BACKEND_ENABLED=false`).
+- Рекомендуемый listener: `127.0.0.1:18080`.
+- Frontend production build по умолчанию использует same-origin `/api/...`.
+- `VITE_API_BASE_URL` — только опциональный override.
+- Mock включается только явно: `VITE_MOCK_MODE=true`.
+- HTTPS hosting/tunnel, BotFather и пользовательская кнопка не активируются автоматически и являются отдельным deployment-этапом.
+- Экспериментальный SNI-router, который мог затрагивать Amnezia/Xray на внешнем `443`, в интегрируемый код не входит.
 
-## Требования к интерфейсу
+## Совместимость с runtime 1.3.4
 
-- mobile-first;
-- светлая и тёмная тема Telegram;
-- safe-area и динамический viewport;
-- русский и английский язык самого Mini App;
-- мгновенное переключение языка без перезагрузки;
-- локализация статических и динамических значений;
-- понятные карточки, переключатели и сегментированные элементы;
-- состояния загрузки, ошибки и подтверждение сохранения;
-- сохранение введённых значений при сетевой ошибке;
-- предупреждение о несохранённых изменениях;
-- haptic feedback;
-- mock-режим без Telegram и backend.
+Mini App использует актуальный FVG schema v3:
 
-## Реализованные разделы
+- до 10 уникальных комбинаций `exchange + symbol`;
+- Bitunix, Binance, Bybit, BingX, Bitget, Gate;
+- таймфреймы `15m`, `1h`, `4h`, `1d`;
+- market-data source — только закрытые `15m` свечи;
+- `1h/4h/1d` строятся локально по UTC-границам;
+- pre-FVG/T−3 удалён из API и frontend;
+- legacy pre flags при сохранении принудительно нормализуются в `false`;
+- stable instrument key позволяет независимо хранить одинаковый symbol на разных биржах;
+- exchange, symbol и timeframes проходят полный backend round-trip без потери данных.
 
-### Главная
+## Реализованные пользовательские разделы
 
-Показывает состояние FVG и funding alerts, число инструментов и бирж, текущую частоту и наличие несохранённых изменений.
+### Главная и сводка
+
+Показывают состояние FVG/funding, число инструментов и бирж, выбранные таймфреймы, формат сообщений, направления, порог и частоту.
 
 ### Общие настройки
 
-- язык бота и Mini App: `ru` / `en`;
-- формат уведомлений: `compact` / `detailed`;
-- язык переключается сразу, а сохраняется через общий PUT;
-- даты, интервалы, размеры, статусы, placeholders и известные ошибки локализуются вместе с интерфейсом.
+- язык `ru` / `en`;
+- message mode `compact` / `detailed`;
+- сохранение через существующий `UserPreferences`;
+- локализация интерфейса и динамических значений.
 
 ### FVG
 
 - статус модуля;
-- подтверждённые FVG;
-- пред-FVG T−3;
-- бычьи и медвежьи сигналы;
-- список инструментов;
-- включение отдельного инструмента;
-- добавление и удаление инструмента;
-- серверный лимит количества инструментов;
-- ценовой фильтр: минимум, максимум и scope;
-- фильтр размера: минимум, USD/проценты и scope;
-- scope: пред-FVG, подтверждённые, бычьи, медвежьи.
+- confirmed FVG;
+- bullish/bearish;
+- exchange + symbol instruments;
+- `15m/1h/4h/1d` selection;
+- pause/delete;
+- backend limit;
+- price filter min/max;
+- size filter min + USD/PERCENT;
+- confirmed/bullish/bearish filter scopes.
 
-### Funding alerts
+### Funding
 
-- статус;
-- интервал 15–2880 минут с шагом 15 минут;
-- положительный процентный порог;
-- положительное и/или отрицательное направление;
-- минимум одно направление;
-- минимум одна биржа;
-- Bitunix, Binance, Bybit, BingX, Bitget и Gate;
-- очистка legacy и multi-exchange crossing-state при значимых изменениях.
+- status;
+- 15–2880 minute interval, step 15;
+- threshold;
+- positive/negative directions;
+- six exchanges;
+- crossing-state reset on significant changes.
 
-### Уведомления
+## Администрирование
 
-Сводка активных параметров FVG, funding alerts, формата сообщений, направлений, порога, частоты и бирж с быстрым переходом к настройке.
+Server-side admin check обязателен на каждом административном запросе.
 
-### Администрирование
+Реализованы:
 
-Только после серверной проверки `ADMIN_TELEGRAM_IDS`:
+- read-only FVG/funding/SQLite/outbox/process diagnostics;
+- public/private access endpoint;
+- runtime allowlist add/remove;
+- env/admin deletion protection;
+- short-lived one-time confirmation challenges bound to admin/action/target;
+- replay, retarget, wrong phrase and expiry rejection;
+- backup/restart adapters without shell fallback.
 
-- публичный/приватный режим;
-- чтение полного allowlist;
-- добавление и удаление runtime allowlist;
-- защита env/admin записей от удаления;
-- WebSocket status;
-- последняя свеча и последний REST recovery;
-- последняя операционная ошибка;
-- outbox, успешные доставки, ошибки, retries и permanent failures;
-- `PRAGMA quick_check` и размеры FVG/Funding SQLite;
-- размер JSON-настроек;
-- память процесса;
-- load average 1/5/15;
-- свободное и общее место на диске;
-- PID;
-- VERSION, BUILD_COMMIT и Python;
-- capabilities для access, allowlist, backup и restart.
-
-Диагностика имеет стабильную схему и не делает endpoint недоступным при ошибке отдельной метрики.
-
-Каждая admin-запись требует короткоживущий одноразовый challenge. Он привязан к проверенному Telegram ID администратора, точному действию и целевому Telegram ID. Повтор, изменение цели, неверная фраза и истечение срока отклоняются.
-
-Backup и restart endpoints реализованы, но остаются fail-closed до подключения production callbacks из соответствующих проверенных веток.
-
-## HTTPS-размещение
-
-Подготовлен изолированный production deploy:
-
-- DuckDNS или другой валидный hostname;
-- Nginx reverse proxy;
-- Let’s Encrypt через Certbot;
-- единый origin для frontend и API;
-- backend proxy только на `127.0.0.1:18080`;
-- атомарные frontend-релизы и rollback через symlink;
-- отдельные команды `prepare-artifact`, `https` и `verify`;
-- SPA fallback, controlled caching и security headers;
-- отсутствие автоматического изменения env бота;
-- отсутствие автоматического рестарта бота;
-- отсутствие регистрации URL в BotFather.
-
-Полная инструкция находится в `telegram-mini-app/DEPLOYMENT.md`.
+Backup/restart остаются fail-closed до подключения verified production callbacks.
 
 ## Безопасность
 
-- Идентичность определяется только по проверенному `Telegram.WebApp.initData`.
-- `initDataUnsafe` не является источником авторизации.
-- Backend проверяет HMAC-SHA-256 подпись, `auth_date` и срок действия.
-- Telegram ID текущего пользователя из JSON-body игнорируется.
-- Права администратора проверяются на каждом запросе.
-- Все значения повторно валидируются на backend.
-- Размер запросов ограничивается.
-- Секреты, токен и `.env` не возвращаются frontend.
-- В приватном режиме применяются те же env/runtime allowlist, что и в боте.
-- Общий PUT не выполняет административные действия.
-- Env-allowlist и администраторы не удаляются через Mini App.
-- Confirmation token одноразовый и удаляется при первой попытке исполнения.
-- Backup/restart не имеют fallback на произвольные команды операционной системы.
-- Публично доступны только порты `80/443`; backend listener остаётся loopback-only.
+- Идентичность определяется только raw `Telegram.WebApp.initData` после HMAC-SHA-256 verification.
+- Проверяются `auth_date`, срок действия и future skew.
+- Telegram ID из JSON body не считается источником identity.
+- Payload полностью валидируется до первой записи.
+- Общий settings PUT не выполняет admin writes.
+- Runtime/private access использует существующие project stores.
+- Backend listener остаётся loopback-only.
+- Секреты и production env не возвращаются frontend.
+- CORS использует точный allowlist.
 
 ## API
 
-Основные endpoints:
+```text
+GET    /healthz
+GET    /api/mini-app/settings
+PUT    /api/mini-app/settings
+POST   /api/mini-app/admin/confirmations
+PUT    /api/mini-app/admin/access
+POST   /api/mini-app/admin/allowlist
+DELETE /api/mini-app/admin/allowlist/{telegram_id}
+POST   /api/mini-app/admin/backup
+POST   /api/mini-app/admin/restart
+```
 
-- `GET /api/mini-app/settings`;
-- `PUT /api/mini-app/settings`;
-- `POST /api/mini-app/admin/confirmations`;
-- `PUT /api/mini-app/admin/access`;
-- `POST /api/mini-app/admin/allowlist`;
-- `DELETE /api/mini-app/admin/allowlist/{telegram_id}`;
-- `POST /api/mini-app/admin/backup`;
-- `POST /api/mini-app/admin/restart`;
-- `GET /healthz`.
+Авторизация personal/admin API:
 
-Заголовок авторизации:
+```text
+X-Telegram-Init-Data: <raw Telegram.WebApp.initData>
+```
 
-`X-Telegram-Init-Data: <raw Telegram.WebApp.initData>`
+Полная модель: `telegram-mini-app/API_CONTRACT.md`.
 
-## Сохранение
+## Lifecycle
 
-1. Получить текущие настройки.
-2. Изменять локальную копию.
-3. Показать несохранённое состояние.
-4. Провести клиентскую валидацию.
-5. Отправить полный personal-settings payload.
-6. Повторно валидировать его сервером до первой записи.
-7. Сохранить через существующие stores.
-8. Вернуть нормализованную модель.
-9. Обновить baseline только после успешного ответа.
-10. При ошибке не терять локальные изменения.
-11. Не разрешать admin-операцию, пока personal settings имеют несохранённые изменения.
-12. Для admin-операции отдельно получить challenge, показать точную фразу и отправить одноразовое подтверждение.
+`bot.py` сохраняет текущий 1.3.4 lifecycle и дополнительно:
 
-## Этапы
+1. после старта FVG stream/watchdog вызывает `start_mini_app_backend(application)`;
+2. функция ничего не делает при `MINI_APP_BACKEND_ENABLED=false`;
+3. при shutdown Mini App runner очищается через `stop_mini_app_backend(application)`;
+4. существующие graceful shutdown/runtime lifecycle механизмы сохраняются.
 
-Выполнено:
+## Frontend delivery model
 
-1. Frontend-каркас, дизайн, Telegram adapter, mock и контракт.
-2. Проверка `initData` и чтение реальных настроек.
-3. Сохранение общих настроек.
-4. Сохранение FVG и фильтров.
-5. Сохранение funding alerts и бирж.
-6. Расширенная read-only диагностика администратора.
-7. Полная RU/EN-локализация интерфейса Mini App.
-8. Защищённые admin endpoints, confirmation flow, access mode и runtime allowlist.
-9. Production deploy assets для DuckDNS/Nginx/Certbot, атомарного frontend и health-check.
+GitHub Actions:
 
-Зависит от других production-веток:
+- Node.js 22;
+- `npm ci`;
+- typecheck;
+- production build с `VITE_MOCK_MODE=false`;
+- artifact `tb-mini-app-frontend`;
+- manifest привязан к точному commit SHA и `apiMode: same-origin`.
 
-10. Подключение verified backup callback.
-11. Подключение graceful restart/restart-guard callback.
-
-Осталось:
-
-12. Выполнить HTTPS-размещение на VDS и включить backend env.
-13. Пройти сквозную проверку frontend/API.
-14. Зарегистрировать URL в BotFather.
-15. Добавить тестовую кнопку только для администратора.
-16. Провести параллельный тест со старым Telegram UI.
-17. Выполнить финальную интеграцию только после отдельного подтверждения.
+Этот merge намеренно не фиксирует конкретный публичный hostname. Один и тот же frontend artifact можно опубликовать через выбранный постоянный HTTPS tunnel/hosting, который не требует изменения Amnezia/Xray или внешнего `443` VDS.
 
 ## Проверки
 
+Обязательны:
+
 - Python compileall;
 - полный `unittest discover`;
-- тесты подписи, срока действия и подмены `initData`;
-- проверка приватного доступа и административных прав;
-- одноразовые confirmation tokens;
-- срок действия, replay и привязка challenge к action/target/admin;
-- allowlist add/remove и защита env/admin записей;
-- fail-closed backup/restart adapters;
-- HTTP-поток admin endpoints и CORS;
-- Bash syntax deploy-скрипта;
-- безопасная Nginx proxy-конфигурация;
-- отсутствие автоматического production activation в deploy-скрипте;
-- лимиты инструментов;
-- диапазоны цены;
-- Decimal и единицы размера;
-- шаг funding-интервала;
-- минимум одно направление и одна биржа;
-- multi-exchange crossing-state;
-- стабильная схема административной диагностики;
-- SQLite, storage и release diagnostics;
-- TypeScript typecheck;
-- production build frontend;
-- мобильная ширина, safe-area, RU/EN, светлая/тёмная тема;
-- сетевые ошибки и повторное сохранение;
-- отсутствие потери существующих пользовательских данных.
+- Mini App auth/service/runtime/web/admin tests;
+- FVG 1.3.4 multi-exchange/timeframe regression tests;
+- same symbol on multiple exchanges round-trip;
+- legacy pre-FVG cannot be re-enabled;
+- funding crossing-state tests;
+- frontend TypeScript typecheck/build;
+- dependency audit;
+- bounded pipeline smoke;
+- systemd verification;
+- release audit.
 
-## Критерий завершения
+## Что входит в интеграцию кода
 
-Mini App считается готовым только когда все настройки читаются и сохраняются через production backend, серверная авторизация и роли проверены, интерфейс протестирован в Telegram-клиентах, RU/EN полностью реализованы, автоматические тесты проходят, production callbacks подключены к принятым operational механизмам, HTTPS deploy реально выполнен и проверен, владелец проекта отдельно разрешил финальную интеграцию и удаление лишних настроек из бота.
+- frontend и backend исходники;
+- lifecycle hook, выключенный по умолчанию;
+- API/auth/admin/diagnostics;
+- актуальный FVG 1.3.4 contract;
+- CI frontend artifact build;
+- тесты и документация.
+
+## Что НЕ входит в интеграцию кода
+
+- изменение production VDS;
+- изменение Amnezia/Xray;
+- разделение внешнего `443`;
+- DuckDNS deployment wrapper;
+- включение backend production env;
+- BotFather registration;
+- добавление Mini App button пользователям;
+- удаление старого Telegram UI.
+
+## Следующие этапы после merge
+
+1. Выбрать постоянный HTTPS tunnel/hosting без вмешательства в VPN.
+2. Опубликовать verified frontend artifact и same-origin `/api` proxy/tunnel.
+3. Включить backend на `127.0.0.1:18080` с точным allowed origin и проверить `/healthz`.
+4. Зарегистрировать проверенный URL в BotFather.
+5. Провести ограниченный Telegram end-to-end test и проверить round-trip настроек.
+6. Расширять доступ только после успешного параллельного тестирования со старым Telegram UI.
