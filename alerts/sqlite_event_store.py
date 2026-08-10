@@ -81,7 +81,6 @@ class FvgEventStore:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
@@ -96,6 +95,7 @@ class FvgEventStore:
             legacy_data = self._read_json(self.legacy_json_path)
 
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
             self._create_schema(connection)
 
         if not legacy_data:
