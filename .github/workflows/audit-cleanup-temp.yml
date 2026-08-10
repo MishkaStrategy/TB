@@ -1,0 +1,38 @@
+name: Clean temporary audit workflows
+
+on:
+  push:
+    branches:
+      - agent/project-audit-optimization-2026-08-11
+    paths:
+      - ".github/workflows/audit-cleanup-temp.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: agent/project-audit-optimization-2026-08-11
+      - name: Remove temporary workflows and push cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f \
+            .github/workflows/audit-release-bump.yml \
+            .github/workflows/audit-release-bump-v2.yml \
+            .github/workflows/audit-release-bump-v3.yml \
+            .github/workflows/audit-version-bump.yml \
+            .github/workflows/audit-finalize-release-linux.yml \
+            .github/workflows/audit-finalizer-v2-linux.yml \
+            .github/workflows/audit-cleanup-temp.yml
+          git add -A .github/workflows
+          git commit -m "ci: remove temporary audit workflows"
+          git push origin HEAD:agent/project-audit-optimization-2026-08-11
