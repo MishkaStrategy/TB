@@ -1,4 +1,3 @@
-import { setUiLanguage } from "./i18n";
 import { mockSettings } from "./mock";
 import { getInitData, getTelegramUser } from "./telegram";
 import type {
@@ -12,19 +11,14 @@ const CONFIGURED_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | u
 const MOCK_MODE = String(import.meta.env.VITE_MOCK_MODE ?? "false").toLowerCase() === "true";
 const REQUEST_TIMEOUT_MS = 10_000;
 
-function announceLanguage(envelope: SettingsEnvelope): SettingsEnvelope {
-  setUiLanguage(envelope.settings.general.language);
-  return envelope;
-}
-
 function mockEnvelope(settings: AppSettings = mockSettings): SettingsEnvelope {
-  return announceLanguage({
+  return {
     settings: structuredClone(settings),
     user: getTelegramUser(),
     limits: { maxFvgSymbols: 10 },
     source: "mock",
     updatedAt: new Date().toISOString(),
-  });
+  };
 }
 
 function mockMarketOverview(): MarketOverviewEnvelope {
@@ -44,10 +38,10 @@ function mockMarketOverview(): MarketOverviewEnvelope {
 
 function requestFailureMessage(error: unknown): string {
   if (error instanceof DOMException && error.name === "AbortError") {
-    return "Сервер Mini App не отвечает. Проверьте соединение и повторите попытку.";
+    return "Сервер настроек не отвечает. Проверьте соединение и повторите попытку.";
   }
   if (error instanceof TypeError) {
-    return "Не удалось подключиться к серверу Mini App. Проверьте соединение и повторите попытку.";
+    return "Не удалось подключиться к серверу настроек. Проверьте соединение и повторите попытку.";
   }
   return error instanceof Error ? error.message : "Не удалось выполнить запрос к Mini App API.";
 }
@@ -81,7 +75,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function loadSettings(): Promise<SettingsEnvelope> {
   if (MOCK_MODE) return mockEnvelope();
-  return announceLanguage(await request<SettingsEnvelope>("/api/mini-app/settings"));
+  return request<SettingsEnvelope>("/api/mini-app/settings");
 }
 
 export async function loadMarketOverview(): Promise<MarketOverviewEnvelope> {
@@ -95,8 +89,8 @@ export async function saveSettings(settings: AppSettings): Promise<SettingsEnvel
     return mockEnvelope(settings);
   }
   const payload: SaveSettingsRequest = { settings };
-  return announceLanguage(await request<SettingsEnvelope>("/api/mini-app/settings", {
+  return request<SettingsEnvelope>("/api/mini-app/settings", {
     method: "PUT",
     body: JSON.stringify(payload),
-  }));
+  });
 }
