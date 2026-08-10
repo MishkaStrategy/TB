@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from telegram import BotCommand, MenuButtonCommands
+from telegram import BotCommand
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
 from alerts.process_watchdog import start_process_watchdog, stop_process_watchdog
@@ -107,7 +107,6 @@ async def configure_bot_interface(application):
     await application.bot.set_my_commands(BOT_COMMANDS)
     await application.bot.set_my_commands(BOT_COMMANDS, language_code="ru")
     await application.bot.set_my_commands(BOT_COMMANDS_EN, language_code="en")
-    await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
 
 async def post_init(application):
