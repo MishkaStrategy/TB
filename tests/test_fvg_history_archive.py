@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -73,6 +74,7 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             archive_path = Path(directory) / "archive.sqlite3"
             now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
             source = prepare_source(source_path)
+            self.addCleanup(source.close)
             insert_event(source, "old-one", now - timedelta(days=100))
             insert_event(source, "old-two", now - timedelta(days=95))
             insert_event(source, "recent", now - timedelta(days=5))
@@ -103,7 +105,6 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             self.assertEqual(summary["events"], 2)
             self.assertEqual(summary["deliveries"], 1)
             self.assertEqual(summary["last_run"]["source_deleted_count"], 2)
-            source.close()
 
     def test_active_legacy_and_v2_outbox_events_are_not_deleted(self):
         with TemporaryDirectory() as directory:
@@ -111,6 +112,7 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             archive_path = Path(directory) / "archive.sqlite3"
             now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
             source = prepare_source(source_path)
+            self.addCleanup(source.close)
             for event_id in ("legacy", "v2-active", "v2-terminal"):
                 insert_event(source, event_id, now - timedelta(days=100))
             source.execute("INSERT INTO outbox VALUES('legacy', '1')")
@@ -138,7 +140,6 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             }
             self.assertEqual(remaining, {"legacy", "v2-active"})
             self.assertEqual(archive.summary()["events"], 1)
-            source.close()
 
     def test_existing_archive_rows_make_retry_idempotent(self):
         with TemporaryDirectory() as directory:
@@ -146,10 +147,11 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             archive_path = Path(directory) / "archive.sqlite3"
             now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
             source = prepare_source(source_path)
+            self.addCleanup(source.close)
             insert_event(source, "old", now - timedelta(days=100))
             source.commit()
             archive = FvgHistoryArchive(archive_path)
-            with sqlite3.connect(archive_path) as connection:
+            with closing(sqlite3.connect(archive_path)) as connection:
                 connection.execute(
                     """
                     INSERT INTO archived_fvg_events(
@@ -162,6 +164,7 @@ class FvgHistoryArchiveTests(unittest.TestCase):
                         (now - timedelta(minutes=1)).isoformat(),
                     ),
                 )
+                connection.commit()
 
             source.execute("BEGIN IMMEDIATE")
             result = archive.archive_and_delete(
@@ -174,7 +177,6 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             self.assertEqual(result["events_archived"], 1)
             self.assertEqual(result["source_deleted"], 1)
             self.assertEqual(archive.summary()["events"], 1)
-            source.close()
 
     def test_archive_write_failure_leaves_source_untouched(self):
         with TemporaryDirectory() as directory:
@@ -182,6 +184,7 @@ class FvgHistoryArchiveTests(unittest.TestCase):
             archive_path = Path(directory) / "archive.sqlite3"
             now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
             source = prepare_source(source_path)
+            self.addCleanup(source.close)
             insert_event(source, "old", now - timedelta(days=100))
             source.commit()
             archive = FvgHistoryArchive(archive_path)
@@ -203,7 +206,6 @@ class FvgHistoryArchiveTests(unittest.TestCase):
                 source.execute("SELECT COUNT(*) FROM events").fetchone()[0],
                 1,
             )
-            source.close()
 
 
 if __name__ == "__main__":
