@@ -175,7 +175,7 @@ FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 
 ## Обновление существующего VDS до 1.3.4
 
-Production обновляется только после публикации проверенного тега `v1.3.4` и точного SHA из deployment issue:
+Production обновляется только после публикации проверенного тега `v1.3.4` и точного SHA из deployment issue. Релизный архив называется `fvg-alert-bot-1.3.4.tar.gz`.
 
 ```bash
 cd /root/TB
