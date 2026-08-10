@@ -3,7 +3,8 @@ import { mockSettings } from "./mock";
 import { getInitData, getTelegramUser } from "./telegram";
 import type { AppSettings, SaveSettingsRequest, SettingsEnvelope } from "./types";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const CONFIGURED_API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
+const MOCK_MODE = String(import.meta.env.VITE_MOCK_MODE ?? "false").toLowerCase() === "true";
 
 function announceLanguage(envelope: SettingsEnvelope): SettingsEnvelope {
   setUiLanguage(envelope.settings.general.language);
@@ -14,14 +15,14 @@ function mockEnvelope(settings: AppSettings = mockSettings): SettingsEnvelope {
   return announceLanguage({
     settings: structuredClone(settings),
     user: getTelegramUser(),
-    limits: { maxFvgSymbols: 20 },
+    limits: { maxFvgSymbols: 10 },
     source: "mock",
     updatedAt: new Date().toISOString(),
   });
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${CONFIGURED_API_BASE_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -44,12 +45,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function loadSettings(): Promise<SettingsEnvelope> {
-  if (!API_BASE_URL) return mockEnvelope();
+  if (MOCK_MODE) return mockEnvelope();
   return announceLanguage(await request<SettingsEnvelope>("/api/mini-app/settings"));
 }
 
 export async function saveSettings(settings: AppSettings): Promise<SettingsEnvelope> {
-  if (!API_BASE_URL) {
+  if (MOCK_MODE) {
     await new Promise((resolve) => window.setTimeout(resolve, 350));
     return mockEnvelope(settings);
   }
