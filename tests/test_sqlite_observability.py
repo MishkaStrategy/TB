@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -15,7 +16,7 @@ UTC = timezone.utc
 
 
 def create_database(path: Path, rows=2):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(
             "CREATE TABLE items(id INTEGER PRIMARY KEY, value TEXT NOT NULL)"
