@@ -11,7 +11,11 @@ from typing import Any, Callable
 from alerts.funding_alerts import parse_threshold
 from alerts.funding_exchange_store import FundingExchangeStore
 from alerts.funding_quarter_hour import FundingAlertStore, parse_interval_minutes
-from alerts.fvg_store import FvgAlertSettings
+from alerts.fvg_store import (
+    FvgAlertSettings,
+    instrument_key,
+    split_instrument_key,
+)
 from config import (
     ADMIN_TELEGRAM_IDS,
     ALLOWED_TELEGRAM_IDS,
@@ -23,12 +27,14 @@ from database.access_control import AccessRegistry
 from database.runtime_settings import RuntimeSettings
 from database.user_activity import UserActivityRegistry
 from database.user_preferences import UserPreferences
-from exchanges.funding import normalize_exchanges
+from exchanges.funding import normalize_exchange, normalize_exchanges
+from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
 
 from .auth import TelegramUser
 
 UTC = timezone.utc
 _SYMBOL_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
+_FVG_EXCHANGES = frozenset(("bitunix", "binance", "bybit", "bingx", "bitget", "gate"))
 
 
 class SettingsValidationError(ValueError):
@@ -110,10 +116,50 @@ def _normalize_symbol(value: Any, field: str) -> str:
     return symbol
 
 
+def _normalize_fvg_exchange(value: Any, field: str) -> str:
+    try:
+        exchange = normalize_exchange(str(value or "bitunix"))
+    except (TypeError, ValueError) as error:
+        raise SettingsValidationError(
+            "Неподдерживаемая биржа FVG.",
+            code="INVALID_FVG_EXCHANGE",
+            field=field,
+        ) from error
+    if exchange not in _FVG_EXCHANGES:
+        raise SettingsValidationError(
+            "Неподдерживаемая биржа FVG.",
+            code="INVALID_FVG_EXCHANGE",
+            field=field,
+        )
+    return exchange
+
+
+def _normalize_timeframes(value: Any, field: str) -> list[str]:
+    rows = _list(value if value is not None else ["15m"], field)
+    selected = {str(item).strip().lower() for item in rows if str(item).strip()}
+    invalid = selected.difference(CONFIRMED_TIMEFRAMES)
+    if invalid:
+        raise SettingsValidationError(
+            f"Неподдерживаемые таймфреймы: {', '.join(sorted(invalid))}.",
+            code="INVALID_FVG_TIMEFRAMES",
+            field=field,
+        )
+    ordered = [item for item in CONFIRMED_TIMEFRAMES if item in selected]
+    if not ordered:
+        raise SettingsValidationError(
+            "Выберите хотя бы один таймфрейм FVG.",
+            code="FVG_TIMEFRAME_REQUIRED",
+            field=field,
+        )
+    return ordered
+
+
 def _scope(value: Any, field: str) -> dict:
     source = _object(value, field)
     return {
-        "apply_to_pre_fvg": _boolean(source.get("preFvg"), f"{field}.preFvg"),
+        # 1.3.4 removed pre-FVG from runtime. Keep the storage key false only
+        # for schema compatibility; the Mini App API no longer exposes it.
+        "apply_to_pre_fvg": False,
         "apply_to_confirmed_fvg": _boolean(
             source.get("confirmedFvg"), f"{field}.confirmedFvg"
         ),
@@ -156,11 +202,25 @@ def _normalize_settings_payload(payload: Any, *, max_symbols: int) -> dict:
     for index, raw_item in enumerate(symbol_rows):
         base_field = f"settings.fvg.symbols[{index}]"
         item = _object(raw_item, base_field)
+        exchange = _normalize_fvg_exchange(
+            item.get("exchange", "bitunix"), f"{base_field}.exchange"
+        )
         symbol = _normalize_symbol(item.get("symbol"), f"{base_field}.symbol")
-        if symbol in symbols:
+        timeframes = _normalize_timeframes(
+            item.get("timeframes", ["15m"]), f"{base_field}.timeframes"
+        )
+        key = instrument_key(exchange, symbol)
+        supplied_key = item.get("key")
+        if supplied_key not in (None, "", key):
             raise SettingsValidationError(
-                f"Инструмент {symbol} указан несколько раз.",
-                code="DUPLICATE_SYMBOL",
+                "Ключ инструмента не соответствует бирже и символу.",
+                code="INVALID_FVG_INSTRUMENT_KEY",
+                field=f"{base_field}.key",
+            )
+        if key in symbols:
+            raise SettingsValidationError(
+                f"Инструмент {exchange}:{symbol} указан несколько раз.",
+                code="DUPLICATE_INSTRUMENT",
                 field=f"{base_field}.symbol",
             )
 
@@ -195,7 +255,10 @@ def _normalize_settings_payload(payload: Any, *, max_symbols: int) -> dict:
         )
         size_scope = _scope(size.get("scope"), f"{base_field}.sizeFilter.scope")
 
-        symbols[symbol] = {
+        symbols[key] = {
+            "exchange": exchange,
+            "symbol": symbol,
+            "timeframes": timeframes,
             "enabled": _boolean(item.get("enabled"), f"{base_field}.enabled"),
             "price_filter": {
                 "enabled": _boolean(
@@ -221,9 +284,7 @@ def _normalize_settings_payload(payload: Any, *, max_symbols: int) -> dict:
         "notify_confirmed_fvg": _boolean(
             fvg.get("notifyConfirmedFvg"), "settings.fvg.notifyConfirmedFvg"
         ),
-        "notify_pre_fvg": _boolean(
-            fvg.get("notifyPreFvg"), "settings.fvg.notifyPreFvg"
-        ),
+        "notify_pre_fvg": False,
         "bullish_enabled": _boolean(
             fvg.get("bullishEnabled"), "settings.fvg.bullishEnabled"
         ),
@@ -442,12 +503,11 @@ class MiniAppSettingsService:
                     "notifyConfirmedFvg": bool(
                         fvg.get("notify_confirmed_fvg", True)
                     ),
-                    "notifyPreFvg": bool(fvg.get("notify_pre_fvg", False)),
                     "bullishEnabled": bool(fvg.get("bullish_enabled", True)),
                     "bearishEnabled": bool(fvg.get("bearish_enabled", True)),
                     "symbols": [
-                        self._serialize_symbol(symbol, config)
-                        for symbol, config in fvg.get("symbols", {}).items()
+                        self._serialize_symbol(key, config)
+                        for key, config in fvg.get("symbols", {}).items()
                     ],
                 },
                 "funding": {
@@ -478,18 +538,29 @@ class MiniAppSettingsService:
     @staticmethod
     def _serialize_scope(config: dict) -> dict:
         return {
-            "preFvg": bool(config.get("apply_to_pre_fvg", True)),
             "confirmedFvg": bool(config.get("apply_to_confirmed_fvg", True)),
             "bullish": bool(config.get("apply_to_bullish", True)),
             "bearish": bool(config.get("apply_to_bearish", True)),
         }
 
     @classmethod
-    def _serialize_symbol(cls, symbol: str, config: dict) -> dict:
+    def _serialize_symbol(cls, key: str, config: dict) -> dict:
+        key_exchange, key_symbol = split_instrument_key(key)
+        exchange = str(config.get("exchange") or key_exchange)
+        symbol = str(config.get("symbol") or key_symbol)
+        timeframes = [
+            timeframe
+            for timeframe in CONFIRMED_TIMEFRAMES
+            if timeframe in config.get("timeframes", ("15m",))
+        ] or ["15m"]
+        normalized_key = instrument_key(exchange, symbol)
         price = config.get("price_filter", {})
         size = config.get("size_filter", {})
         return {
+            "key": normalized_key,
+            "exchange": exchange,
             "symbol": symbol,
+            "timeframes": timeframes,
             "enabled": bool(config.get("enabled", True)),
             "priceFilter": {
                 "enabled": bool(price.get("enabled", False)),
@@ -552,7 +623,7 @@ class MiniAppSettingsService:
         delivery_failures = 0
         database_paths = [Path(self.funding_settings.path)]
         try:
-            from alerts.scheduler_multi import get_fvg_service
+            from alerts.scheduler_15m import get_fvg_service
 
             event_store = get_fvg_service().event_store
             health = event_store.health()
