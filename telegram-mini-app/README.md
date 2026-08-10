@@ -1,76 +1,182 @@
 # TB Telegram Mini App
 
-Telegram Mini App — дополнительный мобильный интерфейс настроек TB, интегрированный с runtime 1.3.4. Существующий Telegram UI остаётся рабочим резервным путём и не удаляется.
+TB Telegram Mini App — mobile-first trading control center внутри Telegram. Он работает поверх существующих TB stores/runtime и не заменяет резервный Telegram UI бота.
 
-## Текущее состояние
+## UI / UX
 
-- frontend: `telegram-mini-app/` (React 19, TypeScript, Vite);
-- backend: `mini_app_backend/` (aiohttp, запускается внутри процесса бота);
-- backend выключен по умолчанию: `MINI_APP_BACKEND_ENABLED=false`;
-- backend должен слушать только loopback, рекомендуемый порт `127.0.0.1:18080`;
-- production frontend по умолчанию использует same-origin API (`/api/...`);
-- `VITE_API_BASE_URL` нужен только для явного API override;
-- mock включается только явно через `VITE_MOCK_MODE=true`;
-- Mini App не подключается к BotFather и меню автоматически;
-- код не содержит production-схемы, которая делит внешний `443` с Amnezia/Xray;
-- HTTPS-публикация через внешний туннель/хостинг выполняется отдельным этапом после выбора сервиса.
+Текущий интерфейс использует собственную тёмную trading design system TB, а не копирует Telegram UI:
 
-## FVG 1.3.4
+- почти чёрный фон `#070b12` / `#09101a`;
+- компактные surfaces `#101722` / `#121b28`;
+- primary blue `#2F9BFF`, cyan `#32D5FF`;
+- bullish `#26D99A`, bearish `#FF5D6C`;
+- тонкие borders, минимальные shadows, без декоративного glow;
+- единый лёгкий SVG icon set;
+- mobile-first layout 360–430 px, safe-area и fixed 5-tab navigation;
+- desktop/tablet layout ограничен примерно 960 px и использует дополнительные columns там, где это полезно;
+- `prefers-reduced-motion` отключает необязательные transitions/animations.
 
-Mini App использует тот же контракт, что и текущий Telegram runtime:
+Основная навигация:
+
+1. Главная
+2. FVG
+3. Funding
+4. Уведомления
+5. Настройки
+
+Admin остаётся secondary destination и показывается только при server-provided `admin.available`.
+
+## Главная
+
+Overview — trading dashboard, а не settings page. Он показывает:
+
+- статус FVG, активные инструменты и число выбранных timeframe;
+- статус Funding, число бирж, threshold и interval;
+- список сохранённых FVG-инструментов;
+- exchange + symbol + timeframes;
+- active/paused и число активных per-instrument filters;
+- реальный exchange-aware `24h price change %`, когда market data доступны;
+- `—`, если конкретный market snapshot временно недоступен.
+
+Нажатие на market row открывает редактор конкретного FVG-инструмента.
+
+## FVG
+
+Mini App использует тот же FVG v3 contract, что и основной runtime:
 
 - до 10 уникальных комбинаций `exchange + symbol` на Telegram ID;
 - Bitunix, Binance, Bybit, BingX, Bitget и Gate;
-- таймфреймы `15m`, `1h`, `4h`, `1d`;
-- исходные рыночные данные — только закрытые `15m` свечи;
-- `1h/4h/1d` агрегируются локально по UTC-границам;
-- пред-FVG/T−3 не используется и не может быть повторно включён через Mini App;
-- стабильный instrument key сохраняет одинаковый символ на разных биржах независимо;
-- биржа, символ и выбранные таймфреймы проходят полный server-side round-trip;
-- фильтры цены и размера сохраняются exchange-aware.
+- таймфреймы `15m`, `1h`, `4h`, `1d`, минимум один;
+- одинаковый symbol на разных биржах хранится независимо;
+- stable instrument key сохраняется server-side;
+- global FVG enable, confirmed FVG, bullish и bearish;
+- per-instrument enable;
+- price filter и FVG size filter со scope;
+- pre-FVG/T−3 не экспонируется и не может быть повторно включён legacy payload.
+
+Исходные FVG market data runtime остаются прежними: закрытые `15m` свечи; `1h/4h/1d` агрегируются локально.
 
 ## Funding alerts
 
-Поддерживаются:
+Funding screen сохраняет текущую существующую семантику:
 
+- enable/disable;
 - интервал 15–2880 минут с шагом 15;
-- абсолютный процентный порог;
-- положительное, отрицательное или оба направления;
-- Bitunix, Binance, Bybit, BingX, Bitget и Gate;
-- минимум одно направление и одна биржа;
-- очистка crossing-state при значимых изменениях.
+- абсолютный percentage threshold;
+- Positive / Negative, минимум одно направление;
+- Bitunix, Binance, Bybit, BingX, Bitget и Gate, минимум одна биржа;
+- `nextCheckAt` read-only;
+- crossing-state очищается backend при значимых изменениях.
 
-## Общие настройки
+## Уведомления и общие настройки
 
-- язык `ru` / `en`;
-- формат сообщений `compact` / `detailed`;
-- защита несохранённых изменений;
-- Telegram theme/safe-area/viewport/haptics;
-- RU/EN-локализация frontend.
+Alerts screen — read-only operational summary текущих правил FVG/Funding с быстрым переходом в соответствующий editor.
 
-## Администрирование
+Settings содержит только общие параметры и профиль:
 
-Административный раздел доступен только после server-side проверки `is_admin`.
+- RU / EN;
+- compact / detailed;
+- Telegram user / ID;
+- admin badge и переход в Administration только при наличии server-side capability.
 
-Реализованы:
+## 24h market overview
 
-- read-only runtime/SQLite/outbox/resource diagnostics;
-- access mode и runtime allowlist через отдельные endpoints;
-- одноразовые короткоживущие confirmation challenges, привязанные к admin/action/target;
-- replay/retarget/expired challenge rejection;
-- защита env allowlist и администраторов от удаления;
-- backup/restart adapters fail-closed до подключения проверенных production callbacks.
+Volatile market state отделён от mutable settings:
 
-Общий `PUT /api/mini-app/settings` не выполняет административные записи.
+```text
+GET /api/mini-app/market-overview
+```
+
+Backend не принимает произвольные `exchange`/`symbol` из клиента. После Telegram auth/access check он строит snapshot только по уже сохранённым FVG-инструментам пользователя.
+
+Поле называется однозначно:
+
+```json
+{
+  "key": "binance|BTCUSDT",
+  "exchange": "binance",
+  "symbol": "BTCUSDT",
+  "price": null,
+  "priceChange24hPct": 1.42,
+  "source": "ticker"
+}
+```
+
+Источники переиспользуют существующие public market adapters TB, API keys не нужны:
+
+- Bitunix 24h ticker;
+- Binance futures 24h ticker;
+- Bybit linear ticker;
+- Bitget futures ticker;
+- Gate futures ticker;
+- для exchange adapter без готового 24h field (сейчас BingX) — fallback по закрытым `15m` свечам, сравнение цены сейчас и 24 часа назад.
+
+Robustness:
+
+- существующие HTTP adapters имеют bounded request timeout;
+- exchange loads выполняются через bounded thread pool вне aiohttp event loop;
+- одна упавшая биржа не ломает остальные market rows;
+- бесконечных retry нет;
+- результат кешируется на короткий TTL (по умолчанию 30 секунд) с bounded cache size;
+- unavailable value возвращается `null`, frontend показывает `—`, а не `0%`;
+- market endpoint является вторичным read-only API и не влияет на settings writes/runtime alerts.
+
+Полный формат: [`API_CONTRACT.md`](API_CONTRACT.md).
+
+## Telegram integration
+
+Сохранены:
+
+- raw `Telegram.WebApp.initData` для server auth;
+- `ready()` и `expand()`;
+- Telegram viewport;
+- safe-area через CSS env variables;
+- haptic feedback;
+- closing confirmation при unsaved changes;
+- дополнительный browser `beforeunload` guard;
+- Telegram user context для отображения;
+- RU/EN.
+
+TB намеренно удерживает собственный dark trading surface независимо от Telegram light/dark theme; Telegram header/background синхронизируются с `#070b12`.
+
+## Admin
+
+Administrative UI использует ту же design system и сохраняет существующую security model:
+
+- runtime;
+- WebSocket / REST state;
+- SQLite;
+- outbox/delivery counters;
+- resources;
+- access mode;
+- allowlist;
+- backup;
+- restart.
+
+Все writes идут через отдельные admin endpoints и одноразовые confirmation challenges. Frontend `admin.available` — только presentation gate; окончательная авторизация всегда server-side.
+
+Backup/restart остаются fail-closed, если production callbacks не подключены. Shell/systemctl fallback в Mini App отсутствует.
+
+## Архитектура
+
+- frontend: `telegram-mini-app/` — React 19 + TypeScript + Vite;
+- backend: `mini_app_backend/` — aiohttp внутри процесса бота;
+- existing stores/adapters переиспользуются, второй market stack не создаётся;
+- backend по умолчанию выключен: `MINI_APP_BACKEND_ENABLED=false`;
+- рекомендуемый listener: `127.0.0.1:18080`;
+- production frontend по умолчанию использует same-origin `/api/...`;
+- `VITE_API_BASE_URL` нужен только для явного override;
+- mock включается только явно через `VITE_MOCK_MODE=true`.
+
+Frontend декомпозирован на `TradingApp.tsx`, `ui.tsx`, `screens/*`, API clients и design stylesheet. Legacy `App.tsx` и старые styles пока могут оставаться в repository history/source для безопасной миграции, но production entrypoint их не монтирует.
 
 ## Backend API
-
-Основные endpoints:
 
 ```text
 GET    /healthz
 GET    /api/mini-app/settings
 PUT    /api/mini-app/settings
+GET    /api/mini-app/market-overview
 POST   /api/mini-app/admin/confirmations
 PUT    /api/mini-app/admin/access
 POST   /api/mini-app/admin/allowlist
@@ -79,19 +185,15 @@ POST   /api/mini-app/admin/backup
 POST   /api/mini-app/admin/restart
 ```
 
-Frontend передаёт raw Telegram init data:
+Frontend передаёт:
 
 ```text
 X-Telegram-Init-Data: <window.Telegram.WebApp.initData>
 ```
 
-Backend проверяет HMAC-SHA-256, `auth_date`, срок действия, извлекает Telegram ID только из проверенного initData и повторно валидирует payload до записи.
-
-Полный формат: [`API_CONTRACT.md`](API_CONTRACT.md).
+Backend проверяет HMAC-SHA-256, `auth_date`, срок действия и получает Telegram ID только из verified initData.
 
 ## Backend activation
-
-API запускается в процессе существующего бота только при явном флаге:
 
 ```env
 MINI_APP_BACKEND_ENABLED=true
@@ -101,11 +203,11 @@ MINI_APP_AUTH_MAX_AGE_SECONDS=3600
 MINI_APP_ALLOWED_ORIGINS=https://<public-mini-app-host>
 ```
 
-После изменения production env требуется отдельный контролируемый restart и health-check. Эта операция не выполняется автоматически кодом Mini App.
+Production env/restart/deployment остаются отдельным контролируемым этапом.
 
 ## Frontend build
 
-Локальный mock:
+Mock development:
 
 ```bash
 cd telegram-mini-app
@@ -114,41 +216,23 @@ npm ci
 npm run dev
 ```
 
-Production build:
+Production verification:
 
 ```bash
-cd telegram-mini-app
-VITE_MOCK_MODE=false npm ci --no-audit --no-fund
-VITE_MOCK_MODE=false npm run typecheck
-VITE_MOCK_MODE=false npm run build
-```
-
-Если `VITE_API_BASE_URL` пуст, production frontend обращается к `/api/...` на том же HTTPS-origin. Это позволяет публиковать один и тот же build через выбранный HTTPS-туннель или reverse proxy без привязки к DuckDNS.
-
-GitHub Actions выполняет Node.js 22 typecheck/build и сохраняет artifact `tb-mini-app-frontend` с manifest, содержащим commit SHA и `apiMode: same-origin`.
-
-## Тесты
-
-```bash
-PUBLIC_ACCESS_ENABLED=true python -m unittest discover -s tests -v
-
 cd telegram-mini-app
 npm ci --no-audit --no-fund
 npm run typecheck
 VITE_MOCK_MODE=false npm run build
 ```
 
-CI дополнительно выполняет dependency audit, compileall, FVG/funding regression tests, bounded pipeline smoke, systemd verification и release audit.
+## Backend / regression tests
 
-## Следующий deployment-этап
+```bash
+PUBLIC_ACCESS_ENABLED=true python -m unittest discover -s tests -v
+```
 
-Интеграция кода и deployment разделены намеренно. Для публикации нужно отдельно:
+Mini App-specific coverage включает settings/auth regressions, market overview exchange-awareness/cache/partial failure/null handling, market endpoint auth, navigation/design contracts и existing admin/runtime regressions.
 
-1. выбрать постоянный HTTPS-туннель/хостинг, не изменяющий Amnezia/Xray и внешний `443` VDS;
-2. направить публичный HTTPS origin на frontend и `/api` → `127.0.0.1:18080`;
-3. включить backend env и пройти `/healthz`;
-4. зарегистрировать проверенный HTTPS URL в BotFather;
-5. сначала открыть Mini App ограниченному тестовому кругу и проверить round-trip настроек;
-6. только после этого решать вопрос о расширении доступа.
+## Deployment boundary
 
-Старый Telegram UI остаётся совместимым и рабочим во всех этих этапах.
+Код Mini App не меняет BotFather/menu button, внешний `443`, Amnezia/Xray или production reverse proxy автоматически. Публикация HTTPS URL и включение backend выполняются отдельным deployment workflow после merge/release и smoke-check.
