@@ -13,6 +13,16 @@ UTC = timezone.utc
 CROSSING_RETENTION_DAYS = 7
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """Commit or roll back a context-managed connection, then always close it."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 def _iso(value: datetime) -> str:
     return value.astimezone(UTC).isoformat()
 
@@ -26,15 +36,21 @@ class FundingExchangeStore:
         self._prepare()
 
     def _connect(self):
-        connection = sqlite3.connect(self.path, timeout=30)
+        connection = sqlite3.connect(
+            self.path,
+            timeout=30,
+            factory=_ClosingConnection,
+        )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
     def _prepare(self):
         with self._connect() as connection:
+            # WAL is persistent. Configure it once during store initialization
+            # instead of reissuing a journal-mode transition on every read.
+            connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS funding_alert_exchange_selection (
@@ -57,9 +73,13 @@ class FundingExchangeStore:
                     ON funding_alert_exchange_crossings(last_seen_at);
                 """
             )
-            migrated = connection.execute(
-                "SELECT value FROM metadata WHERE key = 'multi_exchange_migrated'"
-            ).fetchone() if self._table_exists(connection, "metadata") else None
+            migrated = (
+                connection.execute(
+                    "SELECT value FROM metadata WHERE key = 'multi_exchange_migrated'"
+                ).fetchone()
+                if self._table_exists(connection, "metadata")
+                else None
+            )
             if not migrated and self._table_exists(connection, "funding_alert_crossings"):
                 columns = {
                     row["name"]
@@ -68,8 +88,12 @@ class FundingExchangeStore:
                     ).fetchall()
                 }
                 required = {
-                    "chat_id", "symbol", "direction", "rate",
-                    "first_seen_at", "last_seen_at",
+                    "chat_id",
+                    "symbol",
+                    "direction",
+                    "rate",
+                    "first_seen_at",
+                    "last_seen_at",
                 }
                 if required <= columns:
                     connection.execute(
@@ -119,6 +143,7 @@ class FundingExchangeStore:
         selected = normalize_exchanges(exchanges)
         timestamp = _iso(now or datetime.now(UTC))
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 "DELETE FROM funding_alert_exchange_selection WHERE chat_id = ?",
                 (str(chat_id),),
@@ -131,7 +156,14 @@ class FundingExchangeStore:
                 """,
                 [(str(chat_id), exchange, timestamp) for exchange in selected],
             )
-        self.clear_crossings(chat_id)
+            # Selection and threshold-crossing state are one logical update.
+            # Clear crossings in the same transaction so a crash cannot leave
+            # stale state attached to a newly selected exchange set.
+            connection.execute(
+                "DELETE FROM funding_alert_exchange_crossings WHERE chat_id = ?",
+                (str(chat_id),),
+            )
+            connection.commit()
         return selected
 
     def toggle(self, chat_id: int, exchange: str, *, now: datetime | None = None):
@@ -189,7 +221,11 @@ class FundingExchangeStore:
                 """,
                 [
                     (
-                        str(chat_id), exchange, symbol, direction, str(rate),
+                        str(chat_id),
+                        exchange,
+                        symbol,
+                        direction,
+                        str(rate),
                         previous.get((exchange, symbol, direction), timestamp),
                         timestamp,
                     )
