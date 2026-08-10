@@ -7,8 +7,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Release136MiniAppContractTests(unittest.TestCase):
-    def test_release_version_and_source_tree(self):
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.6")
+    def test_release_document_and_source_tree(self):
+        self.assertTrue((ROOT / "docs" / "RELEASE_1.3.6.md").is_file())
         self.assertTrue((ROOT / "mini_app_backend" / "service.py").is_file())
         self.assertTrue((ROOT / "mini_app_backend" / "auth.py").is_file())
         self.assertTrue((ROOT / "telegram-mini-app" / "package.json").is_file())
