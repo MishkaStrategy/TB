@@ -44,6 +44,44 @@ def _number(value: Decimal | None) -> float | None:
     return result if math.isfinite(result) else None
 
 
+def _normalize_instruments(values) -> list[dict]:
+    """Normalize valid persisted rows without letting one bad row poison a read."""
+    normalized: list[dict] = []
+    for item in values if isinstance(values, list) else ():
+        if (
+            not isinstance(item, dict)
+            or not item.get("key")
+            or not item.get("exchange")
+            or not item.get("symbol")
+        ):
+            continue
+        try:
+            normalized.append(
+                {
+                    "key": str(item["key"]),
+                    "exchange": normalize_exchange(item["exchange"]),
+                    "symbol": normalize_fvg_symbol(item["symbol"]),
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    return normalized
+
+
+def _ticker_index(rows) -> dict[str, dict]:
+    """Index valid ticker rows while isolating malformed exchange payload entries."""
+    result: dict[str, dict] = {}
+    for row in rows if isinstance(rows, list) else ():
+        if not isinstance(row, dict) or not row.get("symbol"):
+            continue
+        try:
+            symbol = normalize_fvg_symbol(row.get("symbol"))
+        except (TypeError, ValueError):
+            continue
+        result[symbol] = row
+    return result
+
+
 class MarketOverviewService:
     """Build cached exchange-aware 24h snapshots for saved FVG instruments."""
 
@@ -83,18 +121,7 @@ class MarketOverviewService:
 
         envelope = self.settings_service.read_settings(user)
         instruments = envelope.get("settings", {}).get("fvg", {}).get("symbols", [])
-        normalized = [
-            {
-                "key": str(item["key"]),
-                "exchange": normalize_exchange(item["exchange"]),
-                "symbol": normalize_fvg_symbol(item["symbol"]),
-            }
-            for item in instruments
-            if isinstance(item, dict)
-            and item.get("key")
-            and item.get("exchange")
-            and item.get("symbol")
-        ]
+        normalized = _normalize_instruments(instruments)
         cache_key = (
             int(user.id),
             tuple((item["key"], item["exchange"], item["symbol"]) for item in normalized),
@@ -141,15 +168,11 @@ class MarketOverviewService:
         funding_client = self.funding_client_factory()
         candle_client = self.candle_client_factory()
         ticker_rows = funding_client.load(exchange)
-        ticker_index = {
-            normalize_fvg_symbol(row.get("symbol")): row
-            for row in ticker_rows
-            if isinstance(row, dict) and row.get("symbol")
-        }
+        ticker_rows_by_symbol = _ticker_index(ticker_rows)
 
         result: dict[str, dict] = {}
         for instrument in instruments:
-            ticker = ticker_index.get(instrument["symbol"], {})
+            ticker = ticker_rows_by_symbol.get(instrument["symbol"], {})
             change = _finite_decimal(ticker.get("priceChange24h"))
             source = "ticker"
             if change is None:
