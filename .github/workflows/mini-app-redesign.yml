@@ -91,6 +91,7 @@ jobs:
           python -m compileall -q
           mini_app_backend
           telegram-mini-app
+          tests/test_mini_app_api_timeout.py
           tests/test_mini_app_market_overview.py
           tests/test_mini_app_market_web.py
           tests/test_mini_app_service.py
@@ -107,6 +108,7 @@ jobs:
           set -euo pipefail
           python -m unittest -v \
             tests.test_mini_app_auth \
+            tests.test_mini_app_api_timeout \
             tests.test_mini_app_service \
             tests.test_mini_app_web \
             tests.test_mini_app_runtime_service \
