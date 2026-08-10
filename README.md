@@ -9,7 +9,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Текущий релиз: **1.3.4**. Это patch-релиз мультибиржевого FVG runtime: с бирж загружаются только закрытые `15m` свечи, а подтверждённые `1h/4h/1d` строятся локально. Пред-FVG и минутные свечи удалены. Telegram Mini App и графический WebApp-интерфейс в релиз не входят.
+Текущая runtime-база: **1.3.4**. Это patch-релиз мультибиржевого FVG runtime: с бирж загружаются только закрытые `15m` свечи, а подтверждённые `1h/4h/1d` строятся локально. Пред-FVG и минутные свечи удалены. В кодовую базу также интегрированы Telegram Mini App frontend и защищённый backend настроек, но backend выключен по умолчанию, публичный HTTPS URL не настраивается автоматически, BotFather/menu button не изменяются, а существующий Telegram UI остаётся основным рабочим и резервным интерфейсом.
 
 ## Что входит в 1.3.x
 
@@ -57,6 +57,28 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - `❤️ Донат`.
 
 Для каждого Telegram ID отдельно сохраняются язык RU/EN, compact/detailed формат, FVG-инструменты и фильтры, funding alerts и выбранные биржи.
+
+### Telegram Mini App
+
+В репозитории присутствуют `telegram-mini-app/` и `mini_app_backend/`.
+
+- frontend: React 19 + TypeScript + Vite;
+- production frontend по умолчанию обращается к same-origin `/api/...`;
+- mock включается только явно через `VITE_MOCK_MODE=true`;
+- backend использует тот же Bot API token и проверяет raw `Telegram.WebApp.initData` через HMAC-SHA-256;
+- backend запускается внутри bot process только при `MINI_APP_BACKEND_ENABLED=true`;
+- рекомендуемый listener — `127.0.0.1:18080`;
+- FVG-модель Mini App соответствует schema v3: `exchange + symbol + timeframes`, включая `15m/1h/4h/1d` и шесть бирж;
+- одинаковый symbol на разных биржах хранится независимо;
+- pre-FVG/T−3 не экспонируется и не может быть повторно включён legacy payload;
+- funding, RU/EN, compact/detailed и административная диагностика используют существующие stores;
+- admin access/allowlist writes требуют одноразового challenge;
+- backup/restart остаются fail-closed без production callbacks;
+- Mini App не удаляет и не заменяет существующий Telegram UI.
+
+Публичный HTTPS hosting/tunnel, регистрация URL в BotFather и menu button выполняются отдельным deployment-этапом. В текущую интеграцию не входит схема, изменяющая Amnezia/Xray или разделяющая внешний порт `443` VDS.
+
+Подробнее: [`telegram-mini-app/README.md`](telegram-mini-app/README.md) и [`telegram-mini-app/API_CONTRACT.md`](telegram-mini-app/API_CONTRACT.md).
 
 ### Админ-панель и «⚙️ Операции»
 
@@ -197,7 +219,7 @@ Telegram smoke:
 - убедиться, что в UI нет pre-FVG;
 - RU/EN и compact/detailed;
 - `⚙️ Операции`: restart guard и FVG archive;
-- отсутствие Telegram Mini App.
+- убедиться, что Mini App backend остаётся выключен, если `MINI_APP_BACKEND_ENABLED` явно не включён.
 
 После первой 15-минутной контрольной точки проверить journal: для активных рынков не должно быть `No closed 15m FVG candles returned`. Если такая ошибка есть, она должна быть видна как operational failure, а не скрываться как «FVG нет».
 
@@ -220,6 +242,12 @@ GRACEFUL_SHUTDOWN_ENABLED=false
 FVG_HISTORY_ARCHIVE_ENABLED=false
 FVG_PROCESS_GRACEFUL_RESTART_ENABLED=false
 FVG_PROCESS_RESTART_GUARD_ENABLED=false
+
+MINI_APP_BACKEND_ENABLED=false
+MINI_APP_BACKEND_HOST=127.0.0.1
+MINI_APP_BACKEND_PORT=18080
+MINI_APP_AUTH_MAX_AGE_SECONDS=3600
+MINI_APP_ALLOWED_ORIGINS=
 ```
 
 После ручного изменения:
@@ -285,6 +313,8 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, exchange-adapter contracts, FVG multi-timeframe aggregation, non-BTC end-to-end delivery, backup portability regression, полный unit suite, bounded `500 × 10` soak и production systemd verification.
+Для Mini App CI дополнительно выполняет Node.js 22 `npm ci`, TypeScript typecheck, production build с `VITE_MOCK_MODE=false` и публикует artifact `tb-mini-app-frontend` с manifest, привязанным к точному commit SHA.
 
-После публикации release workflow создаёт тег `v1.3.4`, GitHub Release, архив `fvg-alert-bot-1.3.4.tar.gz` и SHA-256 checksum. Уже существующий tag не может быть перепубликован содержимым другого commit.
+Общий CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, exchange-adapter contracts, FVG multi-timeframe aggregation, non-BTC end-to-end delivery, Mini App auth/service/runtime/web/admin regressions, backup portability regression, полный unit suite, bounded `500 × 10` soak и production systemd verification.
+
+Release workflow для версии 1.3.4 сохраняет immutable tag/assets: уже существующий tag нельзя перепубликовать содержимым другого commit.
