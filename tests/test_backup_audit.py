@@ -4,6 +4,7 @@ import sqlite3
 import tarfile
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,7 +21,7 @@ UTC = timezone.utc
 
 
 def create_database(path: Path, value="row"):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute("CREATE TABLE probe(value TEXT NOT NULL)")
         connection.execute("INSERT INTO probe(value) VALUES (?)", (value,))
         connection.commit()
