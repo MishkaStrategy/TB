@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/ui-ux-telegram-audit-2026-08-11
+  pull_request:
+    branches:
+      - agent/project-audit-optimization-2026-08-11
   workflow_dispatch:
 
 permissions:
