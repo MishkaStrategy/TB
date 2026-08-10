@@ -320,8 +320,15 @@ function markLanguageControls(root: ParentNode): void {
   const buttons = root.querySelectorAll<HTMLButtonElement>("button");
   buttons.forEach((button) => {
     const label = button.textContent?.trim();
-    if (label === "Русский" || label === "Russian") button.dataset.uiLanguage = "ru";
-    if (label === "English") button.dataset.uiLanguage = "en";
+    if (
+      (label === "Русский" || label === "Russian")
+      && button.dataset.uiLanguage !== "ru"
+    ) {
+      button.dataset.uiLanguage = "ru";
+    }
+    if (label === "English" && button.dataset.uiLanguage !== "en") {
+      button.dataset.uiLanguage = "en";
+    }
   });
 }
 
@@ -351,8 +358,12 @@ function applyLocalization(): void {
     markLanguageControls(document.body);
     const selectedLanguage = detectSelectedLanguage(document.body);
     if (selectedLanguage) currentLanguage = selectedLanguage;
-    document.documentElement.lang = currentLanguage;
-    document.documentElement.dataset.language = currentLanguage;
+    if (document.documentElement.lang !== currentLanguage) {
+      document.documentElement.lang = currentLanguage;
+    }
+    if (document.documentElement.dataset.language !== currentLanguage) {
+      document.documentElement.dataset.language = currentLanguage;
+    }
     localizeTree(document.body);
   } finally {
     applying = false;

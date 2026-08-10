@@ -23,6 +23,14 @@ const COPY: Record<"ru" | "en", NavigationCopy> = {
 const PROFILE_DIALOG_ID = "tb-profile-menu-dialog";
 const CLOSE_BUTTON_CLASS = "profile-sheet-close";
 
+function setAttributeIfChanged(element: Element, name: string, value: string): void {
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
+function removeAttributeIfPresent(element: Element, name: string): void {
+  if (element.hasAttribute(name)) element.removeAttribute(name);
+}
+
 function currentLanguage(): "ru" | "en" {
   return document.documentElement.dataset.language === "en" ? "en" : "ru";
 }
@@ -49,28 +57,31 @@ export function startNavigationAccessibility(): () => void {
     const nav = document.querySelector<HTMLElement>(".bottom-nav");
 
     if (trigger) {
-      trigger.setAttribute("aria-label", copy.profileTrigger);
-      trigger.setAttribute("aria-haspopup", "dialog");
-      trigger.setAttribute("aria-controls", PROFILE_DIALOG_ID);
+      setAttributeIfChanged(trigger, "aria-label", copy.profileTrigger);
+      setAttributeIfChanged(trigger, "aria-haspopup", "dialog");
+      setAttributeIfChanged(trigger, "aria-controls", PROFILE_DIALOG_ID);
     }
 
     if (nav) {
-      nav.setAttribute("aria-label", copy.primaryNavigation);
+      setAttributeIfChanged(nav, "aria-label", copy.primaryNavigation);
       nav.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-        if (button.classList.contains("active")) button.setAttribute("aria-current", "page");
-        else button.removeAttribute("aria-current");
+        if (button.classList.contains("active")) {
+          setAttributeIfChanged(button, "aria-current", "page");
+        } else {
+          removeAttributeIfPresent(button, "aria-current");
+        }
       });
     }
 
     if (backdrop) {
-      backdrop.tabIndex = -1;
-      backdrop.setAttribute("aria-hidden", "true");
-      backdrop.removeAttribute("aria-label");
+      if (backdrop.tabIndex !== -1) backdrop.tabIndex = -1;
+      setAttributeIfChanged(backdrop, "aria-hidden", "true");
+      removeAttributeIfPresent(backdrop, "aria-label");
     }
 
     if (sheet) {
-      sheet.id = PROFILE_DIALOG_ID;
-      sheet.setAttribute("aria-label", copy.profileDialog);
+      if (sheet.id !== PROFILE_DIALOG_ID) sheet.id = PROFILE_DIALOG_ID;
+      setAttributeIfChanged(sheet, "aria-label", copy.profileDialog);
 
       const header = sheet.querySelector<HTMLElement>(".profile-sheet-header");
       if (header) {
@@ -86,7 +97,7 @@ export function startNavigationAccessibility(): () => void {
           });
           header.append(close);
         }
-        close.setAttribute("aria-label", copy.closeProfile);
+        setAttributeIfChanged(close, "aria-label", copy.closeProfile);
       }
     }
 
