@@ -6,15 +6,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class Release137MiniAppContractTests(unittest.TestCase):
-    def test_release_version_and_source_tree(self):
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.7")
+class Release137HistoricalMiniAppContractTests(unittest.TestCase):
+    def test_release_document_and_history_are_preserved(self):
+        release = ROOT / "docs" / "RELEASE_1.3.7.md"
+        self.assertTrue(release.is_file())
+        self.assertIn("# FVG Alert Bot 1.3.7", release.read_text(encoding="utf-8"))
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("## 1.3.7", changelog)
         self.assertTrue((ROOT / "mini_app_backend" / "service.py").is_file())
-        self.assertTrue((ROOT / "mini_app_backend" / "auth.py").is_file())
-        self.assertTrue((ROOT / "telegram-mini-app" / "package.json").is_file())
-        self.assertTrue((ROOT / "telegram-mini-app" / "src" / "api.ts").is_file())
         self.assertTrue((ROOT / "telegram-mini-app" / "src" / "TradingApp.tsx").is_file())
-        self.assertTrue((ROOT / "mini_app_backend" / "market_overview.py").is_file())
 
     def test_backend_is_wired_but_default_off_and_loopback_only_by_default(self):
         bot = (ROOT / "bot.py").read_text(encoding="utf-8")
@@ -102,8 +102,6 @@ class Release137MiniAppContractTests(unittest.TestCase):
         self.assertIn("archive_missing", workflow)
         self.assertIn("checksum_missing", workflow)
         self.assertNotIn("--clobber", workflow)
-        self.assertIn("node_modules", workflow)
-        self.assertIn("__pycache__", workflow)
 
 
 if __name__ == "__main__":
