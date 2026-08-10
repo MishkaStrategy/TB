@@ -125,8 +125,8 @@ class MenuTests(unittest.TestCase):
 
 
 class TelegramMenuButtonTests(unittest.IsolatedAsyncioTestCase):
-    async def test_configures_localized_telegram_commands(self):
-        bot = SimpleNamespace(set_my_commands=AsyncMock(), set_chat_menu_button=AsyncMock())
+    async def test_configures_commands_without_overwriting_external_menu_button(self):
+        bot = SimpleNamespace(set_my_commands=AsyncMock())
         await configure_bot_interface(SimpleNamespace(bot=bot))
         self.assertEqual(
             bot.set_my_commands.await_args_list,
@@ -136,7 +136,6 @@ class TelegramMenuButtonTests(unittest.IsolatedAsyncioTestCase):
                 call(BOT_COMMANDS_EN, language_code="en"),
             ],
         )
-        bot.set_chat_menu_button.assert_awaited_once()
         self.assertEqual(BOT_COMMANDS[0].command, "menu")
         commands = [command.command for command in BOT_COMMANDS]
         self.assertIn("funding", commands)

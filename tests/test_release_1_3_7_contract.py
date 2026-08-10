@@ -6,9 +6,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class Release136MiniAppContractTests(unittest.TestCase):
+class Release137MiniAppContractTests(unittest.TestCase):
     def test_release_version_and_source_tree(self):
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.6")
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.7")
         self.assertTrue((ROOT / "mini_app_backend" / "service.py").is_file())
         self.assertTrue((ROOT / "mini_app_backend" / "auth.py").is_file())
         self.assertTrue((ROOT / "telegram-mini-app" / "package.json").is_file())
@@ -30,6 +30,12 @@ class Release136MiniAppContractTests(unittest.TestCase):
         self.assertIn("MINI_APP_BACKEND_ENABLED=false", env_example)
         self.assertIn("MINI_APP_BACKEND_HOST=127.0.0.1", env_example)
         self.assertIn("MINI_APP_BACKEND_PORT=18080", env_example)
+
+    def test_bot_startup_preserves_external_web_app_menu_button(self):
+        bot = (ROOT / "bot.py").read_text(encoding="utf-8")
+        self.assertNotIn("set_chat_menu_button", bot)
+        self.assertNotIn("MenuButtonCommands", bot)
+        self.assertIn("set_my_commands", bot)
 
     def test_init_data_validation_is_hmac_based(self):
         auth = (ROOT / "mini_app_backend" / "auth.py").read_text(encoding="utf-8")

@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.7 — 2026-08-11
+
+### Telegram Mini App
+
+- исправлена потеря кнопки Mini App после запуска или обновления бота;
+- runtime больше не заменяет внешнюю Web App Menu Button стандартной кнопкой команд;
+- список локализованных Bot API commands продолжает обновляться независимо от Menu Button;
+- добавлен regression test, запускающий настройку команд на Bot API mock без метода изменения Menu Button.
+
+### Production safety
+
+- URL Mini App не зашит в runtime-код и остаётся отдельной Bot API/BotFather-настройкой;
+- `/etc/fvg-alert-bot.env`, SQLite, пользовательские настройки, Xray, Nginx и сетевые порты автоматически не изменяются;
+- релиз публикуется новым immutable tag `v1.3.7`; `v1.3.6` и более ранние теги не перемещаются.
+
 ## 1.3.6 — 2026-08-11
 
 ### Telegram Mini App

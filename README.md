@@ -1,6 +1,6 @@
 # FVG Alert Bot
 
-![Version](https://img.shields.io/badge/version-1.3.6-2ea44f)
+![Version](https://img.shields.io/badge/version-1.3.7-2ea44f)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab)
 ![Telegram](https://img.shields.io/badge/interface-Telegram-2aabee)
 ![Status](https://img.shields.io/badge/status-stable-2ea44f)
@@ -9,7 +9,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Текущий релиз: **1.3.6**. Это immutable patch-релиз с новым тёмным Telegram Mini App trading dashboard и совместимым exchange-aware market overview backend. Telegram UI остаётся независимым резервным интерфейсом, а production update сохраняет env, SQLite, пользовательские настройки, BotFather, Xray и сетевую конфигурацию.
+Текущий релиз: **1.3.7**. Это immutable patch-релиз, который сохраняет внешний Telegram Mini App Menu Button при запуске бота. Бот обновляет команды, но больше не заменяет настроенную через Bot API/BotFather Web App кнопку стандартной кнопкой команд. Production update сохраняет env, SQLite, пользовательские настройки, Xray и сетевую конфигурацию.
 
 ## Что входит в 1.3.x
 
@@ -60,7 +60,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 
 ### Telegram Mini App
 
-Официальный `v1.3.6` содержит `telegram-mini-app/` и `mini_app_backend/`.
+Официальный `v1.3.7` содержит `telegram-mini-app/` и `mini_app_backend/`.
 
 - frontend: React 19 + TypeScript + Vite;
 - новый `TradingApp`: Главная, FVG, Funding, Уведомления, Настройки и защищённый Admin;
@@ -81,6 +81,8 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - Mini App не удаляет и не заменяет существующий Telegram UI.
 
 Для production Mini App зарезервирован `https://tbbot.mstrategy.com.ru`, но runtime-код не привязан к домену жёстко. Публичный HTTPS reverse proxy, регистрация URL в BotFather/menu button и включение backend выполняются отдельным deployment-этапом. Релиз не изменяет Amnezia/Xray и внешний port `443`.
+
+Начиная с `1.3.7`, запуск бота не вызывает `setChatMenuButton`: внешняя Web App Menu Button остаётся неизменной при restart и обновлении. Команды `/menu`, `/funding`, `/admin` и остальные по-прежнему синхронизируются автоматически.
 
 Подробнее: [`telegram-mini-app/README.md`](telegram-mini-app/README.md) и [`telegram-mini-app/API_CONTRACT.md`](telegram-mini-app/API_CONTRACT.md).
 
@@ -126,7 +128,7 @@ Operational readers открывают SQLite через `mode=ro` и `PRAGMA qu
 
 Подробности:
 
-- [`docs/RELEASE_1.3.6.md`](docs/RELEASE_1.3.6.md);
+- [`docs/RELEASE_1.3.7.md`](docs/RELEASE_1.3.7.md);
 - [`docs/RELEASE_1.3.4.md`](docs/RELEASE_1.3.4.md);
 - [`docs/RELEASE_1.3.3.md`](docs/RELEASE_1.3.3.md);
 - [`docs/RELEASE_1.3.2.md`](docs/RELEASE_1.3.2.md);
@@ -172,15 +174,15 @@ apt update && apt install -y git
 git clone https://github.com/MishkaStrategy/TB.git /root/TB
 cd /root/TB
 git checkout main
-test "$(cat VERSION)" = "1.3.6"
+test "$(cat VERSION)" = "1.3.7"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 Установщик собирает staging-релиз и запускает unit suite в чистом окружении до остановки работающего процесса. Production `.env` не копируется в staging. Затем создаётся backup, выполняется атомарное переключение, а при ошибке запуска автоматически возвращается предыдущая версия.
 
-## Обновление существующего VDS до 1.3.6
+## Обновление существующего VDS до 1.3.7
 
-Production обновляется только после публикации проверенного тега `v1.3.6` и точного SHA из deployment issue. Релизный архив называется `fvg-alert-bot-1.3.6.tar.gz`.
+Production обновляется только после публикации проверенного тега `v1.3.7` и точного SHA из deployment issue. Релизный архив называется `fvg-alert-bot-1.3.7.tar.gz`.
 
 ```bash
 cd /root/TB
@@ -190,8 +192,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.6 \
-  EXPECTED_VERSION=1.3.6 \
+  TARGET_REF=v1.3.7 \
+  EXPECTED_VERSION=1.3.7 \
   EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -213,7 +215,7 @@ sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
 sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 ```
 
-Ожидается версия `1.3.6`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
+Ожидается версия `1.3.7`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
 
 Telegram smoke:
 
@@ -325,4 +327,4 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
 
 Общий CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, exchange-adapter contracts, FVG multi-timeframe aggregation, non-BTC end-to-end delivery, Mini App auth/service/runtime/web/admin regressions, backup portability regression, полный unit suite, bounded `500 × 10` soak и production systemd verification.
 
-Release workflow для версии 1.3.6 создаёт `v1.3.6` только из merge commit `main`, сохраняет immutable tag/assets, создаёт `fvg-alert-bot-1.3.6.tar.gz` и SHA-256 checksum, а повторный запуск при уже корректном tag/release является идемпотентным.
+Release workflow для версии 1.3.7 создаёт `v1.3.7` только из merge commit `main`, сохраняет immutable tag/assets, создаёт `fvg-alert-bot-1.3.7.tar.gz` и SHA-256 checksum, а повторный запуск при уже корректном tag/release является идемпотентным.
