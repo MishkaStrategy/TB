@@ -19,6 +19,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+input::placeholder {
+  color: #78879d;
+}
+
 /* Keep secondary content readable instead of collapsing to 8–10 px. */
 .brand-copy small,
 .profile-copy small {
