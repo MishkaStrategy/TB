@@ -1,6 +1,7 @@
 import unittest
 from pathlib import Path
 
+from button_localization import translate_button_label
 from handlers.donate import format_donation_text
 from handlers.menu import build_reply_menu
 
@@ -32,6 +33,24 @@ class UiUxAuditTests(unittest.TestCase):
         self.assertIn("🔔 Alerts", en_rows[1])
         self.assertIn("⚙️ Настройки", ru_rows[2])
         self.assertIn("⚙️ Settings", en_rows[2])
+
+    def test_deep_native_buttons_are_localized_without_losing_state_cues(self):
+        samples = {
+            "➕ Добавить инструмент": "➕ Add instrument",
+            "✅ 15 минут": "✅ 15 min",
+            "⬜ 4 часа": "⬜ 4 h",
+            "⏸️ Отключить уведомления": "⏸️ Disable alerts",
+            "✅ Фильтр включён": "✅ Filter enabled",
+            "▫️ 🐮 Бычьи": "▫️ 🐮 Bullish",
+            "✏️ Ввести диапазон": "✏️ Enter range",
+            "🔎 Проверка фандинга": "🔎 Check funding",
+            "🔄 Показать актуальные": "🔄 Refresh rates",
+            "⏱ 30 мин.": "⏱ 30 min",
+        }
+        for source, expected in samples.items():
+            with self.subTest(source=source):
+                self.assertEqual(translate_button_label(source, "en"), expected)
+                self.assertEqual(translate_button_label(source, "ru"), source)
 
     def test_telegram_ui_storage_reads_stay_off_event_loop(self):
         start = (ROOT / "handlers" / "start.py").read_text(encoding="utf-8")
