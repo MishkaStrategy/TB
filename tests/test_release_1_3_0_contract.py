@@ -49,14 +49,13 @@ class Release134ContractTests(unittest.TestCase):
         self.assertTrue(callable(read_restart_guard_status))
         self.assertTrue(callable(read_fvg_history_status))
 
-    def test_bot_api_only_deployment_remains_available_alongside_mini_app(self):
+    def test_bot_api_only_deployment_and_no_mini_app(self):
         wrapper = Path("scripts/update_vds_bot_api_only.sh").read_text(
             encoding="utf-8"
         )
         self.assertIn("TELEGRAM_TOKEN", wrapper)
         self.assertIn("TELEGRAM_API_HASH", wrapper)
-        self.assertTrue(Path("telegram-mini-app").is_dir())
-        self.assertNotIn("deploy_tbbot_mini_app.sh", wrapper)
+        self.assertFalse(Path("telegram-mini-app").exists())
 
 
 if __name__ == "__main__":
