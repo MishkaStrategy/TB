@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -18,7 +19,7 @@ class SQLiteObservabilityDefaultsTests(unittest.TestCase):
     def test_default_collector_skips_row_counts_and_quick_check(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "target.sqlite3"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute("CREATE TABLE items(id INTEGER PRIMARY KEY)")
                 connection.executemany(
                     "INSERT INTO items DEFAULT VALUES",
