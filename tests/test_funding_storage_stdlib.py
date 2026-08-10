@@ -4,6 +4,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -74,7 +75,7 @@ class FundingStorageStdlibTests(unittest.TestCase):
                 [item["captured_at"].minute for item in store.latest()],
                 [45, 30, 15],
             )
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 self.assertEqual(
                     connection.execute(
                         "SELECT COUNT(*) FROM funding_snapshot_history"
