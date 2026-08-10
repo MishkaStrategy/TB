@@ -5,8 +5,9 @@
 - Авторизация выполняется только по проверенному Telegram `initData`.
 - Telegram ID текущего пользователя извлекается сервером и не принимается из JSON-body.
 - Backend повторно валидирует полный personal-settings payload до записи.
-- Точные десятичные значения передаются строками.
+- Точные десятичные значения настроек передаются строками.
 - Общий `PUT /api/mini-app/settings` сохраняет только персональные настройки.
+- Volatile market state не смешивается с mutable settings и читается отдельным endpoint.
 - Access mode, allowlist, backup и restart используют отдельные admin endpoints.
 - Каждое административное изменение требует короткоживущего одноразового подтверждения.
 - Backend API выключен по умолчанию и должен слушать только loopback.
@@ -19,11 +20,11 @@ Frontend передаёт raw Telegram init data:
 X-Telegram-Init-Data: <window.Telegram.WebApp.initData>
 ```
 
-Backend проверяет HMAC-SHA-256, обязательные поля, отсутствие дубликатов, `auth_date`, срок действия и допустимое future skew. `initDataUnsafe` не используется как источник идентичности.
+Backend проверяет HMAC-SHA-256, обязательные поля, отсутствие дубликатов, `auth_date`, срок действия и допустимый future skew. `initDataUnsafe` используется только для необязательного отображения пользователя во frontend и не является источником server-side identity.
 
 ## GET `/api/mini-app/settings`
 
-Сокращённый пример ответа для FVG 1.3.4:
+Сокращённый пример ответа:
 
 ```json
 {
@@ -95,9 +96,60 @@ Backend проверяет HMAC-SHA-256, обязательные поля, от
 }
 ```
 
-Bitunix сохраняет legacy-compatible key `BTCUSDT`; остальные биржи используют `exchange|symbol`. Клиент должен считать `key` непрозрачным стабильным идентификатором строки и возвращать его без самостоятельной подмены.
+Bitunix сохраняет legacy-compatible key `BTCUSDT`; остальные биржи используют `exchange|symbol`. Клиент считает `key` непрозрачным стабильным идентификатором строки и возвращает его без самостоятельной подмены.
 
-`notifyPreFvg` и `scope.preFvg` в API 1.3.4 отсутствуют. Даже если legacy-клиент добавит такие поля, backend не позволяет повторно включить pre-FVG: storage keys нормализуются в `false`.
+`notifyPreFvg` и `scope.preFvg` отсутствуют. Даже если legacy-клиент добавит такие поля, backend не позволяет повторно включить pre-FVG: storage keys нормализуются в `false`.
+
+## GET `/api/mini-app/market-overview`
+
+Read-only endpoint для volatile market state. Он не принимает `exchange`, `symbol` или Telegram ID из query/body. Backend сначала проходит Telegram auth/access control и формирует список только из уже сохранённых FVG-инструментов пользователя.
+
+Пример:
+
+```json
+{
+  "instruments": [
+    {
+      "key": "binance|BTCUSDT",
+      "exchange": "binance",
+      "symbol": "BTCUSDT",
+      "price": null,
+      "priceChange24hPct": 1.42,
+      "source": "ticker"
+    },
+    {
+      "key": "bybit|ETHUSDT",
+      "exchange": "bybit",
+      "symbol": "ETHUSDT",
+      "price": null,
+      "priceChange24hPct": null,
+      "source": "unavailable"
+    }
+  ],
+  "updatedAt": "2026-08-10T12:00:00+00:00"
+}
+```
+
+### Определение `priceChange24hPct`
+
+`priceChange24hPct` — процент изменения цены за 24 часа для конкретной пары `exchange + symbol`. Это не FVG percentage и не funding rate.
+
+Backend переиспользует существующие public market adapters проекта:
+
+- Bitunix: 24h ticker, изменение из `last/open`;
+- Binance: futures 24h ticker `priceChangePercent`;
+- Bybit: linear ticker `price24hPcnt`;
+- Bitget: futures ticker `change24h`;
+- Gate: futures ticker `change_percentage`;
+- если текущий exchange adapter не предоставляет 24h change (в частности BingX), применяется fallback по закрытым `15m` свечам: последняя закрытая цена сравнивается с закрытой ценой 24 часа назад.
+
+Внешние запросы используют существующие public REST adapters и их bounded request timeout; API keys не требуются. Exchange groups обрабатываются в ограниченном thread pool, поэтому сетевые вызовы не блокируют aiohttp event loop. Ошибка одной биржи изолируется и не ломает остальные строки. Бесконечных retry нет.
+
+Результат кешируется backend на короткий TTL (по умолчанию 30 секунд) с ограниченным числом cache entries. Cache key включает Telegram ID и точный набор сохранённых `key + exchange + symbol`, поэтому изменения списка инструментов не получают stale snapshot прежнего набора.
+
+Если market value получить нельзя, `priceChange24hPct` возвращается как `null`; frontend обязан показывать `—`, а не `0%`.
+
+Поле `price` зарезервировано для read-only текущей цены и сейчас возвращается `null`; frontend не должен вычислять 24h change самостоятельно.
 
 ## PUT `/api/mini-app/settings`
 
@@ -112,9 +164,7 @@ Bitunix сохраняет legacy-compatible key `BTCUSDT`; остальные �
 }
 ```
 
-Отправляется полная personal-settings модель из GET. Backend сохраняет `general`, `fvg` и `funding`; production runtime service игнорирует административные записи в общем PUT.
-
-Ответ повторяет GET и содержит значения после server-side нормализации.
+Отправляется полная personal-settings модель из GET. Backend сохраняет `general`, `fvg` и `funding`; production runtime service игнорирует административные записи в общем PUT. Ответ повторяет GET и содержит значения после server-side нормализации.
 
 ## `general`
 
@@ -160,7 +210,7 @@ Bitunix сохраняет legacy-compatible key `BTCUSDT`; остальные �
 - size unit — `USD` или `PERCENT`;
 - pre-FVG отсутствует и storage-compatible pre flags принудительно `false`.
 
-Runtime 1.3.4 получает от бирж только закрытые `15m` свечи; `1h/4h/1d` агрегируются локально. Mini App сохраняет именно выбор целевых таймфреймов, а не меняет источник market data.
+Runtime получает от бирж только закрытые `15m` свечи; `1h/4h/1d` агрегируются локально. Mini App сохраняет именно выбор целевых таймфреймов, а не меняет источник market data.
 
 ## `funding`
 
