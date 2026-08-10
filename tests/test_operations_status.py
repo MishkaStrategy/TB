@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,8 +27,9 @@ class OperationsStatusReaderTests(unittest.TestCase):
     def test_reader_does_not_create_optional_tables(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "plain.sqlite3"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute("CREATE TABLE existing(id INTEGER PRIMARY KEY)")
+                connection.commit()
 
             result = OperationsStatusReader(path).snapshot()
 
@@ -35,7 +37,7 @@ class OperationsStatusReaderTests(unittest.TestCase):
             self.assertFalse(result["lifecycle"]["available"])
             self.assertFalse(result["tasks"]["available"])
             self.assertFalse(result["databases"]["available"])
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 names = {
                     row[0]
                     for row in connection.execute(
