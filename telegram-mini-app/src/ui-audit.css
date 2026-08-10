@@ -68,6 +68,19 @@ input::placeholder {
   font-size: 12px;
 }
 
+/* Mobile interaction floor: every direct form/control target is at least 44px tall. */
+.add-instrument-form input,
+.add-instrument-form select,
+.field input,
+.field select,
+.filter-fields input,
+.filter-fields select,
+.suffix-input,
+.primary-button.compact,
+.chip {
+  min-height: 44px;
+}
+
 .primary-button,
 .secondary-button,
 .danger-button {
@@ -75,6 +88,37 @@ input::placeholder {
   font-size: 12.5px;
   font-weight: 750;
   transition: transform 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+/* Keep the compact 28px switch track while expanding its actual button hit area. */
+.tb-toggle {
+  height: 44px;
+  background: transparent;
+}
+
+.tb-toggle::before {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  background: #263140;
+  content: "";
+  transition: background 150ms ease;
+}
+
+.tb-toggle.on {
+  background: transparent;
+}
+
+.tb-toggle.on::before {
+  background: var(--primary);
+}
+
+.tb-toggle > span {
+  top: 11px;
+  z-index: 1;
 }
 
 .primary-button:hover:not(:disabled),
@@ -191,6 +235,7 @@ input::placeholder {
   .secondary-button,
   .danger-button,
   .tb-toggle,
+  .tb-toggle::before,
   .tb-toggle > span {
     animation: none !important;
     transition: none !important;
