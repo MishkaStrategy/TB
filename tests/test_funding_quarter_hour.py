@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,7 +84,7 @@ class FundingQuarterHourMigrationTests(unittest.TestCase):
                 datetime(2026, 7, 28, 15, 0, tzinfo=UTC),
             )
 
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 row = connection.execute(
                     "SELECT interval_hours, interval_minutes "
                     "FROM funding_alert_settings WHERE chat_id = '10'"
