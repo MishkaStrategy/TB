@@ -1,0 +1,31 @@
+name: Kick audit release finalizer
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - reopened
+
+permissions:
+  contents: write
+
+jobs:
+  kick:
+    runs-on: [self-hosted, fast]
+    timeout-minutes: 5
+    steps:
+      - name: Check out audit branch
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: agent/project-audit-optimization-2026-08-11
+
+      - name: Push one empty trigger commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit --allow-empty -m "ci: trigger audit release finalizer"
+          git push origin HEAD:agent/project-audit-optimization-2026-08-11
