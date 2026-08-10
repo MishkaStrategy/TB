@@ -10,11 +10,12 @@ This audit reviews the user-facing Telegram bot and Telegram Mini App directly f
 
 1. **Persistent keyboard language drift — fixed.** The reply keyboard was always rendered in Russian even though user preferences and routing already supported RU/EN aliases. `build_reply_menu(language)` now renders the selected language and the keyboard is refreshed immediately when the language changes.
 2. **Main inline menu hierarchy — improved.** Primary labels were shortened and status is communicated with a compact `✅ / ⏸` prefix, reducing wrapping in Telegram clients.
-3. **Onboarding density — improved.** `/start` no longer dumps the advanced command reference into the conversation. It gives a short product introduction and routes the user to the pinned navigation; Telegram's command menu remains available for advanced actions.
-4. **Donation panel — simplified and localized.** The panel now supports RU/EN, keeps the approved USDT/ETH/BNB EVM address presentation and removes the extra warning line from the interface.
-5. **Event-loop safety on high-frequency UI paths — improved.** User-preference and onboarding persistence calls introduced or touched by this audit execute through `asyncio.to_thread` rather than blocking Telegram async handlers.
-6. **Mini App Menu Button — regression guarded.** The UI regression contract verifies that runtime startup code does not call `set_chat_menu_button` or replace the externally configured Web App button with `MenuButtonCommands`.
-7. **Deep legacy menus — residual UX debt.** FVG instrument management, funding-alert advanced controls and parts of the admin panel still contain Russian-first legacy copy. The main navigation and high-frequency settings paths are bilingual; deeper legacy localization should be completed separately with full flow-level regression coverage.
+3. **Deep user-facing button localization — fixed centrally.** Legacy FVG instrument, FVG filter and funding controls now pass through a dedicated outbound button-label translator. Emoji/state prefixes, callback data, URLs and handler contracts stay unchanged while English profiles receive English labels for deep native controls as well as the main menu.
+4. **Onboarding density — improved.** `/start` no longer dumps the advanced command reference into the conversation. It gives a short product introduction and routes the user to the pinned navigation; Telegram's command menu remains available for advanced actions.
+5. **Donation panel — simplified and localized.** The panel now supports RU/EN, keeps the approved USDT/ETH/BNB EVM address presentation and removes the extra warning line from the interface.
+6. **Event-loop safety on high-frequency UI paths — improved.** User-preference and onboarding persistence calls introduced or touched by this audit execute through `asyncio.to_thread` rather than blocking Telegram async handlers.
+7. **Mini App Menu Button — regression guarded.** The UI regression contract verifies that runtime startup code does not call `set_chat_menu_button` or replace the externally configured Web App button with `MenuButtonCommands`.
+8. **Operator/admin prose — residual localization debt only.** Parts of the administrative/operational prose remain Russian-first. This does not affect the primary user navigation or the deep FVG/Funding native button labels covered by this audit.
 
 ### Telegram Mini App
 
@@ -47,10 +48,11 @@ Telegram native reply/inline buttons do not expose arbitrary per-button typograp
 The audit is not merge-ready until the exact final branch SHA passes:
 
 - dependency audit and Python compilation;
-- complete project unit suite, including `tests.test_ui_ux_audit`, Telegram menu contracts and release contracts;
+- complete project unit suite, including `tests.test_ui_ux_audit`, Telegram menu/button localization contracts and release contracts;
 - bounded pipeline/research smoke, backup contracts and notification soak;
 - Telegram Mini App TypeScript typecheck and production build with `VITE_MOCK_MODE=false`;
 - Mini App redesign, runner selector and dependency policy checks;
+- release and release-audit workflows on `[self-hosted, Linux]` with required release tooling verified up front;
 - production systemd render/verify;
 - a second CI and Release audit run on the same exact final SHA;
 - review confirming no regression to BotFather/Bot API Menu Button configuration or production runtime state.
