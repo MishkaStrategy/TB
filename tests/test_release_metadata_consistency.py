@@ -45,12 +45,16 @@ class ReleaseMetadataConsistencyTests(unittest.TestCase):
         self.assertIn(f"TARGET_REF={self.tag}", document)
         self.assertIn(f"EXPECTED_VERSION={self.version}", document)
         self.assertIn(f"installed version is `{self.version}`", document)
+        self.assertIn("MINI_APP_ALLOWED_ORIGINS=https://tbbot.mstrategy.com.ru", document)
+        self.assertIn("MINI_APP_BACKEND_HOST=127.0.0.1", document)
+        self.assertIn("MINI_APP_BACKEND_PORT=18080", document)
 
     def test_release_documents_and_changelog_exist(self):
         release_path = ROOT / "docs" / f"RELEASE_{self.version}.md"
         self.assertTrue(release_path.is_file(), release_path)
         release_text = release_path.read_text(encoding="utf-8")
         self.assertIn(f"# FVG Alert Bot {self.version}", release_text)
+        self.assertIn("Telegram Mini App", release_text)
 
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertRegex(
@@ -70,15 +74,21 @@ class ReleaseMetadataConsistencyTests(unittest.TestCase):
             f'EXPECTED_VERSION="${{EXPECTED_VERSION:-{self.version}}}"',
             workflow,
         )
+        self.assertIn("tests.test_release_1_3_5_contract", workflow)
+        self.assertIn("VITE_MOCK_MODE", workflow)
 
-    def test_release_workflow_does_not_republish_existing_tag(self):
+    def test_release_workflow_is_immutable_and_idempotent(self):
         workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
         self.assertIn("existingRef.data.object.sha !== context.sha", workflow)
         self.assertIn("refusing to republish it from", workflow)
+        self.assertIn("two-parent merge commit on main", workflow)
         self.assertNotIn("--clobber", workflow)
-        self.assertIn("steps.publish.outputs.release_created == 'true'", workflow)
+        self.assertIn("archive_missing", workflow)
+        self.assertIn("checksum_missing", workflow)
+        self.assertIn("mini_app_backend/service.py", workflow)
+        self.assertIn("telegram-mini-app/package.json", workflow)
 
 
 if __name__ == "__main__":

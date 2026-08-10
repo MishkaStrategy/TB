@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.3.5 — 2026-08-10
+
+Immutable patch-релиз, синхронизирующий `main`, `VERSION` и новый официальный tag после merge Telegram Mini App.
+
+### Добавлено в официальный релиз
+
+- `mini_app_backend/**` и `telegram-mini-app/**` впервые входят в официальный immutable release archive;
+- lifecycle Mini App backend уже подключён к `bot.py`, но backend остаётся выключен по умолчанию;
+- production frontend использует same-origin `/api/`, а production build выполняется с `VITE_MOCK_MODE=false`;
+- production Mini App domain документирован как `https://tbbot.mstrategy.com.ru` без жёсткой привязки runtime-кода к домену.
+
+### Исправлено
+
+- устранена рассинхронизация после `v1.3.4`, когда Mini App был объединён в `main`, но `VERSION` остался `1.3.4`;
+- release workflow создаёт новый tag только из merge commit `main`, никогда не перемещает существующий tag и fail-closed при несовпадении commit;
+- повторный запуск для уже корректного tag/release идемпотентен и загружает только отсутствующие immutable assets;
+- release archive теперь отдельно проверяется на наличие Mini App backend/frontend и отсутствие `.env`, SQLite, `node_modules`, frontend `dist`, Python caches и AppleDouble metadata;
+- release audit проверяет неизменность `v1.3.4`, dependency/security contract, Mini App production build, backup checksum binding и полный `500 × 10` soak.
+
+### Production safety
+
+- Telegram UI остаётся основным и резервным интерфейсом;
+- `MINI_APP_BACKEND_ENABLED=false` по умолчанию;
+- default backend listener — `127.0.0.1:18080`;
+- production env, SQLite и пользовательские runtime-данные автоматически не изменяются;
+- Mini App использует только BotFather `TELEGRAM_TOKEN`; `API_ID/API_HASH`, Telethon, Pyrogram и user sessions не используются;
+- operational feature flags автоматически не включаются;
+- deployment релиза и отдельное включение Mini App выполняются контролируемыми этапами после публикации;
+- `v1.3.4` и более ранние теги остаются immutable.
+
 ## 1.3.4 — 2026-08-09
 
 Patch-релиз мультибиржевого FVG runtime после повторного production-аудита.

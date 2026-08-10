@@ -30,11 +30,9 @@ The update wrapper validates this without printing the bot token.
 
 ## Release history relevant to deployment
 
-The first `v1.3.0` production attempt stopped during candidate tests before `systemctl stop` and atomic switch. Production remained on `1.2.0`; rollback was not required and runtime SQLite data were not changed.
+`v1.3.4` remains the currently deployed immutable production release at commit `f568f2282435099e2b12718de45e4bbe802a0b79`. It must not be moved or rewritten.
 
-The confirmed cause was production environment contamination: a stale `MAX_SYMBOLS_PER_USER=20` override affected candidate unit tests. Releases `1.3.1` and later isolate candidate tests with `env -i`, retain a complete test log and cap the effective FVG instrument limit at 10.
-
-`v1.3.4` is the current audited deployment target. It restores multi-timeframe confirmed FVG from a `15m`-only exchange data source, keeps pre-FVG and `1m` disabled, fixes the Gate candle adapter and makes empty multi-exchange sources observable. Telegram Mini App PR #53 is excluded.
+`v1.3.5` is the next immutable patch release. It publishes the Telegram Mini App backend and frontend that were merged into `main` after `v1.3.4`, while keeping the backend disabled by default. The existing Telegram UI remains the primary and fallback interface. Release publication does not modify production env, SQLite, runtime state, BotFather settings, Xray, or port 443.
 
 ## Preflight
 
@@ -53,14 +51,14 @@ Before changing production, record the currently installed code and active confi
 ```bash
 cat /opt/fvg-alert-bot/VERSION
 cat /opt/fvg-alert-bot/BUILD_COMMIT
-sudo grep -E '^(MAX_ACTIVE_SYMBOLS|MAX_SYMBOLS_PER_USER)=' /etc/fvg-alert-bot.env || true
+sudo grep -E '^(MAX_ACTIVE_SYMBOLS|MAX_SYMBOLS_PER_USER|MINI_APP_BACKEND_ENABLED|MINI_APP_BACKEND_HOST|MINI_APP_BACKEND_PORT|MINI_APP_ALLOWED_ORIGINS)=' /etc/fvg-alert-bot.env || true
 ```
 
 Do not print `TELEGRAM_TOKEN` or other secret values.
 
-## Update to 1.3.4
+## Update to 1.3.5
 
-Use the published tag and exact audited commit from the production deployment issue:
+Deploy only the published immutable tag and exact audited commit from the deployment issue:
 
 ```bash
 cd /root/TB
@@ -69,13 +67,15 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.4 \
-  EXPECTED_VERSION=1.3.4 \
+  TARGET_REF=v1.3.5 \
+  EXPECTED_VERSION=1.3.5 \
   EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
 
 Do not deploy a moving integration branch. The wrapper first verifies Bot API-only credentials and then delegates to `scripts/update_vds.sh`, preserving its backup, clean candidate environment, full unit suite, atomic switch, rollback, systemd, version, commit and SQLite checks.
+
+The release workflow does not execute this command and does not deploy production automatically.
 
 ## Candidate test guarantees
 
@@ -95,7 +95,7 @@ The installed service continues to read the external production file through sys
 
 The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from the runtime snapshot and runs tar with `COPYFILE_DISABLE=1`. This prevents macOS from synthesizing unmanifested AppleDouble members after the manifest is built. Archive verification remains strict for all ordinary unmanifested members.
 
-## FVG 1.3.4 production contract
+## FVG 1.3.5 production contract
 
 - the exchange data source is always closed `15m` candles;
 - confirmed target timeframes are `15m`, `1h`, `4h`, `1d`;
@@ -105,6 +105,26 @@ The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from
 - `MAX_ACTIVE_SYMBOLS` counts unique instruments, not timeframe rows;
 - a completely empty candle source for an active multi-exchange market is an operational failure and must be visible in journal/health counters;
 - a failure on one market must not stop processing of the remaining markets.
+
+## Telegram Mini App release contract
+
+The official `v1.3.5` source archive contains both `mini_app_backend/` and `telegram-mini-app/`, plus the backend lifecycle wiring in `bot.py`.
+
+Production-safe defaults remain:
+
+```dotenv
+MINI_APP_BACKEND_ENABLED=false
+MINI_APP_BACKEND_HOST=127.0.0.1
+MINI_APP_BACKEND_PORT=18080
+MINI_APP_AUTH_MAX_AGE_SECONDS=3600
+MINI_APP_ALLOWED_ORIGINS=https://tbbot.mstrategy.com.ru
+```
+
+These values are deployment examples only. Release publication does not write them to `/etc/fvg-alert-bot.env` and does not enable the backend automatically.
+
+The backend validates raw Telegram `initData` using the BotFather `TELEGRAM_TOKEN` and HMAC-SHA-256. Runtime code is not hard-wired to `tbbot.mstrategy.com.ru`; the domain is supplied through the origin allowlist. The frontend uses same-origin `/api/` requests. Production builds use `VITE_MOCK_MODE=false` and publish no source maps.
+
+The public HTTPS reverse-proxy/TLS setup, BotFather Mini App URL/menu button, and `MINI_APP_BACKEND_ENABLED=true` are a separate controlled activation stage after the audited release has been deployed. Xray and external port 443 are outside this release task.
 
 ## Post-deploy
 
@@ -122,26 +142,25 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
-- installed version is `1.3.4`;
+- installed version is `1.3.5`;
 - installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - `NRestarts` does not grow during observation;
 - both SQLite checks return `ok`;
 - no startup traceback or Telegram polling conflict appears;
-- no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`.
+- no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`;
+- Mini App backend remains disabled unless the deployment owner explicitly enabled it in a separate step.
 
-## 1.3.4 smoke checks
+## 1.3.5 smoke checks
 
 - FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
 - pre-FVG is absent from UI and commands;
-- verify existing instrument timeframe selections because the previous `15m`-only compatibility layer could persist normalized `15m` settings after a write;
 - configure at least one non-BTC instrument on `15m` and confirm it remains configured after reopening the menu;
 - configure or verify at least one instrument on a non-Bitunix exchange;
 - after a 15-minute control point, inspect journal for multi-exchange source failures;
-- `No closed 15m FVG candles returned for <exchange> <symbol>` must be treated as a visible data-source failure, not as proof that no FVG exists;
-- `⚙️ Операции` shows restart circuit-breaker status;
-- `⚙️ Операции` shows read-only FVG archive status;
-- Telegram Mini App is not deployed or required;
+- `No closed 15m FVG candles returned for <exchange> <symbol>` remains a visible data-source failure;
+- `⚙️ Операции` shows restart circuit-breaker and read-only FVG archive status;
+- Telegram UI remains fully usable with the Mini App backend disabled;
 - operational feature flags remain default-off for the first launch.
 
 A market does not need to produce an FVG on every control point. The production smoke validates that every configured market is actually scanned and that failures are visible; it must not manufacture test alerts.
