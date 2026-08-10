@@ -94,8 +94,14 @@ async def persistent_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     message, chat_id = update.effective_message, update.effective_chat.id
     _clear_input_states(context)
     action = MENU_ALIASES.get(message.text)
+    preferences = PREFERENCES.user(chat_id)
+    language = preferences["language"]
+    english = language == "en"
     if action == "fvg":
-        await message.reply_text("Настройки применяются отдельно для твоего Telegram ID.", reply_markup=build_fvg_settings_menu(chat_id))
+        await message.reply_text(
+            "Settings are saved separately for your Telegram ID." if english else "Настройки сохраняются отдельно для вашего Telegram ID.",
+            reply_markup=build_fvg_settings_menu(chat_id, language=language),
+        )
     elif action == "funding":
         await show_funding(message, context, edit=False)
     elif action == "alerts":
@@ -105,7 +111,7 @@ async def persistent_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif action == "settings":
         await show_settings(message, chat_id)
     elif action == "donate":
-        await send_donation(message)
+        await send_donation(message, language=language)
 
 
 @authorized
@@ -119,25 +125,37 @@ async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         PREFERENCES.set_language(chat_id, language)
         await query.answer("Язык изменён." if language == "ru" else "Language updated.")
         await show_settings(query.message, chat_id, edit=True)
-        await query.message.reply_text("Нижнее меню обновлено." if language == "ru" else "Bottom menu updated.", reply_markup=build_reply_menu())
+        await query.message.reply_text(
+            "Нижнее меню обновлено." if language == "ru" else "Bottom menu updated.",
+            reply_markup=build_reply_menu(language),
+        )
         return
     if action.startswith("mode:"):
         preferences = PREFERENCES.set_message_mode(chat_id, action.split(":", 1)[1])
         await query.answer("Формат уведомлений изменён." if preferences["language"] == "ru" else "Alert format updated.")
         await show_settings(query.message, chat_id, edit=True)
         return
+    preferences = PREFERENCES.user(chat_id)
+    language = preferences["language"]
+    english = language == "en"
     await query.answer()
     if action in {"open", "back"}:
         await show_settings(query.message, chat_id, edit=True)
     elif action == "fvg":
-        await query.message.edit_text("Настройки применяются отдельно для твоего Telegram ID.", reply_markup=build_fvg_settings_menu(chat_id))
+        await query.message.edit_text(
+            "Settings are saved separately for your Telegram ID." if english else "Настройки сохраняются отдельно для вашего Telegram ID.",
+            reply_markup=build_fvg_settings_menu(chat_id, language=language),
+        )
     elif action == "funding":
         await query.message.edit_text(format_funding_alert_settings(chat_id), reply_markup=build_funding_alert_menu(chat_id), parse_mode="HTML")
     elif action == "admin":
         from handlers.admin_settings import show_admin_panel
         await show_admin_panel(query.message, chat_id, edit=True)
     elif action == "main":
-        await query.message.edit_text("Панель управления:", reply_markup=build_main_menu(chat_id))
+        await query.message.edit_text(
+            "Control panel:" if english else "Панель управления:",
+            reply_markup=build_main_menu(chat_id, language=language),
+        )
 
 
 def build_settings_handlers():
