@@ -1,0 +1,1 @@
+This file is reserved for audit verification bookkeeping. It must not be modified after the final exact-SHA candidate is established; second-run verification is performed by rerunning workflows, not by changing this file.
