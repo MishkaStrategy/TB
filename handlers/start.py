@@ -1,9 +1,15 @@
+import asyncio
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from alerts.fvg_store import FvgAlertSettings
+from database.user_preferences import UserPreferences
 from handlers.auth import authorized
 from handlers.menu import show_menu
+
+
+PREFERENCES = UserPreferences()
 
 
 def _enable_confirmed_fvg_for_new_user(chat_id: int, settings: FvgAlertSettings | None = None) -> bool:
@@ -26,29 +32,34 @@ def _enable_confirmed_fvg_for_new_user(chat_id: int, settings: FvgAlertSettings 
 @authorized
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    auto_enabled = _enable_confirmed_fvg_for_new_user(chat_id)
-    activation_note = (
-        "\n\n✅ Уведомления о подтверждённых FVG включены автоматически для BTCUSDT. "
-        "Пред-FVG остаются выключенными — их можно включить командой /fvg_pre_alert on."
-        if auto_enabled
-        else ""
-    )
-    await update.effective_message.reply_text(
-        "🤖 FVG Alert Bot запущен!\n\n"
-        "Бот отслеживает FVG на Bitunix и ставки фандинга на нескольких биржах.\n"
-        "Поддерживаются Bitunix, Binance, Bybit, Bitget, Gate и BingX.\n\n"
-        "Команды:\n"
-        "/fvg_alert on|off — FVG 15m уведомления\n"
-        "/fvg_pre_alert on|off — пред-FVG за 3 минуты\n"
-        "/fvg_symbol add ETHUSDT — добавить инструмент\n"
-        "/fvg_price BTCUSDT 50000 90000 both — фильтр цены\n"
-        "/fvg_size — фильтр размера FVG\n"
-        "/fvg_stats — статистика FVG-событий\n"
-        "/funding — мультибиржевой топ ставок и уведомления\n"
-        "/donate — поддержать проект\n"
-        "/menu — открыть нижнее меню\n\n"
-        "/admin — админ-панель.\n\n"
-        "Основные разделы всегда доступны на клавиатуре под полем сообщения."
-        f"{activation_note}"
-    )
+    auto_enabled = await asyncio.to_thread(_enable_confirmed_fvg_for_new_user, chat_id)
+    preferences = await asyncio.to_thread(PREFERENCES.user, chat_id)
+    language = preferences.get("language", "ru")
+
+    if language == "en":
+        activation_note = (
+            "\n\n✅ Confirmed FVG alerts were enabled for BTCUSDT."
+            if auto_enabled
+            else ""
+        )
+        text = (
+            "🤖 <b>TB Trading Assistant</b>\n\n"
+            "FVG and multi-exchange funding monitoring inside Telegram.\n"
+            "Use the pinned buttons below for the main sections; Telegram's command menu remains available for advanced actions."
+            f"{activation_note}"
+        )
+    else:
+        activation_note = (
+            "\n\n✅ Уведомления о подтверждённых FVG автоматически включены для BTCUSDT."
+            if auto_enabled
+            else ""
+        )
+        text = (
+            "🤖 <b>TB Trading Assistant</b>\n\n"
+            "Мониторинг FVG и мультибиржевого фандинга прямо в Telegram.\n"
+            "Основные разделы доступны на закреплённых кнопках ниже; расширенные действия остаются в меню команд Telegram."
+            f"{activation_note}"
+        )
+
+    await update.effective_message.reply_text(text, parse_mode="HTML")
     await show_menu(update.effective_message, chat_id)
