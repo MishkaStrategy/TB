@@ -33,6 +33,16 @@ class UiUxAuditTests(unittest.TestCase):
         self.assertIn("⚙️ Настройки", ru_rows[2])
         self.assertIn("⚙️ Settings", en_rows[2])
 
+    def test_telegram_ui_storage_reads_stay_off_event_loop(self):
+        start = (ROOT / "handlers" / "start.py").read_text(encoding="utf-8")
+        donate = (ROOT / "handlers" / "donate.py").read_text(encoding="utf-8")
+        settings = (ROOT / "handlers" / "settings.py").read_text(encoding="utf-8")
+        self.assertIn("await asyncio.to_thread(_enable_confirmed_fvg_for_new_user", start)
+        self.assertIn("await asyncio.to_thread(PREFERENCES.user", start)
+        self.assertIn("await asyncio.to_thread(PREFERENCES.user", donate)
+        self.assertIn("await asyncio.to_thread(PREFERENCES.user", settings)
+        self.assertIn("await asyncio.to_thread(PREFERENCES.set_language", settings)
+
     def test_donation_panel_is_localized_and_has_no_extra_warning(self):
         ru = format_donation_text("ru")
         en = format_donation_text("en")
@@ -53,6 +63,8 @@ class UiUxAuditTests(unittest.TestCase):
         self.assertIn('import "./ui-audit.css";', main)
         self.assertIn(".bottom-nav button.active::before", css)
         self.assertIn("font-size: 10px", css)
+        self.assertIn("input::placeholder", css)
+        self.assertIn("color: #78879d", css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
 
     def test_mini_app_selection_controls_expose_pressed_state(self):
