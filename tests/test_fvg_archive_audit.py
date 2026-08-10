@@ -47,6 +47,7 @@ def create_archive(path: Path) -> FvgHistoryArchive:
             """,
             (now, now),
         )
+        connection.commit()
     return archive
 
 
@@ -62,6 +63,7 @@ def create_runtime_health(path: Path, **values):
                 for key, value in values.items()
             ],
         )
+        connection.commit()
 
 
 class FvgArchiveAuditTests(unittest.TestCase):
@@ -103,6 +105,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
             path = Path(directory) / "archive.sqlite3"
             with closing(sqlite3.connect(path)) as connection:
                 connection.execute("CREATE TABLE unrelated(id INTEGER PRIMARY KEY)")
+                connection.commit()
 
             result = audit_fvg_archive(path)
 
@@ -118,6 +121,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
                     "UPDATE archived_fvg_events SET payload_json=? WHERE event_id='event-1'",
                     (json.dumps({"event_id": "different"}),),
                 )
+                connection.commit()
 
             result = audit_fvg_archive(path)
 
@@ -140,6 +144,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
                     """,
                     (now, now),
                 )
+                connection.commit()
 
             result = audit_fvg_archive(path)
 
@@ -162,6 +167,7 @@ class FvgArchiveAuditTests(unittest.TestCase):
                     """,
                     (now, now),
                 )
+                connection.commit()
 
             result = audit_fvg_archive(path)
 
