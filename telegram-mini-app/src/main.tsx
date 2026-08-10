@@ -6,6 +6,7 @@ import { startUiLocalization } from "./i18n";
 import { initTelegram } from "./telegram";
 import "./styles.css";
 import "./admin-actions.css";
+import "./navigation-redesign.css";
 
 initTelegram();
 startUiLocalization();
