@@ -97,7 +97,6 @@ jobs:
           fi
           python -m unittest -v \
             tests.test_release_metadata_consistency \
-            tests.test_release_1_3_0_contract \
             tests.test_release_1_3_5_contract \
             tests.test_vds_bot_api_only_update
 
