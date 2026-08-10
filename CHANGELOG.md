@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.7 — 2026-08-11
+
+Patch-релиз по результатам аудита актуального `main` после `1.3.6`.
+
+### Исправлено и оптимизировано
+
+- `FundingExchangeStore` гарантированно закрывает context-managed SQLite connections, а `journal_mode=WAL` больше не переустанавливается на каждом чтении;
+- смена funding exchange selection и сброс crossing-state выполняются одной транзакцией;
+- Telegram update hot path переиспользует один `UserActivityRegistry` вместо создания объекта на каждый update;
+- sync settings/admin storage Mini App вынесено из `aiohttp` event loop через worker threads;
+- `aiohttp.Application` использует typed `web.AppKey`, устраняя `NotAppKeyWarning`;
+- повреждённый saved instrument или отдельная некорректная ticker row больше не обрушает весь market overview;
+- GitHub Actions переведены на точный allowlist capability selectors, release/systemd проверки закреплены за `[self-hosted, Linux]`;
+- release publication проверяет наличие `sha256sum`, `tar` и `gh` до создания immutable assets.
+
+### Проверки и совместимость
+
+- добавлены регрессии SQLite connection lifecycle, atomic crossing reset, off-loop Mini App storage, shared activity registry и malformed market rows;
+- runner selector policy проверяется отдельным workflow и обычным unit suite;
+- Telegram/FVG/funding/Mini App API контракты не меняются;
+- production env, SQLite/runtime-state и существующие immutable tags не изменяются автоматически;
+- релиз публикуется отдельным immutable tag `v1.3.7`.
+
 ## 1.3.6 — 2026-08-11
 
 ### Telegram Mini App
