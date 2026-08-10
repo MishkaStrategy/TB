@@ -17,7 +17,7 @@ jobs:
   publish-release:
     name: Publish VERSION tag and release
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fast]
     timeout-minutes: 10
 
     steps:
