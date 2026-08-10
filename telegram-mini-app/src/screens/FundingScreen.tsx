@@ -17,10 +17,10 @@ export function FundingScreen({ settings, language, onChange, onToggleDirection,
   };
 
   return <div className="screen-stack funding-screen">
-    <PageHeader eyebrow="Funding" title={tx(language, "Funding Alerts", "Funding Alerts")} description={tx(language, "Мультибиржевой контроль порога, направлений и расписания.", "Multi-exchange control for threshold, directions and schedule.")} trailing={<Toggle checked={settings.enabled} onChange={(enabled) => onChange({ enabled })} label={tx(language, "Включить Funding", "Enable Funding")} />} />
+    <PageHeader eyebrow="Funding" title={tx(language, "Funding-уведомления", "Funding Alerts")} description={tx(language, "Мультибиржевой контроль порога, направлений и расписания.", "Multi-exchange control for threshold, directions and schedule.")} trailing={<Toggle checked={settings.enabled} onChange={(enabled) => onChange({ enabled })} label={tx(language, "Включить Funding", "Enable Funding")} />} />
 
     <Section className="funding-summary">
-      <div className="funding-summary-top"><StatusBadge active={settings.enabled}>{settings.enabled ? "Funding Alerts ON" : "Funding Alerts OFF"}</StatusBadge><span>{settings.exchanges.length} {tx(language, "бирж", "exchanges")}</span></div>
+      <div className="funding-summary-top"><StatusBadge active={settings.enabled}>{settings.enabled ? tx(language, "Уведомления включены", "Funding alerts on") : tx(language, "Уведомления выключены", "Funding alerts off")}</StatusBadge><span>{settings.exchanges.length} {tx(language, "бирж", "exchanges")}</span></div>
       <div className="funding-big-metrics"><Metric label={tx(language, "Порог", "Threshold")} value={`${settings.threshold}%`} /><Metric label={tx(language, "Интервал", "Interval")} value={formatInterval(settings.intervalMinutes, language)} /><Metric label={tx(language, "Следующая проверка", "Next check")} value={formatDate(settings.nextCheckAt, language)} /></div>
     </Section>
 
@@ -35,11 +35,11 @@ export function FundingScreen({ settings, language, onChange, onToggleDirection,
     </Section>
 
     <Section title={tx(language, "Направления", "Directions")} subtitle={tx(language, "Минимум одно направление обязательно", "At least one direction is required") }>
-      <div className="direction-cards"><button type="button" className={`direction-card positive ${settings.notifyPositive ? "selected" : ""}`} onClick={() => onToggleDirection("notifyPositive")}><div><Icon name="chart" size={20} /><strong>Positive</strong></div><span>{settings.notifyPositive ? tx(language, "Выбрано", "Selected") : tx(language, "Выбрать", "Select")}</span></button><button type="button" className={`direction-card negative ${settings.notifyNegative ? "selected" : ""}`} onClick={() => onToggleDirection("notifyNegative")}><div><Icon name="chart" size={20} /><strong>Negative</strong></div><span>{settings.notifyNegative ? tx(language, "Выбрано", "Selected") : tx(language, "Выбрать", "Select")}</span></button></div>
+      <div className="direction-cards"><button type="button" className={`direction-card positive ${settings.notifyPositive ? "selected" : ""}`} aria-pressed={settings.notifyPositive} onClick={() => onToggleDirection("notifyPositive")}><div><Icon name="chart" size={20} /><strong>{tx(language, "Положительные", "Positive")}</strong></div><span>{settings.notifyPositive ? tx(language, "Выбрано", "Selected") : tx(language, "Выбрать", "Select")}</span></button><button type="button" className={`direction-card negative ${settings.notifyNegative ? "selected" : ""}`} aria-pressed={settings.notifyNegative} onClick={() => onToggleDirection("notifyNegative")}><div><Icon name="chart" size={20} /><strong>{tx(language, "Отрицательные", "Negative")}</strong></div><span>{settings.notifyNegative ? tx(language, "Выбрано", "Selected") : tx(language, "Выбрать", "Select")}</span></button></div>
     </Section>
 
-    <Section title={tx(language, "Биржи", "Exchanges")} subtitle={tx(language, "Выберите площадки для funding alerts", "Choose exchanges for funding alerts") }>
-      <div className="exchange-select-grid">{exchangeOrder.map((exchange) => { const active = settings.exchanges.includes(exchange); return <button type="button" key={exchange} className={`exchange-select ${active ? "selected" : ""}`} onClick={() => onToggleExchange(exchange)}><span className="exchange-avatar">{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><span className="exchange-check">{active ? <Icon name="check" size={15} /> : null}</span></button>; })}</div>
+    <Section title={tx(language, "Биржи", "Exchanges")} subtitle={tx(language, "Выберите площадки для funding-уведомлений", "Choose exchanges for funding alerts") }>
+      <div className="exchange-select-grid">{exchangeOrder.map((exchange) => { const active = settings.exchanges.includes(exchange); return <button type="button" key={exchange} className={`exchange-select ${active ? "selected" : ""}`} aria-pressed={active} onClick={() => onToggleExchange(exchange)}><span className="exchange-avatar">{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><span className="exchange-check">{active ? <Icon name="check" size={15} /> : null}</span></button>; })}</div>
     </Section>
   </div>;
 }
