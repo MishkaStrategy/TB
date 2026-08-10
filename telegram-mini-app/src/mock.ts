@@ -1,7 +1,6 @@
 import type { AppSettings } from "./types";
 
 const defaultScope = {
-  preFvg: true,
   confirmedFvg: true,
   bullish: true,
   bearish: true,
@@ -15,12 +14,14 @@ export const mockSettings: AppSettings = {
   fvg: {
     enabled: false,
     notifyConfirmedFvg: true,
-    notifyPreFvg: false,
     bullishEnabled: true,
     bearishEnabled: true,
     symbols: [
       {
+        key: "BTCUSDT",
+        exchange: "bitunix",
         symbol: "BTCUSDT",
+        timeframes: ["15m", "1h", "4h", "1d"],
         enabled: true,
         priceFilter: {
           enabled: false,
@@ -71,8 +72,8 @@ export const mockSettings: AppSettings = {
       diskFreeBytes: 68_719_476_736,
       diskTotalBytes: 107_374_182_400,
       pid: 2481,
-      release: "1.2.0",
-      gitCommit: "demo7ac",
+      release: "1.3.4",
+      gitCommit: "demo134",
       pythonVersion: "3.12.8",
     },
   },
