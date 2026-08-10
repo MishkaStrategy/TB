@@ -46,6 +46,7 @@ from operations.runtime_lifecycle import RuntimeLifecycleCoordinator
 
 LOGGER = logging.getLogger(__name__)
 USER_PREFERENCES = UserPreferences()
+USER_ACTIVITY_REGISTRY = UserActivityRegistry()
 DELIVERY_REGISTRY = (
     TelegramDeliveryRegistry()
     if DELIVERY_STATUS_TRACKING_ENABLED or USER_BLOCK_STATUS_ENABLED
@@ -190,7 +191,7 @@ async def track_user_activity(update, context):
     user = update.effective_user
     chat = update.effective_chat
     if user is not None:
-        await asyncio.to_thread(UserActivityRegistry().touch, user)
+        await asyncio.to_thread(USER_ACTIVITY_REGISTRY.touch, user)
     if DELIVERY_REGISTRY is not None and user is not None and chat is not None:
         await asyncio.to_thread(
             DELIVERY_REGISTRY.record_interaction,
