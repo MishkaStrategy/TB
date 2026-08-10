@@ -1,0 +1,50 @@
+name: Organization CI storage policy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-storage-policy:
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate artifact policy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          import sys
+
+          errors = []
+          root = Path('.github/workflows')
+          for path in sorted([*root.glob('*.yml'), *root.glob('*.yaml')]):
+              if path.name == 'org-storage-policy.yml':
+                  continue
+              lines = path.read_text(encoding='utf-8').splitlines()
+              for i, line in enumerate(lines):
+                  if re.search(r'uses:\s*actions/upload-artifact@', line):
+                      block = '\n'.join(lines[max(0, i-6):min(len(lines), i+18)])
+                      if not re.search(r'retention-days:\s*["\']?1["\']?\s*$', block, re.M):
+                          errors.append(f'{path}:{i+1}: upload-artifact must set retention-days: 1')
+                      temporary = 'failure()' in block or 'cancelled()' in block or 'org-storage-policy: temporary' in block
+                      if not temporary:
+                          errors.append(f'{path}:{i+1}: routine/success upload-artifact is forbidden; use failure-only temporary artifact or GitHub Release for canonical evidence')
+
+          if errors:
+              print('Organization storage policy violations:')
+              for error in errors:
+                  print(f'::error::{error}')
+              sys.exit(1)
+          print('Organization storage policy: PASS')
+          PY
