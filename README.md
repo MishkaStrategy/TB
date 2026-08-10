@@ -1,6 +1,6 @@
 # FVG Alert Bot
 
-![Version](https://img.shields.io/badge/version-1.3.3-2ea44f)
+![Version](https://img.shields.io/badge/version-1.3.4-2ea44f)
 ![Python](https://img.shields.io/badge/Python-3.12-3776ab)
 ![Telegram](https://img.shields.io/badge/interface-Telegram-2aabee)
 ![Status](https://img.shields.io/badge/status-stable-2ea44f)
@@ -9,7 +9,7 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 
 Бот **не открывает сделки**, не управляет средствами пользователя и не является финансовой рекомендацией.
 
-Текущий релиз: **1.3.3**. Это кроссплатформенный backup hotfix поверх стабильного `1.3.2`; функциональный FVG/operations стек основан на `1.3.0`. Telegram Mini App и графический WebApp-интерфейс в релиз не входят.
+Текущий релиз: **1.3.4**. Это patch-релиз мультибиржевого FVG runtime: с бирж загружаются только закрытые `15m` свечи, а подтверждённые `1h/4h/1d` строятся локально. Пред-FVG и минутные свечи удалены. Telegram Mini App и графический WebApp-интерфейс в релиз не входят.
 
 ## Что входит в 1.3.x
 
@@ -19,17 +19,20 @@ Telegram-бот для мониторинга **Fair Value Gap (FVG)** и ста
 - до 10 уникальных комбинаций `биржа + торговая пара` на Telegram ID;
 - подтверждённые FVG на `15m`, `1h`, `4h`, `1d`;
 - сигнал только после закрытия свечи C;
-- BTC-only пред-FVG T−3 только на `15m`;
+- единый источник рыночных данных FVG — закрытые `15m` свечи;
+- `1h = 4 × 15m`, `4h = 16 × 15m`, `1d = 96 × 15m` по UTC-границам;
+- пред-FVG и `1m` не используются;
 - Bitunix, Binance, Bybit, BingX, Bitget и Gate;
 - отдельное включение бычьих и медвежьих сигналов;
 - pause/delete и изменение таймфреймов;
 - exchange-aware фильтры цены и размера зоны;
 - отдельный FAQ по FVG-инструментам;
-- один расчёт на уникальную комбинацию `биржа + символ + таймфрейм`, независимо от числа получателей.
+- один общий набор `15m` на уникальный `exchange + symbol` переиспользуется для всех закрывшихся целевых таймфреймов;
+- пустой market-data source считается operational failure, а не молчаливым отсутствием FVG.
 
-Старые FVG settings schema v2 автоматически мигрируют в schema v3: существующие символы получают биржу Bitunix и таймфрейм `15m`, направления и фильтры сохраняются.
+Старые FVG settings schema v2 автоматически мигрируют в schema v3: существующие символы получают биржу Bitunix и таймфрейм `15m`, направления и фильтры сохраняются. После версии, где таймфреймы могли быть принудительно нормализованы в `15m`, рекомендуется один раз проверить сохранённые `1h/4h/1d` для существующих инструментов.
 
-Верхний публичный лимит — 10 инструментов. Старый env override не может повысить его. Legacy-настройки, где уже сохранено больше 10 инструментов, не обрезаются: пользователь может удалять их, но не может добавлять новые до снижения количества ниже лимита.
+Верхний публичный лимит — 10 инструментов. Старый env override не может повысить его. Legacy-настройки, где уже сохранено больше 10 инструментов, не обрезаются: пользователь может удалять их, но не может добавлять новые до снижения количества ниже лимита. Глобальный `MAX_ACTIVE_SYMBOLS` считается по уникальным `exchange + symbol`, а не по числу выбранных таймфреймов.
 
 ### Мультибиржевой фандинг
 
@@ -90,12 +93,14 @@ Operational readers открывают SQLite через `mode=ro` и `PRAGMA qu
 - Bot API-only deployment без Telegram App credentials;
 - candidate unit tests в `env -i` без production secrets и feature flags;
 - полный candidate test log в `/var/log/fvg-alert-bot`;
-- обязательный CI на GitHub-hosted Ubuntu, не на production VDS.
+- обязательный CI на GitHub-hosted Ubuntu, не на production VDS;
+- immutable release tag/assets: существующий tag нельзя перепубликовать содержимым другого commit.
 
 Рискованные operational-функции выключены по умолчанию и включаются поэтапно через `.env`.
 
 Подробности:
 
+- [`docs/RELEASE_1.3.4.md`](docs/RELEASE_1.3.4.md);
 - [`docs/RELEASE_1.3.3.md`](docs/RELEASE_1.3.3.md);
 - [`docs/RELEASE_1.3.2.md`](docs/RELEASE_1.3.2.md);
 - [`docs/RELEASE_1.3.1.md`](docs/RELEASE_1.3.1.md);
@@ -140,15 +145,15 @@ apt update && apt install -y git
 git clone https://github.com/MishkaStrategy/TB.git /root/TB
 cd /root/TB
 git checkout main
-test "$(cat VERSION)" = "1.3.3"
+test "$(cat VERSION)" = "1.3.4"
 FVG_INSTALL_MIN_FREE_MB=1024 bash scripts/install_vds.sh
 ```
 
 Установщик собирает staging-релиз и запускает unit suite в чистом окружении до остановки работающего процесса. Production `.env` не копируется в staging. Затем создаётся backup, выполняется атомарное переключение, а при ошибке запуска автоматически возвращается предыдущая версия.
 
-## Обновление существующего VDS до 1.3.3
+## Обновление существующего VDS до 1.3.4
 
-Production обновляется только после публикации проверенного тега `v1.3.3` и точного SHA из deployment issue:
+Production обновляется только после публикации проверенного тега `v1.3.4` и точного SHA из deployment issue:
 
 ```bash
 cd /root/TB
@@ -158,8 +163,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.3 \
-  EXPECTED_VERSION=1.3.3 \
+  TARGET_REF=v1.3.4 \
+  EXPECTED_VERSION=1.3.4 \
   EXPECTED_COMMIT=ПРОВЕРЕННЫЙ_SHA \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -181,16 +186,20 @@ sqlite3 /var/lib/fvg-alert-bot/fvg_event_store.sqlite3 'PRAGMA quick_check;'
 sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 ```
 
-Ожидается версия `1.3.3`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
+Ожидается версия `1.3.4`, точный audited SHA, `active`, `enabled`, стабильный `NRestarts` и `ok` для обеих SQLite-баз.
 
 Telegram smoke:
 
 - `/start`, `/menu`, `/funding`, `/admin`, `/donate`;
-- добавление FVG-инструмента и выбор `15m/1h/4h/1d`;
-- повторное открытие и сохранение настроек;
+- проверить список сохранённых FVG-инструментов и повторно выбрать нужные `15m/1h/4h/1d`, если предыдущая версия нормализовала их в `15m`;
+- добавить non-BTC инструмент минимум на `15m` и убедиться, что он присутствует в настройках после повторного открытия;
+- проверить instrument на другой бирже, а не только BTC/Bitunix;
+- убедиться, что в UI нет pre-FVG;
 - RU/EN и compact/detailed;
 - `⚙️ Операции`: restart guard и FVG archive;
 - отсутствие Telegram Mini App.
+
+После первой 15-минутной контрольной точки проверить journal: для активных рынков не должно быть `No closed 15m FVG candles returned`. Если такая ошибка есть, она должна быть видна как operational failure, а не скрываться как «FVG нет».
 
 ## Production flags
 
@@ -260,7 +269,6 @@ Telegram `Conflict` означает, что тот же Bot API token испо�
 
 - `/menu` — открыть меню;
 - `/fvg_alert on|off` — подтверждённые FVG;
-- `/fvg_pre_alert on|off` — пред-FVG T−3;
 - `/fvg_symbol` — FVG instruments wizard;
 - `/fvg_price` — ценовой фильтр;
 - `/fvg_size` — фильтр размера зоны;
@@ -277,6 +285,6 @@ MPLCONFIGDIR=/tmp/trading-assistant-mpl \
   .venv/bin/python -m unittest discover -s tests -v
 ```
 
-CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, backup portability regression, FVG migration/timeframe tests, оба read-only admin sections, полный unit suite, bounded `500 × 10` soak и production systemd verification.
+CI включает dependency audit, compilation, release metadata consistency, candidate environment isolation, exchange-adapter contracts, FVG multi-timeframe aggregation, non-BTC end-to-end delivery, backup portability regression, полный unit suite, bounded `500 × 10` soak и production systemd verification.
 
-После публикации release workflow создаёт тег `v1.3.3`, GitHub Release, архив `fvg-alert-bot-1.3.3.tar.gz` и SHA-256 checksum.
+После публикации release workflow создаёт тег `v1.3.4`, GitHub Release, архив `fvg-alert-bot-1.3.4.tar.gz` и SHA-256 checksum. Уже существующий tag не может быть перепубликован содержимым другого commit.

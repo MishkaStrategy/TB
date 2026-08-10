@@ -1,4 +1,4 @@
-"""Public multi-exchange candle adapters for confirmed and BTC pre-FVG."""
+"""Public multi-exchange candle adapters for confirmed FVG market data."""
 
 from __future__ import annotations
 
@@ -312,16 +312,15 @@ class PublicCandleClient:
         result = []
         for raw in payload if isinstance(payload, list) else []:
             try:
-                result.append(
-                    _candle(
-                        symbol,
-                        timeframe,
-                        _seconds(raw[0]),
-                        (raw[5], raw[3], raw[4], raw[2]),
-                        now,
-                    )
-                )
-            except (IndexError, TypeError, ValueError):
+                if isinstance(raw, dict):
+                    open_time = _seconds(raw["t"])
+                    prices = (raw["o"], raw["h"], raw["l"], raw["c"])
+                else:
+                    # Keep compatibility with older/alternate Gate array payloads.
+                    open_time = _seconds(raw[0])
+                    prices = (raw[5], raw[3], raw[4], raw[2])
+                result.append(_candle(symbol, timeframe, open_time, prices, now))
+            except (IndexError, KeyError, TypeError, ValueError):
                 continue
         return result
 

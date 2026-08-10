@@ -1,4 +1,4 @@
-"""Compact button-driven UI for per-user FVG price and size filters."""
+"""Compact button-driven UI for confirmed 15m FVG price and size filters."""
 
 import re
 from decimal import Decimal, InvalidOperation
@@ -8,7 +8,6 @@ from telegram.ext import CallbackQueryHandler, CommandHandler, ContextTypes, Mes
 
 from alerts.fvg_store import FvgAlertSettings
 from exchanges.funding import EXCHANGE_LABELS
-from exchanges.fvg_candles import is_bitcoin_symbol
 from handlers.auth import authorized
 
 
@@ -99,20 +98,14 @@ def build_filter_symbol_menu(chat_id: int, kind: str, settings=None):
 
 def build_filter_menu(chat_id: int, kind: str, symbol: str, settings=None):
     settings = settings or FvgAlertSettings()
-    instrument = _instrument(settings, chat_id, symbol)
     config = _filter(settings, chat_id, kind, symbol)
-    supports_pre = is_bitcoin_symbol(instrument.get("symbol", symbol))
 
     def mark(value):
         return "✅" if value else "⏸️"
 
     rows = [
         [InlineKeyboardButton(
-            (
-                "✅ Фильтр включён"
-                if config.get("enabled", False)
-                else "⏸️ Фильтр выключен"
-            ),
+            "✅ Фильтр включён" if config.get("enabled", False) else "⏸️ Фильтр выключен",
             callback_data=f"fvg-filter:toggle:{kind}:{symbol}",
         )],
         [
@@ -126,17 +119,6 @@ def build_filter_menu(chat_id: int, kind: str, symbol: str, settings=None):
             ),
         ],
     ]
-    event_type_row = []
-    if supports_pre:
-        event_type_row.append(InlineKeyboardButton(
-            f"{mark(config.get('apply_to_pre_fvg', True))} Пред-FVG BTC",
-            callback_data=f"fvg-filter:pre:{kind}:{symbol}",
-        ))
-    event_type_row.append(InlineKeyboardButton(
-        f"{mark(config.get('apply_to_confirmed_fvg', True))} Подтверждённые",
-        callback_data=f"fvg-filter:confirmed:{kind}:{symbol}",
-    ))
-    rows.append(event_type_row)
     if kind == "size":
         unit = config.get("unit", "USD")
         rows.append([
@@ -175,17 +157,11 @@ def format_filter_text(chat_id: int, kind: str, symbol: str, settings=None) -> s
         else f"Диапазон: {minimum} — {maximum}"
     )
     title = _instrument_label(symbol, instrument)
-    pre_note = (
-        "\nПред-FVG применяется только к Bitcoin."
-        if is_bitcoin_symbol(instrument.get("symbol", symbol))
-        else "\nДля этого инструмента доступны только подтверждённые FVG."
-    )
     return (
         f"{'💰' if kind == 'price' else '📏'} Фильтр {_kind_name(kind)} · {title}\n\n"
         f"Статус: {'✅ включён' if config.get('enabled', False) else '⏸️ выключен'}\n"
         f"{value_text}\n"
-        "Все остальные настройки меняются кнопками ниже."
-        f"{pre_note}"
+        "Фильтр применяется только к подтверждённым FVG на закрытых 15м свечах."
     )
 
 
@@ -217,8 +193,8 @@ def _save_filter(settings, chat_id, kind, symbol, config, **changes):
     )
     options = dict(
         enabled=values.get("enabled", False),
-        apply_to_pre=values.get("apply_to_pre_fvg", True),
-        apply_to_confirmed=values.get("apply_to_confirmed_fvg", True),
+        apply_to_pre=False,
+        apply_to_confirmed=True,
         apply_to_bullish=values.get("apply_to_bullish", True),
         apply_to_bearish=values.get("apply_to_bearish", True),
     )
@@ -248,9 +224,7 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         action, kind, symbol = parse_filter_callback(query.data)
     except ValueError:
-        await query.message.reply_text(
-            "Эта кнопка устарела. Открой настройки FVG ещё раз."
-        )
+        await query.message.reply_text("Эта кнопка устарела. Открой настройки FVG ещё раз.")
         return
     chat_id = update.effective_chat.id
     context.user_data.pop(FILTER_INPUT_KEY, None)
@@ -260,7 +234,6 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     settings = FvgAlertSettings()
     config = _filter(settings, chat_id, kind, symbol)
-    instrument = _instrument(settings, chat_id, symbol)
     if action == "select":
         await query.message.edit_text(
             format_filter_text(chat_id, kind, symbol, settings),
@@ -285,17 +258,18 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
     changes = {}
     toggle_keys = {
-        "toggle": "enabled", "bull": "apply_to_bullish", "bear": "apply_to_bearish",
-        "pre": "apply_to_pre_fvg", "confirmed": "apply_to_confirmed_fvg",
+        "toggle": "enabled",
+        "bull": "apply_to_bullish",
+        "bear": "apply_to_bearish",
     }
-    if action == "pre" and not is_bitcoin_symbol(instrument.get("symbol", symbol)):
-        await query.answer("Пред-FVG доступен только для Bitcoin.", show_alert=True)
-        return
     if action in toggle_keys:
         key = toggle_keys[action]
         changes[key] = not config.get(key, key != "enabled")
     elif action in {"percent", "usd"}:
         changes["unit"] = "PERCENT" if action == "percent" else "USD"
+    else:
+        await query.message.reply_text("Эта кнопка больше не используется.")
+        return
     _save_filter(settings, chat_id, kind, symbol, config, **changes)
     await query.message.edit_text(
         format_filter_text(chat_id, kind, symbol, settings),
@@ -305,9 +279,7 @@ async def fvg_filter_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 @authorized
 async def receive_filter_range(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = context.user_data.get(FILTER_INPUT_KEY) or context.chat_data.get(
-        FILTER_INPUT_KEY
-    )
+    state = context.user_data.get(FILTER_INPUT_KEY) or context.chat_data.get(FILTER_INPUT_KEY)
     if not state:
         return
     try:
@@ -320,20 +292,26 @@ async def receive_filter_range(update: Update, context: ContextTypes.DEFAULT_TYP
         chat_id = update.effective_chat.id
         config = _filter(settings, chat_id, kind, symbol)
         _save_filter(
-            settings, chat_id, kind, symbol, config,
-            min=minimum, max=maximum, enabled=True,
+            settings,
+            chat_id,
+            kind,
+            symbol,
+            config,
+            min=minimum,
+            max=maximum,
+            enabled=True,
         )
     except ValueError as error:
-        await update.effective_message.reply_text(f"Не получилось: {error}\nПопробуй ещё раз или /cancel.")
+        await update.effective_message.reply_text(
+            f"Не получилось: {error}\nПопробуй ещё раз или /cancel."
+        )
         return
     context.user_data.pop(FILTER_INPUT_KEY, None)
     context.chat_data.pop(FILTER_INPUT_KEY, None)
     await update.effective_message.reply_text(
-        (
-            "✅ Минимальный размер сохранён. Статус: фильтр включён."
-            if kind == "size"
-            else "✅ Диапазон сохранён. Статус: фильтр включён."
-        ),
+        "✅ Минимальный размер сохранён. Статус: фильтр включён."
+        if kind == "size"
+        else "✅ Диапазон сохранён. Статус: фильтр включён.",
         reply_markup=build_filter_menu(chat_id, kind, symbol, settings),
     )
 

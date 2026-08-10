@@ -53,7 +53,8 @@ jobs:
           test -s "${ARCHIVE}"
           test -s "${ARCHIVE}.sha256"
 
-      - name: Create tag and GitHub Release when missing
+      - name: Create immutable tag and GitHub Release when missing
+        id: publish
         uses: actions/github-script@v9
         env:
           VERSION: ${{ steps.version.outputs.version }}
@@ -67,28 +68,26 @@ jobs:
             const version = process.env.VERSION;
             const tag = process.env.TAG;
 
-            let release;
+            let tagExists = false;
             try {
-              const existing = await github.rest.repos.getReleaseByTag({
-                owner,
-                repo,
-                tag,
-              });
-              release = existing.data;
-              core.info(`Release ${tag} already exists: ${release.html_url}`);
-            } catch (error) {
-              if (error.status !== 404) throw error;
-            }
-
-            try {
-              await github.rest.git.getRef({
+              const existingRef = await github.rest.git.getRef({
                 owner,
                 repo,
                 ref: `tags/${tag}`,
               });
-              core.info(`Tag ${tag} already exists.`);
+              tagExists = true;
+              if (existingRef.data.object.sha !== context.sha) {
+                throw new Error(
+                  `Tag ${tag} already exists at ${existingRef.data.object.sha}; ` +
+                  `refusing to republish it from ${context.sha}.`
+                );
+              }
+              core.info(`Tag ${tag} already exists at current commit ${context.sha}.`);
             } catch (error) {
               if (error.status !== 404) throw error;
+            }
+
+            if (!tagExists) {
               await github.rest.git.createRef({
                 owner,
                 repo,
@@ -98,7 +97,18 @@ jobs:
               core.info(`Created tag ${tag} at ${context.sha}.`);
             }
 
-            if (release) return;
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag,
+              });
+              core.info(`Release ${tag} already exists: ${existing.data.html_url}`);
+              core.setOutput('release_created', 'false');
+              return;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
 
             const releaseDocument = `docs/RELEASE_${version}.md`;
             let body;
@@ -115,7 +125,7 @@ jobs:
               }
             }
 
-            release = (await github.rest.repos.createRelease({
+            const release = (await github.rest.repos.createRelease({
               owner,
               repo,
               tag_name: tag,
@@ -127,8 +137,10 @@ jobs:
               generate_release_notes: false,
             })).data;
             core.info(`Created release: ${release.html_url}`);
+            core.setOutput('release_created', 'true');
 
       - name: Upload release archive
+        if: steps.publish.outputs.release_created == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -138,5 +150,4 @@ jobs:
           set -euo pipefail
           gh release upload "${TAG}" \
             "${ARCHIVE}" \
-            "${ARCHIVE}.sha256" \
-            --clobber
+            "${ARCHIVE}.sha256"

@@ -1,7 +1,8 @@
-"""Telegram JobQueue integration for FVG and funding alerts."""
+"""Telegram JobQueue integration for confirmed multi-timeframe FVG and funding alerts."""
 
 import asyncio
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from alerts.funding_alerts import FundingAlertService
@@ -53,7 +54,7 @@ def get_funding_service():
 
 
 async def run_fvg_recovery(context):
-    """Periodic Bitunix REST safety net; the shared WebSocket remains primary."""
+    """Periodic Bitunix REST safety net using only 15m source candles."""
     service = context.job.data["fvg_service"]
     for symbol in sorted(service.settings.active_symbols()):
         try:
@@ -68,52 +69,36 @@ async def run_fvg_recovery(context):
 
 
 async def run_fvg_control_point(context):
-    """Evaluate one shared market calculation per exchange, symbol and timeframe."""
+    """Evaluate all due FVG timeframes from one shared 15m source download per market."""
     service = context.job.data["fvg_service"]
     poller = context.job.data.get("fvg_poller") or get_fvg_poller()
-    mode = context.job.data.get("mode", "confirmed")
-    now = context.job.data.get("clock", None)
-    if callable(now):
-        now = now()
-    if now is None:
-        now = datetime.now(timezone.utc)
+    clock = context.job.data.get("clock")
+    now = clock() if callable(clock) else datetime.now(timezone.utc)
+    now = now.astimezone(timezone.utc)
+    if now.minute % 15 != 0:
+        return []
 
-    if mode == "pre":
-        markets = service.settings.pre_active_markets()
-        for exchange, symbol in markets:
-            try:
-                events = await asyncio.to_thread(
-                    poller.preliminary,
-                    exchange,
-                    symbol,
-                    now,
-                )
-                await service.deliver(context.bot, events)
-            except asyncio.CancelledError:
-                raise
-            except Exception as error:
-                logger.warning(
-                    "Pre-FVG control point failed for %s %s: %s",
-                    exchange,
-                    symbol,
-                    error,
-                )
-                service.event_store.update_health(last_error=str(error))
-                service.event_store.increment_health("pre_control_point_failures")
-        return
-
+    due_by_market: dict[tuple[str, str], set[str]] = defaultdict(set)
     for exchange, symbol, timeframe in service.settings.active_markets():
-        if not timeframe_due(timeframe, now):
-            continue
+        if timeframe_due(timeframe, now):
+            due_by_market[(exchange, symbol)].add(timeframe)
+
+    all_events = []
+    for (exchange, symbol), timeframes in sorted(due_by_market.items()):
+        ordered = tuple(
+            timeframe
+            for timeframe in ("15m", "1h", "4h", "1d")
+            if timeframe in timeframes
+        )
         try:
             events = await asyncio.to_thread(
-                poller.confirmed,
+                poller.confirmed_many,
                 exchange,
                 symbol,
-                timeframe,
+                ordered,
                 now,
             )
-            await service.deliver(context.bot, events)
+            all_events.extend(events)
         except asyncio.CancelledError:
             raise
         except Exception as error:
@@ -121,11 +106,14 @@ async def run_fvg_control_point(context):
                 "Confirmed FVG control point failed for %s %s %s: %s",
                 exchange,
                 symbol,
-                timeframe,
+                ",".join(ordered),
                 error,
             )
             service.event_store.update_health(last_error=str(error))
             service.event_store.increment_health("control_point_failures")
+    if all_events:
+        await service.deliver(context.bot, all_events)
+    return all_events
 
 
 async def run_fvg_delivery_retry(context):
@@ -198,16 +186,13 @@ async def run_funding_alerts(context):
 
 
 def schedule_fvg_alerts(application):
-    """Register FVG control points, funding, outbox, health and REST recovery."""
+    """Register confirmed FVG, funding, outbox, health and REST recovery."""
     if application.job_queue is None:
         raise RuntimeError("Telegram JobQueue is unavailable")
     service = get_fvg_service()
     poller = get_fvg_poller()
     seconds = datetime.now(timezone.utc).timestamp() % 900
     confirmed_delay = 900 - seconds + 5
-    pre_delay = (725 - seconds) % 900
-    if pre_delay < 1:
-        pre_delay += 900
 
     application.job_queue.run_repeating(
         run_fvg_control_point,
@@ -217,18 +202,6 @@ def schedule_fvg_alerts(application):
         data={
             "fvg_service": service,
             "fvg_poller": poller,
-            "mode": "confirmed",
-        },
-    )
-    application.job_queue.run_repeating(
-        run_fvg_control_point,
-        interval=900,
-        first=pre_delay,
-        name="fvg-pre-control-t-minus-3",
-        data={
-            "fvg_service": service,
-            "fvg_poller": poller,
-            "mode": "pre",
         },
     )
     application.job_queue.run_repeating(
