@@ -118,13 +118,13 @@ class FundingAlertStore:
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
         return connection
 
     def _prepare_database(self) -> None:
         is_new = not self.path.exists()
         with self._connect() as connection:
+            connection.execute("PRAGMA journal_mode = WAL")
             if is_new:
                 connection.execute("PRAGMA auto_vacuum = INCREMENTAL")
             connection.executescript(
