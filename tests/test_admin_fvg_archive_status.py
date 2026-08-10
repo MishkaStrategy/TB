@@ -1,6 +1,7 @@
 import json
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,7 +15,7 @@ UTC = timezone.utc
 
 
 def _runtime_database(path: Path, health: dict | None = None) -> None:
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection:
         connection.execute(
             "CREATE TABLE health(key TEXT PRIMARY KEY, value_json TEXT NOT NULL)"
         )
@@ -26,6 +27,7 @@ def _runtime_database(path: Path, health: dict | None = None) -> None:
                     for key, value in health.items()
                 ],
             )
+        connection.commit()
 
 
 def _minimal_snapshot(archive: dict) -> dict:
@@ -87,7 +89,7 @@ class FvgArchiveOperationsReaderTests(unittest.TestCase):
                 },
             )
             FvgHistoryArchive(archive_path)
-            with sqlite3.connect(archive_path) as connection:
+            with closing(sqlite3.connect(archive_path)) as connection:
                 connection.execute(
                     """
                     INSERT INTO fvg_archive_runs(
@@ -103,6 +105,7 @@ class FvgArchiveOperationsReaderTests(unittest.TestCase):
                         500,
                     ),
                 )
+                connection.commit()
 
             result = OperationsStatusReader(
                 runtime_path,
@@ -122,7 +125,7 @@ class FvgArchiveOperationsReaderTests(unittest.TestCase):
                 archive["runtime_health"]["fvg_archive_backlog_possible"]
             )
 
-            with sqlite3.connect(archive_path) as connection:
+            with closing(sqlite3.connect(archive_path)) as connection:
                 run_count = connection.execute(
                     "SELECT COUNT(*) FROM fvg_archive_runs"
                 ).fetchone()[0]
@@ -134,8 +137,9 @@ class FvgArchiveOperationsReaderTests(unittest.TestCase):
             runtime_path = root / "runtime.sqlite3"
             archive_path = root / "archive.sqlite3"
             _runtime_database(runtime_path)
-            with sqlite3.connect(archive_path) as connection:
+            with closing(sqlite3.connect(archive_path)) as connection:
                 connection.execute("CREATE TABLE unrelated(id INTEGER PRIMARY KEY)")
+                connection.commit()
 
             archive = OperationsStatusReader(
                 runtime_path,
@@ -144,7 +148,7 @@ class FvgArchiveOperationsReaderTests(unittest.TestCase):
 
             self.assertFalse(archive["available"])
             self.assertIn("missing_tables", archive["error_message"])
-            with sqlite3.connect(archive_path) as connection:
+            with closing(sqlite3.connect(archive_path)) as connection:
                 tables = {
                     row[0]
                     for row in connection.execute(
