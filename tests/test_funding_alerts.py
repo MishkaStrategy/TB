@@ -1,6 +1,7 @@
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -117,7 +118,7 @@ class FundingAlertStoreTests(unittest.TestCase):
             now=self.now,
         )
         old = self.now - timedelta(days=200)
-        with sqlite3.connect(self.path) as connection:
+        with closing(sqlite3.connect(self.path)) as connection:
             connection.execute(
                 "UPDATE funding_alert_settings SET enabled = 0, updated_at = ? WHERE chat_id = '10'",
                 (old.isoformat(),),
