@@ -67,9 +67,9 @@ jobs:
       - name: Typecheck frontend
         run: npm run typecheck
 
-      - name: Build frontend
+      - name: Build same-origin production frontend
         env:
-          VITE_API_BASE_URL: https://tbbot.duckdns.org
+          VITE_MOCK_MODE: "false"
         run: |
           npm run build
           test -f dist/index.html
@@ -79,7 +79,7 @@ jobs:
           BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          printf '{\n  "commit": "%s",\n  "domain": "tbbot.duckdns.org",\n  "apiBaseUrl": "https://tbbot.duckdns.org",\n  "builtAt": "%s"\n}\n' \
+          printf '{\n  "commit": "%s",\n  "apiMode": "same-origin",\n  "builtAt": "%s"\n}\n' \
             "${BUILD_COMMIT}" "${built_at}" > dist/manifest.json
           test -f dist/index.html
           test -f dist/manifest.json
@@ -98,15 +98,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # Existing handler tests exercise the explicitly public test fixture.
-      # Production remains closed by default in .env.example/config.py.
       PUBLIC_ACCESS_ENABLED: "true"
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Validate shell scripts
+      - name: Validate production shell scripts
         run: >-
           bash -n
           scripts/install_vds.sh
@@ -114,8 +112,6 @@ jobs:
           scripts/backup_data.sh
           scripts/update_vds.sh
           scripts/update_vds_bot_api_only.sh
-          scripts/deploy_mini_app.sh
-          scripts/deploy_tbbot_mini_app.sh
 
       - name: Create isolated Python environment
         run: |
@@ -163,7 +159,6 @@ jobs:
           set -o pipefail
           python -m unittest discover -s tests -v 2>&1 | tee test-results.txt
 
-      # The full 500 x 10 release soak runs independently in release-audit.
       - name: Run bounded pipeline smoke
         run: |
           python run_fvg_soak.py \
@@ -241,8 +236,7 @@ jobs:
             "${backup_dir}" \
             "$(dirname "${env_file}")" \
             "${unit_dir}"
-          printf '#!/usr/bin/env bash\nexit 0\n' \
-            > "${install_dir}/.venv/bin/python"
+          printf '#!/usr/bin/env bash\nexit 0\n' > "${install_dir}/.venv/bin/python"
           chmod +x "${install_dir}/.venv/bin/python"
           cp scripts/backup_data.sh "${install_dir}/scripts/backup_data.sh"
           chmod +x "${install_dir}/scripts/backup_data.sh"
@@ -264,11 +258,7 @@ jobs:
             "${unit_dir}/fvg-alert-bot-backup.service" \
             "${unit_dir}/fvg-alert-bot-backup.timer"
 
-          grep -F 'ProtectSystem=strict' \
-            "${unit_dir}/fvg-alert-bot.service"
-          grep -F 'ReadWritePaths='"${state_dir}" \
-            "${unit_dir}/fvg-alert-bot.service"
-          grep -F 'WantedBy=multi-user.target' \
-            "${unit_dir}/fvg-alert-bot.service"
-          grep -F 'Persistent=true' \
-            "${unit_dir}/fvg-alert-bot-backup.timer"
+          grep -F 'ProtectSystem=strict' "${unit_dir}/fvg-alert-bot.service"
+          grep -F 'ReadWritePaths='"${state_dir}" "${unit_dir}/fvg-alert-bot.service"
+          grep -F 'WantedBy=multi-user.target' "${unit_dir}/fvg-alert-bot.service"
+          grep -F 'Persistent=true' "${unit_dir}/fvg-alert-bot-backup.timer"
