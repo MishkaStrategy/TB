@@ -1,0 +1,223 @@
+name: Prepare audit release 1.3.8 v3
+
+on:
+  push:
+    branches:
+      - agent/project-audit-optimization-2026-08-11
+    paths:
+      - ".github/workflows/audit-release-bump-v3.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: [self-hosted, fast]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          ref: agent/project-audit-optimization-2026-08-11
+
+      - name: Prepare and commit release 1.3.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def edit(path, replacements):
+              p = Path(path)
+              text = p.read_text(encoding="utf-8")
+              for old, new in replacements:
+                  text = text.replace(old, new)
+              p.write_text(text, encoding="utf-8")
+
+          Path("VERSION").write_text("1.3.8\n", encoding="utf-8")
+
+          edit("scripts/update_vds.sh", [
+              ("TARGET_REF=v1.3.7 EXPECTED_VERSION=1.3.7", "TARGET_REF=v1.3.8 EXPECTED_VERSION=1.3.8"),
+              ('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.7}"', 'EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.8}"'),
+          ])
+          edit(".github/workflows/release-audit.yml", [
+              ('= "1.3.7"', '= "1.3.8"'),
+              ('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.7}"', 'EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.8}"'),
+              ("tests.test_release_1_3_7_contract", "tests.test_release_1_3_8_contract"),
+              ("fvg-soak-1.3.7.sqlite3", "fvg-soak-1.3.8.sqlite3"),
+          ])
+          edit("tests/test_release_1_3_0_contract.py", [
+              ("Release137ContractTests", "Release138ContractTests"),
+              ('"1.3.7"', '"1.3.8"'),
+              ("v1.3.7 EXPECTED_VERSION=1.3.7", "v1.3.8 EXPECTED_VERSION=1.3.8"),
+          ])
+          edit("tests/test_release_metadata_consistency.py", [
+              ("tests.test_release_1_3_7_contract", "tests.test_release_1_3_8_contract"),
+          ])
+
+          readme = Path("README.md")
+          text = readme.read_text(encoding="utf-8")
+          for old, new in [
+              ("version-1.3.7-", "version-1.3.8-"),
+              ("Текущий релиз: **1.3.7**", "Текущий релиз: **1.3.8**"),
+              ("Официальный `v1.3.7`", "Официальный `v1.3.8`"),
+              ('test "$(cat VERSION)" = "1.3.7"', 'test "$(cat VERSION)" = "1.3.8"'),
+              ("Обновление существующего VDS до 1.3.7", "Обновление существующего VDS до 1.3.8"),
+              ("TARGET_REF=v1.3.7", "TARGET_REF=v1.3.8"),
+              ("EXPECTED_VERSION=1.3.7", "EXPECTED_VERSION=1.3.8"),
+              ("fvg-alert-bot-1.3.7.tar.gz", "fvg-alert-bot-1.3.8.tar.gz"),
+              ("Ожидается версия `1.3.7`", "Ожидается версия `1.3.8`"),
+              ("Release workflow для версии 1.3.7", "Release workflow для версии 1.3.8"),
+          ]:
+              text = text.replace(old, new)
+          marker = "- [`docs/RELEASE_1.3.7.md`](docs/RELEASE_1.3.7.md);\n"
+          link = "- [`docs/RELEASE_1.3.8.md`](docs/RELEASE_1.3.8.md);\n"
+          if link not in text and marker in text:
+              text = text.replace(marker, link + marker, 1)
+          readme.write_text(text, encoding="utf-8")
+
+          vds = Path("docs/VDS_BOT_API_ONLY_UPDATE.md")
+          text = vds.read_text(encoding="utf-8")
+          for old, new in [
+              ("## Update to 1.3.7", "## Update to 1.3.8"),
+              ("TARGET_REF=v1.3.7", "TARGET_REF=v1.3.8"),
+              ("EXPECTED_VERSION=1.3.7", "EXPECTED_VERSION=1.3.8"),
+              ("installed version is `1.3.7`", "installed version is `1.3.8`"),
+              ("## 1.3.7 smoke checks", "## 1.3.8 smoke checks"),
+              ("FVG 1.3.7 production contract", "FVG 1.3.8 production contract"),
+              ("official `v1.3.7` source archive", "official `v1.3.8` source archive"),
+          ]:
+              text = text.replace(old, new)
+          vds.write_text(text, encoding="utf-8")
+
+          changelog = Path("CHANGELOG.md")
+          text = changelog.read_text(encoding="utf-8")
+          if "## 1.3.8 " not in text:
+              section = """## 1.3.8 — 2026-08-11
+
+Patch-релиз по результатам аудита актуального `main` после `1.3.7`.
+
+### Исправлено и оптимизировано
+
+- закрыты SQLite connection leaks и оптимизирован persistent WAL hot path;
+- funding selection/crossing reset выполняется атомарно;
+- Telegram activity registry переиспользуется process-wide;
+- Mini App sync storage вынесено из event loop, typed `web.AppKey` устраняет warning noise;
+- malformed market rows изолируются per-row;
+- добавлен repository-wide SQLite hygiene guard;
+- GitHub Actions закреплены за точным allowlist self-hosted capability selectors;
+- сохранён `1.3.7` fix Telegram Mini App menu button.
+
+### Совместимость
+
+- Telegram/FVG/funding/Mini App API contracts не меняются;
+- production env, runtime-state и operational defaults автоматически не меняются;
+- `v1.3.7` остаётся immutable, аудит публикуется отдельным tag `v1.3.8`.
+
+"""
+              text = text.replace("# Changelog\n\n", "# Changelog\n\n" + section, 1)
+          changelog.write_text(text, encoding="utf-8")
+
+          Path("docs/RELEASE_1.3.8.md").write_text("""# FVG Alert Bot 1.3.8
+
+`1.3.8` is an immutable reliability and performance patch release produced by an audit of the post-`1.3.7` codebase. It preserves the Telegram Mini App menu-button fix from `1.3.7` and keeps existing Telegram/FVG/funding/Mini App contracts stable.
+
+## Runtime reliability and performance
+
+- SQLite connections in funding exchange selection and read-only Mini App/admin diagnostics are explicitly closed;
+- funding exchange selection replacement and crossing reset are one transaction;
+- persistent WAL mode is configured during database initialization rather than every hot-path connection;
+- Telegram update activity tracking reuses one process-wide registry;
+- synchronous Mini App settings/admin storage is kept off the aiohttp event loop;
+- typed `aiohttp.web.AppKey` removes untyped application-state warnings;
+- malformed persisted instruments or exchange ticker rows fail soft per row.
+
+## CI and release safety
+
+- workflow runner selectors are restricted to the approved self-hosted allowlist;
+- fast checks use `[self-hosted, fast]`; Linux/systemd/release verification uses `[self-hosted, Linux]`;
+- release publication preflights `sha256sum`, `tar` and `gh`;
+- SQLite context-manager hygiene is enforced repository-wide by AST regression tests.
+
+## Compatibility and production safety
+
+- the `1.3.7` Telegram Mini App menu button preservation remains intact;
+- Mini App remains opt-in and loopback-only by default;
+- public access remains fail-closed unless explicitly enabled;
+- production env, SQLite/runtime-state and user settings are preserved;
+- existing immutable tags, including `v1.3.7`, are never moved;
+- production VDS deployment remains a separate guarded operation.
+
+## Release archive
+
+The release workflow creates `fvg-alert-bot-1.3.8.tar.gz` and `fvg-alert-bot-1.3.8.tar.gz.sha256` from the reviewed merge commit on `main`.
+""", encoding="utf-8")
+
+          Path("tests/test_release_1_3_7_contract.py").write_text("""import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+class Release137HistoricalContractTests(unittest.TestCase):
+    def test_release_document_is_retained(self):
+        self.assertTrue((ROOT / "docs" / "RELEASE_1.3.7.md").is_file())
+        self.assertIn("## 1.3.7", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+
+    def test_mini_app_menu_button_preservation_remains_in_bot(self):
+        bot = (ROOT / "bot.py").read_text(encoding="utf-8")
+        self.assertIn("MenuButtonWebApp", bot)
+        self.assertIn("get_chat_menu_button", bot)
+        self.assertIn("MenuButtonCommands", bot)
+
+if __name__ == "__main__":
+    unittest.main()
+""", encoding="utf-8")
+
+          Path("tests/test_release_1_3_8_contract.py").write_text("""import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+class Release138AuditContractTests(unittest.TestCase):
+    def test_release_version_and_documents(self):
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.8")
+        self.assertTrue((ROOT / "docs" / "RELEASE_1.3.8.md").is_file())
+        self.assertIn("## 1.3.8", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
+
+    def test_runtime_audit_fixes_are_present(self):
+        funding = (ROOT / "alerts" / "funding_exchange_store.py").read_text(encoding="utf-8")
+        self.assertIn("class _ClosingConnection(sqlite3.Connection)", funding)
+        self.assertIn("factory=_ClosingConnection", funding)
+        self.assertIn('connection.execute("BEGIN IMMEDIATE")', funding)
+        bot = (ROOT / "bot.py").read_text(encoding="utf-8")
+        self.assertIn("USER_ACTIVITY_REGISTRY = UserActivityRegistry()", bot)
+        self.assertIn("USER_ACTIVITY_REGISTRY.touch", bot)
+        self.assertIn("MenuButtonWebApp", bot)
+        self.assertIn("get_chat_menu_button", bot)
+        web = (ROOT / "mini_app_backend" / "web.py").read_text(encoding="utf-8")
+        self.assertIn("web.AppKey", web)
+        self.assertIn("await asyncio.to_thread", web)
+        overview = (ROOT / "mini_app_backend" / "market_overview.py").read_text(encoding="utf-8")
+        self.assertIn("def _normalize_instruments", overview)
+        self.assertIn("def _ticker_index", overview)
+
+    def test_runner_policy_and_linux_release_contract(self):
+        checker = (ROOT / ".github" / "scripts" / "check_runner_selectors.py").read_text(encoding="utf-8")
+        for selector in ("[self-hosted, fast]", "[self-hosted, docker]", "[self-hosted, backtester]", "[self-hosted, Linux]", "[self-hosted, macOS, ARM64]"):
+            self.assertIn(selector, checker)
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+        self.assertIn("runs-on: [self-hosted, Linux]", release)
+        self.assertIn("command -v sha256sum", release)
+        self.assertIn("command -v gh", release)
+
+if __name__ == "__main__":
+    unittest.main()
+""", encoding="utf-8")
+          PY
+
+          git rm -f .github/workflows/audit-release-bump.yml .github/workflows/audit-release-bump-v2.yml .github/workflows/audit-release-bump-v3.yml || true
+          git add -A
+          git commit -m "release: prepare audited fixes as 1.3.8"
+          git push origin HEAD:agent/project-audit-optimization-2026-08-11
