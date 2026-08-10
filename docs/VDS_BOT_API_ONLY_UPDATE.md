@@ -30,9 +30,11 @@ The update wrapper validates this without printing the bot token.
 
 ## Release history relevant to deployment
 
-`v1.3.6` remains the currently deployed immutable production release at commit `b1f5b4fdb9de6b8a6d94759ef3be528e5750b8ed`. It must not be moved or rewritten.
+`v1.3.6` remains an immutable production release at commit `b1f5b4fdb9de6b8a6d94759ef3be528e5750b8ed`. It must not be moved or rewritten.
 
-`v1.3.7` is the next immutable patch release. It prevents bot startup from overwriting an externally configured Telegram Web App Menu Button with `MenuButtonCommands`. The localized command list is still refreshed. Release publication does not modify production env, SQLite, runtime state, BotFather settings, Xray, or port 443.
+`v1.3.7` remains the immutable Telegram Mini App Menu Button hotfix. It prevents bot startup from overwriting an externally configured Web App Menu Button with `MenuButtonCommands`. It must not be moved or rewritten.
+
+`v1.3.8` is the UI/UX audit patch. It keeps the `1.3.7` Menu Button behavior and improves Telegram reply/inline navigation, RU/EN consistency, Mini App readability, touch targets, focus/selection semantics and reduced-motion support. Release publication does not modify production env, SQLite, runtime state, BotFather settings, Xray, Nginx, or port 443.
 
 ## Preflight
 
@@ -56,7 +58,7 @@ sudo grep -E '^(MAX_ACTIVE_SYMBOLS|MAX_SYMBOLS_PER_USER|MINI_APP_BACKEND_ENABLED
 
 Do not print `TELEGRAM_TOKEN` or other secret values.
 
-## Update to 1.3.7
+## Update to 1.3.8
 
 Deploy only the published immutable tag and exact audited commit from the deployment issue:
 
@@ -67,8 +69,8 @@ git checkout main
 git pull --ff-only origin main
 
 sudo env \
-  TARGET_REF=v1.3.7 \
-  EXPECTED_VERSION=1.3.7 \
+  TARGET_REF=v1.3.8 \
+  EXPECTED_VERSION=1.3.8 \
   EXPECTED_COMMIT=<audited-full-commit-sha> \
   bash scripts/update_vds_bot_api_only.sh
 ```
@@ -95,7 +97,7 @@ The installed service continues to read the external production file through sys
 
 The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from the runtime snapshot and runs tar with `COPYFILE_DISABLE=1`. This prevents macOS from synthesizing unmanifested AppleDouble members after the manifest is built. Archive verification remains strict for all ordinary unmanifested members.
 
-## FVG 1.3.7 production contract
+## FVG 1.3.8 production contract
 
 - the exchange data source is always closed `15m` candles;
 - confirmed target timeframes are `15m`, `1h`, `4h`, `1d`;
@@ -106,11 +108,15 @@ The backup script excludes existing Finder metadata (`._*` and `.DS_Store`) from
 - a completely empty candle source for an active multi-exchange market is an operational failure and must be visible in journal/health counters;
 - a failure on one market must not stop processing of the remaining markets.
 
-## Telegram Mini App release contract
+## Telegram and Mini App UI contract
 
-The official `v1.3.7` source archive contains both `mini_app_backend/` and `telegram-mini-app/`, plus the backend lifecycle wiring in `bot.py`.
+The official `v1.3.8` source archive contains both `mini_app_backend/` and `telegram-mini-app/`, plus the backend lifecycle wiring in `bot.py`.
 
-The frontend entrypoint mounts `TradingApp`, provides five bottom tabs and loads exchange-aware `priceChange24hPct` through authenticated `GET /api/mini-app/market-overview`. Unavailable market values remain `null` in the API and render as `—` rather than `0%`.
+Telegram's persistent reply keyboard follows the selected RU/EN language. `/start` uses compact onboarding and routes users to the persistent navigation instead of dumping the advanced command list. Native Telegram buttons keep their platform rendering; the bot controls concise labels, emoji cues, row grouping, ordering and state wording.
+
+The Mini App entrypoint mounts `TradingApp`, provides five bottom tabs and loads exchange-aware `priceChange24hPct` through authenticated `GET /api/mini-app/market-overview`. Unavailable market values remain `null` in the API and render as `—` rather than `0%`.
+
+The audited visual layer keeps critical secondary copy readable, enforces at least 44px direct mobile control targets, adds visible focus/selected states and respects `prefers-reduced-motion`. Primary Overview, FVG, Funding, Alerts and Settings screens avoid unnecessary RU/EN mixed copy.
 
 Production-safe defaults remain:
 
@@ -146,7 +152,7 @@ sqlite3 /var/lib/fvg-alert-bot/funding_alerts.sqlite3 'PRAGMA quick_check;'
 
 Expected results:
 
-- installed version is `1.3.7`;
+- installed version is `1.3.8`;
 - installed commit matches the audited release SHA;
 - service is `active` and `enabled`;
 - `NRestarts` does not grow during observation;
@@ -155,8 +161,10 @@ Expected results:
 - no Telegram App or user-session credentials are present in `/etc/fvg-alert-bot.env`;
 - Mini App backend remains disabled unless the deployment owner explicitly enabled it in a separate step.
 
-## 1.3.7 smoke checks
+## 1.3.8 smoke checks
 
+- `/start` opens compact onboarding and the localized persistent menu;
+- switching RU/EN refreshes the persistent reply keyboard;
 - FVG instruments allow exchange, pair and `15m/1h/4h/1d` selection;
 - pre-FVG is absent from UI and commands;
 - configure at least one non-BTC instrument on `15m` and confirm it remains configured after reopening the menu;
@@ -166,6 +174,7 @@ Expected results:
 - `⚙️ Операции` shows restart circuit-breaker and read-only FVG archive status;
 - Telegram UI remains fully usable with the Mini App backend disabled;
 - `getChatMenuButton` reports `web_app` after the production Menu Button has been configured;
+- Mini App primary screens preserve readable text and selected/focus states on a mobile Telegram viewport;
 - operational feature flags remain default-off for the first launch.
 
 A market does not need to produce an FVG on every control point. The production smoke validates that every configured market is actually scanned and that failures are visible; it must not manufacture test alerts.
