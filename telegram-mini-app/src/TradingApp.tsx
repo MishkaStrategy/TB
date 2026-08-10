@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { loadMarketOverview, loadSettings, saveSettings } from "./api";
-import { setUiLanguage } from "./i18n";
 import { notify, impact, setUnsavedChanges } from "./telegram";
 import { AdminScreen } from "./screens/AdminScreen";
 import { FundingScreen } from "./screens/FundingScreen";
@@ -102,6 +101,13 @@ export default function TradingApp() {
   }, [dirty]);
 
   useEffect(() => {
+    const language = settings?.general.language;
+    if (!language) return;
+    document.documentElement.lang = language;
+    document.documentElement.dataset.language = language;
+  }, [settings?.general.language]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 2400);
     return () => window.clearTimeout(timer);
@@ -130,7 +136,6 @@ export default function TradingApp() {
   };
   const updateGeneral = (changes: Partial<AppSettings["general"]>) => {
     updateSettings((current) => ({ ...current, general: { ...current.general, ...changes } }));
-    if (changes.language) setUiLanguage(changes.language);
   };
   const updateFvg = (changes: Partial<AppSettings["fvg"]>) => updateSettings((current) => ({ ...current, fvg: { ...current.fvg, ...changes } }));
   const updateFunding = (changes: Partial<AppSettings["funding"]>) => updateSettings((current) => ({ ...current, funding: { ...current.funding, ...changes } }));
