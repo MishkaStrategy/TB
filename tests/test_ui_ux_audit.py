@@ -65,6 +65,8 @@ class UiUxAuditTests(unittest.TestCase):
         self.assertIn("font-size: 10px", css)
         self.assertIn("input::placeholder", css)
         self.assertIn("color: #78879d", css)
+        self.assertIn("min-height: 44px", css)
+        self.assertIn(".tb-toggle::before", css)
         self.assertIn("@media (prefers-reduced-motion: reduce)", css)
 
     def test_mini_app_selection_controls_expose_pressed_state(self):
