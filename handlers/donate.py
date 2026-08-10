@@ -1,5 +1,7 @@
 """Donation information shown from the persistent Telegram menu."""
 
+import asyncio
+
 from telegram import Update
 from telegram.ext import ContextTypes
 
@@ -28,18 +30,19 @@ def format_donation_text(language: str = "ru") -> str:
     )
 
 
+async def _language_for_chat(chat_id: int) -> str:
+    preferences = await asyncio.to_thread(PREFERENCES.user, chat_id)
+    return str(preferences.get("language", "ru"))
+
+
 async def send_donation(message, *, language: str | None = None) -> None:
     if language is None:
         chat_id = getattr(message, "chat_id", None)
-        if chat_id is not None:
-            language = PREFERENCES.user(chat_id).get("language", "ru")
-        else:
-            language = "ru"
+        language = await _language_for_chat(chat_id) if chat_id is not None else "ru"
     await message.reply_text(format_donation_text(language), parse_mode="HTML")
 
 
 @authorized
 async def donate(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    chat_id = update.effective_chat.id
-    language = PREFERENCES.user(chat_id).get("language", "ru")
+    language = await _language_for_chat(update.effective_chat.id)
     await send_donation(update.effective_message, language=language)
