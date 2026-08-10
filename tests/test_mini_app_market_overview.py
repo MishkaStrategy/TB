@@ -123,6 +123,31 @@ class MiniAppMarketOverviewTests(unittest.TestCase):
         self.assertIsNone(rows["bybit|BTCUSDT"]["priceChange24hPct"])
         self.assertEqual(rows["bybit|BTCUSDT"]["source"], "unavailable")
 
+    def test_malformed_ticker_row_does_not_poison_exchange(self):
+        self.funding_responses["binance"] = [
+            {"symbol": "???", "priceChange24h": "99"},
+            {"symbol": "BTCUSDT", "priceChange24h": "1.42"},
+        ]
+        result = self.build().read_overview(self.user)
+        row = next(
+            item for item in result["instruments"] if item["key"] == "binance|BTCUSDT"
+        )
+        self.assertEqual(row["priceChange24hPct"], 1.42)
+        self.assertEqual(row["source"], "ticker")
+
+    def test_malformed_saved_instrument_is_skipped(self):
+        settings = StubSettingsService(
+            [
+                {"key": "bad", "exchange": "unknown", "symbol": "???"},
+                *self.instruments,
+            ]
+        )
+        result = self.build(settings).read_overview(self.user)
+        self.assertEqual(
+            [row["key"] for row in result["instruments"]],
+            [row["key"] for row in self.instruments],
+        )
+
     def test_cache_avoids_repeat_market_requests_until_ttl(self):
         service = self.build()
         first = service.read_overview(self.user)
