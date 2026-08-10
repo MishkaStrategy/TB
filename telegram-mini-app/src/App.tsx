@@ -8,6 +8,7 @@ import type {
   FilterScope,
   FvgSizeUnit,
   FvgSymbolSettings,
+  FvgTimeframe,
   SettingsEnvelope,
 } from "./types";
 
@@ -21,12 +22,16 @@ const exchangeLabels: Record<Exchange, string> = {
 };
 
 const exchangeOrder = Object.keys(exchangeLabels) as Exchange[];
+const timeframeOrder: FvgTimeframe[] = ["15m", "1h", "4h", "1d"];
 const defaultScope: FilterScope = {
-  preFvg: true,
   confirmedFvg: true,
   bullish: true,
   bearish: true,
 };
+
+const makeInstrumentKey = (exchange: Exchange, symbol: string) => (
+  exchange === "bitunix" ? symbol : `${exchange}|${symbol}`
+);
 
 type Tab = "overview" | "general" | "notifications" | "fvg" | "funding" | "admin";
 
@@ -184,8 +189,9 @@ function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [baseline, setBaseline] = useState("");
   const [tab, setTab] = useState<Tab>("overview");
-  const [selectedSymbol, setSelectedSymbol] = useState("BTCUSDT");
+  const [selectedInstrumentKey, setSelectedInstrumentKey] = useState("");
   const [newSymbol, setNewSymbol] = useState("");
+  const [newExchange, setNewExchange] = useState<Exchange>("bitunix");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -199,7 +205,7 @@ function App() {
         setEnvelope(result);
         setSettings(result.settings);
         setBaseline(JSON.stringify(result.settings));
-        setSelectedSymbol(result.settings.fvg.symbols[0]?.symbol ?? "");
+        setSelectedInstrumentKey(result.settings.fvg.symbols[0]?.key ?? "");
       })
       .catch((loadError: unknown) => {
         if (!active) return;
@@ -256,8 +262,8 @@ function App() {
     }));
   };
 
-  const updateSymbol = (
-    symbol: string,
+  const updateInstrument = (
+    key: string,
     updater: (item: FvgSymbolSettings) => FvgSymbolSettings,
   ) => {
     updateSettings((current) => ({
@@ -265,7 +271,7 @@ function App() {
       fvg: {
         ...current.fvg,
         symbols: current.fvg.symbols.map((item) => (
-          item.symbol === symbol ? updater(item) : item
+          item.key === key ? updater(item) : item
         )),
       },
     }));
@@ -280,6 +286,9 @@ function App() {
       setEnvelope(result);
       setSettings(result.settings);
       setBaseline(JSON.stringify(result.settings));
+      if (!result.settings.fvg.symbols.some((item) => item.key === selectedInstrumentKey)) {
+        setSelectedInstrumentKey(result.settings.fvg.symbols[0]?.key ?? "");
+      }
       setToast("Настройки сохранены");
       notify("success");
     } catch (saveError: unknown) {
@@ -313,19 +322,20 @@ function App() {
     );
   }
 
-  const maxSymbols = envelope.limits?.maxFvgSymbols ?? 20;
-  const selected = settings.fvg.symbols.find((item) => item.symbol === selectedSymbol)
+  const maxSymbols = envelope.limits?.maxFvgSymbols ?? 10;
+  const selected = settings.fvg.symbols.find((item) => item.key === selectedInstrumentKey)
     ?? settings.fvg.symbols[0];
 
-  const addSymbol = () => {
+  const addInstrument = () => {
     const normalized = newSymbol.trim().toUpperCase().replace("/", "");
     if (!/^[A-Z0-9]{5,20}$/.test(normalized)) {
       setToast("Введите корректный инструмент, например ETHUSDT");
       notify("warning");
       return;
     }
-    if (settings.fvg.symbols.some((item) => item.symbol === normalized)) {
-      setSelectedSymbol(normalized);
+    const key = makeInstrumentKey(newExchange, normalized);
+    if (settings.fvg.symbols.some((item) => item.key === key)) {
+      setSelectedInstrumentKey(key);
       setNewSymbol("");
       return;
     }
@@ -334,8 +344,11 @@ function App() {
       notify("warning");
       return;
     }
-    const symbol: FvgSymbolSettings = {
+    const instrument: FvgSymbolSettings = {
+      key,
+      exchange: newExchange,
       symbol: normalized,
+      timeframes: ["15m"],
       enabled: true,
       priceFilter: {
         enabled: false,
@@ -350,17 +363,46 @@ function App() {
         scope: { ...defaultScope },
       },
     };
-    updateFvg({ symbols: [...settings.fvg.symbols, symbol] });
-    setSelectedSymbol(normalized);
+    updateFvg({ symbols: [...settings.fvg.symbols, instrument] });
+    setSelectedInstrumentKey(key);
     setNewSymbol("");
     impact("medium");
   };
 
-  const removeSymbol = (symbol: string) => {
-    const next = settings.fvg.symbols.filter((item) => item.symbol !== symbol);
+  const removeInstrument = (key: string) => {
+    const next = settings.fvg.symbols.filter((item) => item.key !== key);
     updateFvg({ symbols: next });
-    setSelectedSymbol(next[0]?.symbol ?? "");
+    setSelectedInstrumentKey(next[0]?.key ?? "");
     impact("medium");
+  };
+
+  const changeInstrumentExchange = (instrument: FvgSymbolSettings, exchange: Exchange) => {
+    const nextKey = makeInstrumentKey(exchange, instrument.symbol);
+    if (settings.fvg.symbols.some((item) => item.key === nextKey && item.key !== instrument.key)) {
+      setToast("Такой инструмент уже добавлен на выбранной бирже");
+      notify("warning");
+      return;
+    }
+    updateInstrument(instrument.key, (item) => ({ ...item, exchange, key: nextKey }));
+    setSelectedInstrumentKey(nextKey);
+    impact("medium");
+  };
+
+  const toggleTimeframe = (instrument: FvgSymbolSettings, timeframe: FvgTimeframe) => {
+    const active = instrument.timeframes.includes(timeframe);
+    if (active && instrument.timeframes.length === 1) {
+      setToast("Выберите хотя бы один таймфрейм");
+      notify("warning");
+      return;
+    }
+    const selectedTimeframes = new Set(instrument.timeframes);
+    if (active) selectedTimeframes.delete(timeframe);
+    else selectedTimeframes.add(timeframe);
+    updateInstrument(instrument.key, (item) => ({
+      ...item,
+      timeframes: timeframeOrder.filter((value) => selectedTimeframes.has(value)),
+    }));
+    impact("light");
   };
 
   const toggleFundingDirection = (key: "notifyPositive" | "notifyNegative") => {
@@ -397,7 +439,6 @@ function App() {
   ) => (
     <div className="scope-grid">
       {([
-        ["preFvg", "Пред-FVG T−3"],
         ["confirmedFvg", "Подтверждённые"],
         ["bullish", "Бычьи"],
         ["bearish", "Медвежьи"],
@@ -428,7 +469,7 @@ function App() {
           </p>
           <div className="hero-stats">
             <div><strong>{settings.fvg.symbols.length}</strong><span>инструментов</span></div>
-            <div><strong>{settings.funding.exchanges.length}</strong><span>бирж</span></div>
+            <div><strong>{settings.funding.exchanges.length}</strong><span>бирж фандинга</span></div>
             <div><strong>{formatInterval(settings.funding.intervalMinutes)}</strong><span>частота</span></div>
           </div>
         </div>
@@ -443,9 +484,9 @@ function App() {
             </StatusPill>
           </div>
           <h3>Fair Value Gap</h3>
-          <p>15-минутные зоны, направления, инструменты и персональные фильтры.</p>
+          <p>15m-источник, подтверждённые 15m/1h/4h/1d, биржи и персональные фильтры.</p>
           <div className="module-footer">
-            <span>{settings.fvg.notifyPreFvg ? "T−3 включён" : "Только подтверждённые"}</span>
+            <span>{settings.fvg.notifyConfirmedFvg ? "Подтверждённые включены" : "Сигналы выключены"}</span>
             <b>→</b>
           </div>
         </button>
@@ -531,6 +572,7 @@ function App() {
       : settings.funding.notifyPositive
         ? "Положительный"
         : "Отрицательный";
+    const timeframeCount = new Set(settings.fvg.symbols.flatMap((item) => item.timeframes)).size;
     return (
       <div className="screen-stack">
         <div className="page-title">
@@ -543,12 +585,12 @@ function App() {
             <button type="button" className="text-button" onClick={() => setTab("general")}>Изменить</button>
           </SettingRow>
         </Card>
-        <Card title="Fair Value Gap" description="Текущая конфигурация сигналов" accent="#23d5ab">
+        <Card title="Fair Value Gap" description="Текущая конфигурация подтверждённых сигналов" accent="#23d5ab">
           <div className="diagnostic-grid">
             <Metric label="Статус" value={settings.fvg.enabled ? "Включён" : "Выключен"} />
             <Metric label="Инструменты" value={settings.fvg.symbols.length} />
+            <Metric label="Таймфреймы" value={timeframeCount} />
             <Metric label="Подтверждённые" value={settings.fvg.notifyConfirmedFvg ? "Да" : "Нет"} />
-            <Metric label="Пред-FVG T−3" value={settings.fvg.notifyPreFvg ? "Да" : "Нет"} />
             <Metric label="Бычьи" value={settings.fvg.bullishEnabled ? "Да" : "Нет"} />
             <Metric label="Медвежьи" value={settings.fvg.bearishEnabled ? "Да" : "Нет"} />
           </div>
@@ -574,17 +616,14 @@ function App() {
       <div className="page-title">
         <span>Модуль сигналов</span>
         <h1>Fair Value Gap</h1>
-        <p>Управляйте типами сигналов и точными фильтрами отдельно для каждого инструмента.</p>
+        <p>Биржевые данные берутся из закрытых 15m свечей; 1h/4h/1d строятся локально по UTC-границам.</p>
       </div>
-      <Card title="Основные параметры" description="Главный статус и типы событий" accent="#23d5ab">
+      <Card title="Основные параметры" description="Главный статус подтверждённых FVG" accent="#23d5ab">
         <SettingRow icon="◉" title="Модуль FVG" description="Отключает все FVG-уведомления">
           <Toggle checked={settings.fvg.enabled} onChange={(enabled) => updateFvg({ enabled })} />
         </SettingRow>
-        <SettingRow icon="✓" title="Подтверждённые FVG" description="Сигнал после закрытия 15-минутной свечи">
+        <SettingRow icon="✓" title="Подтверждённые FVG" description="Сигнал только после закрытия свечи C">
           <Toggle checked={settings.fvg.notifyConfirmedFvg} onChange={(notifyConfirmedFvg) => updateFvg({ notifyConfirmedFvg })} />
-        </SettingRow>
-        <SettingRow icon="−3" title="Пред-FVG T−3" description="Предварительный сигнал до подтверждения зоны">
-          <Toggle checked={settings.fvg.notifyPreFvg} onChange={(notifyPreFvg) => updateFvg({ notifyPreFvg })} />
         </SettingRow>
       </Card>
       <Card title="Направления" description="Можно оставить одно или оба направления">
@@ -602,17 +641,29 @@ function App() {
           <input
             value={newSymbol}
             onChange={(event) => setNewSymbol(event.target.value.toUpperCase())}
-            onKeyDown={(event) => event.key === "Enter" && addSymbol()}
+            onKeyDown={(event) => event.key === "Enter" && addInstrument()}
             placeholder="Например, ETHUSDT"
             maxLength={20}
           />
-          <button type="button" onClick={addSymbol}>Добавить</button>
+          <button type="button" onClick={addInstrument}>Добавить</button>
+        </div>
+        <div className="exchange-grid">
+          {exchangeOrder.map((exchange) => (
+            <button
+              type="button"
+              key={exchange}
+              className={newExchange === exchange ? "exchange-card active" : "exchange-card"}
+              onClick={() => setNewExchange(exchange)}
+            >
+              <span>{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><i>{newExchange === exchange ? "✓" : ""}</i>
+            </button>
+          ))}
         </div>
         {settings.fvg.symbols.length ? (
           <div className="symbol-tabs">
             {settings.fvg.symbols.map((item) => (
-              <button type="button" key={item.symbol} className={selected?.symbol === item.symbol ? "active" : ""} onClick={() => setSelectedSymbol(item.symbol)}>
-                <span className={item.enabled ? "dot active" : "dot"} />{item.symbol}
+              <button type="button" key={item.key} className={selected?.key === item.key ? "active" : ""} onClick={() => setSelectedInstrumentKey(item.key)}>
+                <span className={item.enabled ? "dot active" : "dot"} />{item.symbol} · {exchangeLabels[item.exchange]}
               </button>
             ))}
           </div>
@@ -620,38 +671,63 @@ function App() {
       </Card>
 
       {selected ? (
-        <Card title={selected.symbol} description="Персональные фильтры инструмента" accent="#5d7cff">
-          <SettingRow icon="◫" title="Инструмент активен" description="Учитывается при поиске FVG">
-            <Toggle checked={selected.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, enabled }))} />
+        <Card title={`${selected.symbol} · ${exchangeLabels[selected.exchange]}`} description="Биржа, таймфреймы и персональные фильтры" accent="#5d7cff">
+          <SettingRow icon="◫" title="Инструмент активен" description="Учитывается при поиске подтверждённых FVG">
+            <Toggle checked={selected.enabled} onChange={(enabled) => updateInstrument(selected.key, (item) => ({ ...item, enabled }))} />
           </SettingRow>
+
+          <div className="filter-panel">
+            <div className="filter-header"><div><strong>Биржа</strong><small>Источник закрытых 15m свечей</small></div></div>
+            <div className="exchange-grid">
+              {exchangeOrder.map((exchange) => (
+                <button type="button" key={exchange} className={selected.exchange === exchange ? "exchange-card active" : "exchange-card"} onClick={() => changeInstrumentExchange(selected, exchange)}>
+                  <span>{exchangeLabels[exchange].slice(0, 1)}</span><strong>{exchangeLabels[exchange]}</strong><i>{selected.exchange === exchange ? "✓" : ""}</i>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filter-panel">
+            <div className="filter-header"><div><strong>Таймфреймы</strong><small>15m источник; старшие интервалы агрегируются локально</small></div></div>
+            <div className="scope-grid">
+              {timeframeOrder.map((timeframe) => {
+                const active = selected.timeframes.includes(timeframe);
+                return (
+                  <button type="button" key={timeframe} className={active ? "scope-chip active" : "scope-chip"} onClick={() => toggleTimeframe(selected, timeframe)}>
+                    <span>{active ? "✓" : ""}</span>{timeframe}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <div className="filter-panel">
             <div className="filter-header">
               <div><strong>💰 Фильтр цены</strong><small>Диапазон цены сигнала</small></div>
-              <Toggle checked={selected.priceFilter.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, enabled } }))} />
+              <Toggle checked={selected.priceFilter.enabled} onChange={(enabled) => updateInstrument(selected.key, (item) => ({ ...item, priceFilter: { ...item.priceFilter, enabled } }))} />
             </div>
             <div className="field-grid two">
-              <label><span>Минимальная цена</span><input inputMode="decimal" value={selected.priceFilter.min ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, min: event.target.value || null } }))} placeholder="Без минимума" /></label>
-              <label><span>Максимальная цена</span><input inputMode="decimal" value={selected.priceFilter.max ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, max: event.target.value || null } }))} placeholder="Без максимума" /></label>
+              <label><span>Минимальная цена</span><input inputMode="decimal" value={selected.priceFilter.min ?? ""} onChange={(event) => updateInstrument(selected.key, (item) => ({ ...item, priceFilter: { ...item.priceFilter, min: event.target.value || null } }))} placeholder="Без минимума" /></label>
+              <label><span>Максимальная цена</span><input inputMode="decimal" value={selected.priceFilter.max ?? ""} onChange={(event) => updateInstrument(selected.key, (item) => ({ ...item, priceFilter: { ...item.priceFilter, max: event.target.value || null } }))} placeholder="Без максимума" /></label>
             </div>
             <span className="sub-label">Применять к сигналам</span>
-            {renderScope(selected.priceFilter.scope, (scope) => updateSymbol(selected.symbol, (item) => ({ ...item, priceFilter: { ...item.priceFilter, scope } })))}
+            {renderScope(selected.priceFilter.scope, (scope) => updateInstrument(selected.key, (item) => ({ ...item, priceFilter: { ...item.priceFilter, scope } })))}
           </div>
 
           <div className="filter-panel">
             <div className="filter-header">
               <div><strong>📏 Фильтр размера FVG</strong><small>Минимальная ширина зоны</small></div>
-              <Toggle checked={selected.sizeFilter.enabled} onChange={(enabled) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, enabled } }))} />
+              <Toggle checked={selected.sizeFilter.enabled} onChange={(enabled) => updateInstrument(selected.key, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, enabled } }))} />
             </div>
             <div className="field-grid size-fields">
-              <label><span>Минимальный размер</span><input inputMode="decimal" value={selected.sizeFilter.min ?? ""} onChange={(event) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, min: event.target.value || null } }))} placeholder="0" /></label>
-              <label><span>Единица</span><Segmented<FvgSizeUnit> value={selected.sizeFilter.unit} options={[{ value: "USD", label: "$" }, { value: "PERCENT", label: "%" }]} onChange={(unit) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, unit } }))} /></label>
+              <label><span>Минимальный размер</span><input inputMode="decimal" value={selected.sizeFilter.min ?? ""} onChange={(event) => updateInstrument(selected.key, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, min: event.target.value || null } }))} placeholder="0" /></label>
+              <label><span>Единица</span><Segmented<FvgSizeUnit> value={selected.sizeFilter.unit} options={[{ value: "USD", label: "$" }, { value: "PERCENT", label: "%" }]} onChange={(unit) => updateInstrument(selected.key, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, unit } }))} /></label>
             </div>
             <span className="sub-label">Применять к сигналам</span>
-            {renderScope(selected.sizeFilter.scope, (scope) => updateSymbol(selected.symbol, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, scope } })))}
+            {renderScope(selected.sizeFilter.scope, (scope) => updateInstrument(selected.key, (item) => ({ ...item, sizeFilter: { ...item.sizeFilter, scope } })))}
           </div>
 
-          <button type="button" className="danger-button" onClick={() => removeSymbol(selected.symbol)}>Удалить {selected.symbol}</button>
+          <button type="button" className="danger-button" onClick={() => removeInstrument(selected.key)}>Удалить {selected.symbol} · {exchangeLabels[selected.exchange]}</button>
         </Card>
       ) : null}
     </div>
@@ -702,7 +778,7 @@ function App() {
 
   const renderAdminDiagnostics = (diagnostics: AdminDiagnostics) => (
     <>
-      <Card title="Поток данных" description="WebSocket Bitunix и REST recovery" accent="#5d7cff">
+      <Card title="Поток данных" description="FVG stream и REST recovery" accent="#5d7cff">
         <div className="diagnostic-grid">
           <Metric label="WebSocket" value={statusText(diagnostics.websocket)} />
           <Metric label="Последняя свеча" value={formatDate(diagnostics.lastWebsocketMessage)} />
@@ -774,12 +850,12 @@ function App() {
             ) : <div className="empty-state">Список разрешённых пользователей пуст.</div>}
           </Card>
           {renderAdminDiagnostics(settings.admin.diagnostics)}
-          <Card title="Опасные операции" description="Требуют отдельных endpoint и повторного подтверждения">
+          <Card title="Опасные операции" description="Серверные действия остаются fail-closed до production wiring">
             <div className="admin-actions">
               <button type="button" disabled>Создать backup</button>
               <button type="button" className="danger" disabled>Перезапустить бота</button>
             </div>
-            <p className="integration-note">Кнопки намеренно заблокированы до реализации защищённых серверных операций.</p>
+            <p className="integration-note">Общий settings PUT не выполняет административные операции.</p>
           </Card>
         </>
       )}
