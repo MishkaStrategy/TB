@@ -48,6 +48,8 @@ class MiniAppNavigationTests(unittest.TestCase):
         self.assertIn('import "./trading-dashboard.css";', self.main)
         self.assertNotIn("startAdminActionsEnhancer", self.main)
         self.assertNotIn("startNavigationAccessibility", self.main)
+        self.assertNotIn('from "./i18n"', self.app)
+        self.assertIn('document.documentElement.lang = language', self.app)
 
 
 if __name__ == "__main__":
