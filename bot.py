@@ -5,7 +5,7 @@ from telegram import BotCommand, MenuButtonCommands
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, TypeHandler
 
 from alerts.process_watchdog import start_process_watchdog, stop_process_watchdog
-from alerts.scheduler_multi import (
+from alerts.scheduler_15m import (
     drain_fvg_outbox,
     get_fvg_service,
     schedule_fvg_alerts,
@@ -27,9 +27,9 @@ from database.user_activity import UserActivityRegistry
 from database.user_preferences import UserPreferences
 from handlers.admin_settings import admin, admin_callback
 from handlers.donate import donate
-from handlers.fvg_alert import fvg_alert, fvg_pre_alert, fvg_stats
+from handlers.fvg_alert_15m import fvg_alert, fvg_stats
 from handlers.fvg_filter_ui import build_fvg_filter_handlers
-from handlers.fvg_instruments import build_fvg_instrument_handlers
+from handlers.fvg_instruments_15m import build_fvg_instrument_handlers
 from handlers.menu import menu, menu_callback
 from handlers.multi_funding import funding, funding_menu_callback
 from handlers.multi_funding_alert_ui import build_handlers as build_funding_alert_handlers
@@ -58,7 +58,6 @@ BOT_COMMANDS = (
     BotCommand("menu", "Открыть главное меню"),
     BotCommand("admin", "Админ-панель"),
     BotCommand("fvg_alert", "Включить или выключить FVG"),
-    BotCommand("fvg_pre_alert", "Настроить пред-FVG T−3"),
     BotCommand("fvg_symbol", "Настроить инструменты FVG"),
     BotCommand("fvg_price", "Фильтр цены FVG"),
     BotCommand("fvg_size", "Фильтр размера FVG"),
@@ -70,7 +69,6 @@ BOT_COMMANDS_EN = (
     BotCommand("menu", "Open the main menu"),
     BotCommand("admin", "Admin panel"),
     BotCommand("fvg_alert", "Enable or disable FVG"),
-    BotCommand("fvg_pre_alert", "Configure pre-FVG T−3"),
     BotCommand("fvg_symbol", "Configure FVG instruments"),
     BotCommand("fvg_price", "FVG price filter"),
     BotCommand("fvg_size", "FVG size filter"),
@@ -229,7 +227,6 @@ def main():
         app.add_handler(TypeHandler(object, track_user_activity), group=-1)
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("fvg_alert", fvg_alert))
-        app.add_handler(CommandHandler("fvg_pre_alert", fvg_pre_alert))
         app.add_handler(CommandHandler("fvg_stats", fvg_stats))
         app.add_handler(CommandHandler("fvg_symbol", fvg_symbol))
         app.add_handler(CommandHandler("funding", funding))
@@ -239,8 +236,6 @@ def main():
             app.add_handler(handler)
         for handler in build_fvg_filter_handlers():
             app.add_handler(handler)
-        # Instrument text input has a dedicated group so existing filter handlers
-        # can safely ignore messages that do not belong to them.
         for handler in build_fvg_instrument_handlers():
             app.add_handler(handler, group=2)
         for handler in build_funding_alert_handlers():
