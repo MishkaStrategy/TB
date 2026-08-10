@@ -1,4 +1,3 @@
-import re
 import unittest
 from pathlib import Path
 
@@ -16,13 +15,9 @@ class MiniAppNavigationTests(unittest.TestCase):
         self.styles = STYLES.read_text(encoding="utf-8")
 
     def test_bottom_navigation_has_only_three_primary_destinations(self):
-        match = re.search(
-            r"const primaryNavItems:[\s\S]*?= \[(.*?)\n  \];",
-            self.app,
-            flags=re.MULTILINE,
-        )
-        self.assertIsNotNone(match)
-        nav = match.group(1)
+        start = self.app.index("const primaryNavItems")
+        end = self.app.index("  ];", start)
+        nav = self.app[start:end]
         self.assertIn('["overview", "⌂", "Главная"]', nav)
         self.assertIn('["fvg", "◫", "FVG"]', nav)
         self.assertIn('["funding", "≋", "Фандинг"]', nav)
