@@ -1,12 +1,12 @@
 export type Language = "ru" | "en";
 export type MessageMode = "compact" | "detailed";
 export type FvgSizeUnit = "USD" | "PERCENT";
+export type FvgTimeframe = "15m" | "1h" | "4h" | "1d";
 export type Exchange = "bitunix" | "binance" | "bybit" | "bingx" | "bitget" | "gate";
 export type HealthStatus = "ok" | "warning" | "unknown";
 export type WebsocketStatus = "connected" | "disconnected" | "unknown";
 
 export interface FilterScope {
-  preFvg: boolean;
   confirmedFvg: boolean;
   bullish: boolean;
   bearish: boolean;
@@ -27,7 +27,10 @@ export interface SizeFilter {
 }
 
 export interface FvgSymbolSettings {
+  key: string;
+  exchange: Exchange;
   symbol: string;
+  timeframes: FvgTimeframe[];
   enabled: boolean;
   priceFilter: PriceFilter;
   sizeFilter: SizeFilter;
@@ -41,7 +44,6 @@ export interface GeneralSettings {
 export interface FvgSettings {
   enabled: boolean;
   notifyConfirmedFvg: boolean;
-  notifyPreFvg: boolean;
   bullishEnabled: boolean;
   bearishEnabled: boolean;
   symbols: FvgSymbolSettings[];
