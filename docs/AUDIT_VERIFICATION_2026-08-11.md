@@ -11,6 +11,7 @@ The reliability/performance audit is accepted only when the exact final pull-req
 - bounded notification soak completes within configured time/memory limits with an empty remaining outbox;
 - production systemd units render and pass `systemd-analyze verify` on `[self-hosted, Linux]`;
 - exact runner-selector policy and dependency runner policy pass;
+- release metadata publishes the audit only as `1.3.8` and preserves the already-published `1.3.7` Mini App Menu Button hotfix as immutable history;
 - a second CI + Release audit run succeeds on the same final commit SHA before merge;
 - review has no blocking requested changes or unresolved threads;
 - release publication creates a new immutable tag from the reviewed merge commit and never moves an existing tag.
