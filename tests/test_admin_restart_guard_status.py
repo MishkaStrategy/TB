@@ -1,5 +1,6 @@
 import sqlite3
 import unittest
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,14 +39,15 @@ class RestartGuardOperationsReaderTests(unittest.TestCase):
     def test_missing_guard_tables_remain_missing(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "runtime.sqlite3"
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 connection.execute("CREATE TABLE existing(id INTEGER PRIMARY KEY)")
+                connection.commit()
 
             result = OperationsStatusReader(path).snapshot()
 
             self.assertTrue(result["available"])
             self.assertFalse(result["restart_guard"]["available"])
-            with sqlite3.connect(path) as connection:
+            with closing(sqlite3.connect(path)) as connection:
                 tables = {
                     row[0]
                     for row in connection.execute(
