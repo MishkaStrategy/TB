@@ -186,7 +186,10 @@ def create_mini_app_application(
 
     async def get_settings(request: web.Request) -> web.Response:
         user = authenticated_user(request)
-        envelope = request.app["mini_app_settings_service"].read_settings(user)
+        envelope = await asyncio.to_thread(
+            request.app["mini_app_settings_service"].read_settings,
+            user,
+        )
         return web.json_response(enriched_envelope(user, envelope))
 
     async def get_market_overview(request: web.Request) -> web.Response:
@@ -207,8 +210,10 @@ def create_mini_app_application(
                 "В теле запроса отсутствует объект settings.",
                 field="settings",
             )
-        envelope = request.app["mini_app_settings_service"].save_settings(
-            user, body["settings"]
+        envelope = await asyncio.to_thread(
+            request.app["mini_app_settings_service"].save_settings,
+            user,
+            body["settings"],
         )
         return web.json_response(enriched_envelope(user, envelope))
 
@@ -225,7 +230,8 @@ def create_mini_app_application(
     async def put_access_mode(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         body = await json_object(request)
-        result = action_service.set_public_access(
+        result = await asyncio.to_thread(
+            action_service.set_public_access,
             user,
             public_access_enabled=body.get("publicAccessEnabled"),
             confirmation_token=body.get("confirmationToken"),
@@ -236,7 +242,8 @@ def create_mini_app_application(
     async def add_allowlist(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         body = await json_object(request)
-        result = action_service.add_allowlist(
+        result = await asyncio.to_thread(
+            action_service.add_allowlist,
             user,
             target_telegram_id=body.get("telegramId"),
             name=body.get("name"),
@@ -249,7 +256,8 @@ def create_mini_app_application(
     async def remove_allowlist(request: web.Request) -> web.Response:
         user = authenticated_user(request)
         body = await json_object(request)
-        result = action_service.remove_allowlist(
+        result = await asyncio.to_thread(
+            action_service.remove_allowlist,
             user,
             target_telegram_id=request.match_info.get("telegram_id"),
             confirmation_token=body.get("confirmationToken"),
