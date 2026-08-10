@@ -13,6 +13,10 @@
 - Mini App application state uses typed `aiohttp.web.AppKey` keys, removing `NotAppKeyWarning` noise;
 - malformed persisted instruments or malformed exchange ticker rows no longer make the entire market overview unavailable.
 
+### Telegram Mini App compatibility
+
+The Telegram Mini App API paths, authenticated settings contract, market overview schema, safe loopback/default-off backend posture and existing Telegram UI remain compatible with `1.3.6`. This patch changes execution and failure isolation, not the user-facing contract.
+
 ### CI and release safety
 
 - self-hosted workflow routing is restricted to the documented exact selector allowlist;
