@@ -220,6 +220,8 @@ class SettingsAndDedupTests(unittest.TestCase):
     def test_direction_symbol_and_price_are_user_scoped(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
+            settings.add_symbol(1, "BTCUSDT")
+            settings.add_symbol(2, "BTCUSDT")
             settings.set_enabled(1, True)
             settings.set_enabled(2, True)
             settings.set_price_filter(
@@ -381,6 +383,8 @@ class DeliveryIntegrationTests(unittest.IsolatedAsyncioTestCase):
             settings_path = f"{directory}/settings.json"
             events_path = f"{directory}/events.sqlite3"
             settings = FvgAlertSettings(settings_path)
+            settings.add_symbol(1, "BTCUSDT")
+            settings.add_symbol(2, "BTCUSDT")
             settings.set_enabled(1, True)
             settings.set_enabled(2, True)
             event = FvgDetector().detect_confirmed([
