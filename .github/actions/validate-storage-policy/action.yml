@@ -1,0 +1,64 @@
+name: Validate CI storage policy
+description: Reject durable or routine-success GitHub Actions artifacts and mutable Release evidence.
+runs:
+  using: composite
+  steps:
+    - name: Validate artifact and Release policy
+      shell: bash
+      run: |
+        python3 - <<'PY'
+        from pathlib import Path
+        import re
+        import sys
+
+        errors = []
+        workflow_paths = sorted([
+            *Path('.github/workflows').glob('*.y*ml'),
+            *Path('workflow-templates').glob('*.y*ml'),
+        ])
+        for path in workflow_paths:
+            lines = path.read_text(encoding='utf-8').splitlines()
+            for index, line in enumerate(lines):
+                match = re.match(r'^(\s*)(-\s*)?uses:\s*actions/upload-artifact@', line)
+                if not match:
+                    continue
+                indent = len(match.group(1))
+                inline_step = match.group(2) is not None
+                start = index
+                while start > 0:
+                    candidate = lines[start - 1]
+                    candidate_indent = len(candidate) - len(candidate.lstrip())
+                    if candidate_indent < indent and candidate.lstrip().startswith('- '):
+                        break
+                    start -= 1
+                end = index + 1
+                while end < len(lines):
+                    candidate = lines[end]
+                    candidate_indent = len(candidate) - len(candidate.lstrip())
+                    next_step = candidate.strip() and candidate.lstrip().startswith('- ')
+                    if next_step and (candidate_indent < indent or (inline_step and candidate_indent == indent)):
+                        break
+                    end += 1
+                block = '\n'.join(lines[start:end])
+                if not re.search(r'^\s*retention-days:\s*["\']?1["\']?\s*$', block, re.M):
+                    errors.append(f'{path}:{index + 1}: upload-artifact must set retention-days: 1')
+                condition = re.search(r'^\s*if:\s*(.+)$', block, re.M)
+                expression = condition.group(1) if condition else ''
+                if 'failure()' not in expression or 'cancelled()' not in expression:
+                    errors.append(f'{path}:{index + 1}: upload-artifact must be limited to failure() or cancelled()')
+
+        policy_files = {'org-storage-policy.yml', 'storage-policy-check.yml'}
+        for path in [*workflow_paths, *Path('.github/actions').glob('**/*.y*ml')]:
+            if path.name in policy_files or path.parent.name == 'validate-storage-policy':
+                continue
+            for line_number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
+                if '--clobber' not in line or re.search(r'\bgrep\b.*--clobber', line):
+                    continue
+                errors.append(f'{path}:{line_number}: --clobber is forbidden for immutable Release evidence')
+
+        if errors:
+            for error in errors:
+                print(f'::error::{error}')
+            sys.exit(1)
+        print('Organization storage policy: PASS')
+        PY

@@ -281,13 +281,13 @@ jobs:
           grep -F 'MemoryMax=512M' "${unit_dir}/fvg-alert-bot.service"
           grep -F 'Persistent=true' "${unit_dir}/fvg-alert-bot-backup.timer"
 
-      - name: Upload audit evidence
-        if: always()
+      - name: Upload audit diagnostics on failure
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: release-audit-evidence
+          name: release-audit-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             test-results.txt
             soak-report.json
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: 1

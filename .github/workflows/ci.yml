@@ -85,14 +85,6 @@ jobs:
           test -f dist/manifest.json
           test ! -e dist/node_modules
 
-      - name: Publish verified frontend artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: tb-mini-app-frontend
-          path: telegram-mini-app/dist/
-          if-no-files-found: error
-          retention-days: 7
-
   tests:
     name: Python tests
     runs-on: ubuntu-latest
@@ -189,8 +181,8 @@ jobs:
             --horizons 1,4,16,96 \
             --output recent-fvg-quality.json
 
-      - name: Upload verification output
-        if: always()
+      - name: Upload verification output on failure
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
           name: verification-output
@@ -199,7 +191,7 @@ jobs:
             soak-report.json
             recent-fvg-quality.json
           if-no-files-found: ignore
-          retention-days: 7
+          retention-days: 1
 
   vds-linux-verification:
     name: Linux VDS systemd verification

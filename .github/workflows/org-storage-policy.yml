@@ -1,0 +1,24 @@
+name: Organization CI storage policy
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-storage-policy:
+    runs-on: [self-hosted, fast]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Validate artifact policy
+        uses: ./.github/actions/validate-storage-policy
