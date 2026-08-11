@@ -60,17 +60,17 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
     def settings(self):
         return copy.deepcopy(self.service.read_settings(self.user)["settings"])
 
-    def test_read_returns_existing_defaults_and_server_limit(self):
+    def settings_with_bitcoin(self):
+        if "BTCUSDT" not in self.fvg.user(self.user.id)["symbols"]:
+            self.fvg.add_symbol(self.user.id, "BTCUSDT")
+        return self.settings()
+
+    def test_read_returns_empty_fvg_instruments_and_server_limit(self):
         envelope = self.service.read_settings(self.user)
         self.assertEqual(envelope["user"]["id"], 42)
         self.assertEqual(envelope["limits"]["maxFvgSymbols"], 3)
-        instrument = envelope["settings"]["fvg"]["symbols"][0]
-        self.assertEqual(instrument["key"], "BTCUSDT")
-        self.assertEqual(instrument["exchange"], "bitunix")
-        self.assertEqual(instrument["symbol"], "BTCUSDT")
-        self.assertEqual(instrument["timeframes"], ["15m"])
+        self.assertEqual(envelope["settings"]["fvg"]["symbols"], [])
         self.assertNotIn("notifyPreFvg", envelope["settings"]["fvg"])
-        self.assertNotIn("preFvg", instrument["priceFilter"]["scope"])
         self.assertFalse(envelope["settings"]["admin"]["available"])
 
     def test_save_round_trip_updates_all_user_stores(self):
@@ -150,8 +150,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertFalse(stored_instrument["price_filter"]["apply_to_pre_fvg"])
 
     def test_same_symbol_on_multiple_exchanges_round_trips_independently(self):
-        # Default BTCUSDT already exists on Bitunix; preserve it and add the
-        # same symbol on another exchange to exercise the stable instrument key.
+        self.fvg.add_symbol(42, "BTCUSDT")
         self.fvg.update_instrument_timeframes(42, "BTCUSDT", ["15m", "1h"])
         self.fvg.add_instrument(42, "binance", "BTCUSDT", ["4h", "1d"])
 
@@ -172,7 +171,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(stored["binance|BTCUSDT"]["timeframes"], ["4h", "1d"])
 
     def test_legacy_pre_fvg_cannot_be_reenabled_by_payload(self):
-        settings = self.settings()
+        settings = self.settings_with_bitcoin()
         settings["fvg"]["notifyPreFvg"] = True
         settings["fvg"]["symbols"][0]["priceFilter"]["scope"]["preFvg"] = True
         self.service.save_settings(self.user, settings)
@@ -183,7 +182,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         )
 
     def test_invalid_price_range_is_rejected_before_writes(self):
-        settings = self.settings()
+        settings = self.settings_with_bitcoin()
         settings["general"]["language"] = "en"
         settings["fvg"]["symbols"][0]["priceFilter"].update(
             {"enabled": True, "min": "10", "max": "5"}
@@ -194,7 +193,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(self.service.read_settings(self.user)["settings"]["general"]["language"], "ru")
 
     def test_symbol_limit_is_enforced(self):
-        settings = self.settings()
+        settings = self.settings_with_bitcoin()
         template = settings["fvg"]["symbols"][0]
         settings["fvg"]["symbols"] = []
         for exchange, symbol in (
@@ -213,7 +212,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.code, "FVG_SYMBOL_LIMIT")
 
     def test_duplicate_normalized_instrument_is_rejected(self):
-        settings = self.settings()
+        settings = self.settings_with_bitcoin()
         duplicate = copy.deepcopy(settings["fvg"]["symbols"][0])
         duplicate["symbol"] = "btcusdt"
         duplicate["key"] = "BTCUSDT"
@@ -223,7 +222,7 @@ class MiniAppSettingsServiceTests(unittest.TestCase):
         self.assertEqual(context.exception.code, "DUPLICATE_INSTRUMENT")
 
     def test_invalid_timeframe_and_key_are_rejected(self):
-        settings = self.settings()
+        settings = self.settings_with_bitcoin()
         settings["fvg"]["symbols"][0]["timeframes"] = ["5m"]
         with self.assertRaises(SettingsValidationError) as context:
             self.service.save_settings(self.user, settings)
