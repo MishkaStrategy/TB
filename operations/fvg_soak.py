@@ -216,7 +216,7 @@ async def run_soak(
             f"{max_peak_memory_mb:.3f}MB"
         )
 
-    throughput = expected_deliveries / duration if duration else float("inf")
+    throughput = bot.messages / duration if duration else float("inf")
     return SoakReport(
         events_requested=events,
         recipients=recipients,
