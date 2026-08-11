@@ -48,7 +48,6 @@ jobs:
           command -v systemd-analyze
           command -v sha256sum
           command -v tar
-          command -v gh
 
       - name: Validate shell and release metadata
         shell: bash
