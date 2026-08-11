@@ -86,9 +86,9 @@ class ProductionSafetyTests(unittest.TestCase):
     def test_symbol_quota_is_enforced_per_user(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(str(Path(directory) / "settings.json"))
-            # BTCUSDT exists in the defaults and counts towards the quota.
-            for index in range(MAX_SYMBOLS_PER_USER - 1):
+            for index in range(MAX_SYMBOLS_PER_USER):
                 settings.add_symbol(42, f"S{index:03d}USDT")
+            self.assertEqual(len(settings.user(42)["symbols"]), MAX_SYMBOLS_PER_USER)
             with self.assertRaisesRegex(ValueError, "не более"):
                 settings.add_symbol(42, "OVERLIMITUSDT")
 
