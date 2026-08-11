@@ -164,7 +164,7 @@ runs:
           gh release create "${create_arguments[@]}" || gh release view "${tag}" >/dev/null
         fi
 
-        target_commitish="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+        target_commitish="$(gh release view "${tag}" --json targetCommitish --jq .targetCommitish)"
         [[ "${target_commitish}" == "${EVIDENCE_COMMIT_SHA}" ]] || {
           echo "Existing evidence release is not bound to ${EVIDENCE_COMMIT_SHA}: ${target_commitish}" >&2
           exit 1
