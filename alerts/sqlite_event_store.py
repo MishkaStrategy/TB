@@ -67,6 +67,10 @@ class FvgEventStore:
             else (self.LEGACY_DEFAULT_PATH if path is None else None)
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Keep one SQLite connection per thread. Existing with-blocks still
+        # commit or roll back every method call, but the delivery hot path no
+        # longer pays connection + PRAGMA setup thousands of times.
+        self._thread_connections = threading.local()
         resolved = str(self.path.resolve())
         with _MIGRATION_LOCKS_GUARD:
             lock = _MIGRATION_LOCKS.setdefault(resolved, threading.Lock())
@@ -74,17 +78,29 @@ class FvgEventStore:
             self._prepare_database()
 
     def _connect(self) -> sqlite3.Connection:
+        connection = getattr(self._thread_connections, "connection", None)
+        if connection is not None:
+            return connection
+
         connection = sqlite3.connect(
             self.path,
             timeout=30,
-            factory=_ClosingConnection,
         )
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 30000")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
         connection.execute("PRAGMA synchronous = NORMAL")
+        self._thread_connections.connection = connection
         return connection
+
+    def close(self) -> None:
+        """Close the connection owned by the current thread, if one exists."""
+        connection = getattr(self._thread_connections, "connection", None)
+        if connection is None:
+            return
+        connection.close()
+        del self._thread_connections.connection
 
     def _prepare_database(self) -> None:
         legacy_data = None
