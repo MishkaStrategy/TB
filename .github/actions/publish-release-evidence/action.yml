@@ -156,37 +156,93 @@ runs:
         fi
         printf '%s  %s\n' "${digest}" "${asset_name}" > "${digest_path}"
 
-        if ! gh release view "${tag}" >/dev/null 2>&1; then
-          create_arguments=(
-            "${tag}"
-            --target "${EVIDENCE_COMMIT_SHA}"
-            --title "CI evidence ${EVIDENCE_COMMIT_SHA}"
-            --notes "Canonical immutable evidence for ${GITHUB_REPOSITORY}@${EVIDENCE_COMMIT_SHA}."
-          )
-          [[ "${DRAFT_RELEASE}" == "true" ]] && create_arguments+=(--draft)
-          gh release create "${create_arguments[@]}" || gh release view "${tag}" >/dev/null
+        api_url="${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}"
+        uploads_url="${GITHUB_SERVER_URL:-https://github.com}"
+        if [[ "${uploads_url}" == "https://github.com" ]]; then
+          uploads_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}"
+        else
+          uploads_url="${api_url}"
+        fi
+        api_headers=(
+          --header "Authorization: Bearer ${GH_TOKEN}"
+          --header "Accept: application/vnd.github+json"
+          --header "X-GitHub-Api-Version: 2022-11-28"
+        )
+
+        find_release() {
+          curl --fail-with-body --silent --show-error "${api_headers[@]}" \
+            "${api_url}/releases?per_page=100" | \
+            python3 -c 'import json,sys; tag=sys.argv[1]; matches=[item for item in json.load(sys.stdin) if item.get("tag_name")==tag]; matches or sys.exit(1); json.dump(matches[0],sys.stdout)' "${tag}"
+        }
+
+        if ! release_payload="$(find_release)"; then
+          create_payload="$(python3 - "${tag}" "${EVIDENCE_COMMIT_SHA}" "${DRAFT_RELEASE}" "${GITHUB_REPOSITORY}" <<'PY'
+        import json
+        import sys
+        tag, commit_sha, draft, repository = sys.argv[1:]
+        json.dump({
+            'tag_name': tag,
+            'target_commitish': commit_sha,
+            'name': f'CI evidence {commit_sha}',
+            'body': f'Canonical immutable evidence for {repository}@{commit_sha}.',
+            'draft': draft == 'true',
+            'prerelease': False,
+        }, sys.stdout)
+        PY
+          )"
+          if ! release_payload="$(curl --fail-with-body --silent --show-error "${api_headers[@]}" \
+            --header "Content-Type: application/json" \
+            --request POST --data-binary "${create_payload}" "${api_url}/releases")"; then
+            release_payload="$(find_release)"
+          fi
         fi
 
-        target_commitish="$(gh release view "${tag}" --json targetCommitish --jq .targetCommitish)"
+        target_commitish="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["target_commitish"])' <<< "${release_payload}")"
         [[ "${target_commitish}" == "${EVIDENCE_COMMIT_SHA}" ]] || {
           echo "Existing evidence release is not bound to ${EVIDENCE_COMMIT_SHA}: ${target_commitish}" >&2
           exit 1
         }
+        release_id="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' <<< "${release_payload}")"
 
         upload_immutable() {
-          local source_file="$1" upload_name="$2" existing_directory
+          local source_file="$1" upload_name="$2" existing_directory asset_id encoded_name
           existing_directory="${temporary_directory}/existing-${upload_name}"
-          if gh release view "${tag}" --json assets --jq '.assets[].name' | grep -Fxq "${upload_name}"; then
+          find_asset_id() {
+            curl --fail-with-body --silent --show-error "${api_headers[@]}" \
+              "${api_url}/releases/${release_id}/assets?per_page=100" | \
+              python3 -c 'import json,sys; name=sys.argv[1]; matches=[item for item in json.load(sys.stdin) if item.get("name")==name]; print(matches[0]["id"]) if matches else sys.exit(1)' "${upload_name}"
+          }
+          if asset_id="$(find_asset_id 2>/dev/null)"; then
             mkdir -p "${existing_directory}"
-            gh release download "${tag}" --pattern "${upload_name}" --dir "${existing_directory}"
+            curl --fail-with-body --silent --show-error --location \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --output "${existing_directory}/${upload_name}" \
+              "${api_url}/releases/assets/${asset_id}"
             cmp "${source_file}" "${existing_directory}/${upload_name}" || {
               echo "Refusing to replace differing immutable asset: ${upload_name}" >&2
               exit 1
             }
             echo "Immutable asset already exists and is identical: ${upload_name}"
-          elif ! gh release upload "${tag}" "${source_file}#${upload_name}"; then
+          else
+            encoded_name="$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "${upload_name}")"
+            if curl --fail-with-body --silent --show-error \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Content-Type: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --request POST --data-binary "@${source_file}" \
+              "${uploads_url}/releases/${release_id}/assets?name=${encoded_name}" >/dev/null; then
+              return 0
+            fi
             mkdir -p "${existing_directory}"
-            gh release download "${tag}" --pattern "${upload_name}" --dir "${existing_directory}"
+            asset_id="$(find_asset_id)"
+            curl --fail-with-body --silent --show-error --location \
+              --header "Authorization: Bearer ${GH_TOKEN}" \
+              --header "Accept: application/octet-stream" \
+              --header "X-GitHub-Api-Version: 2022-11-28" \
+              --output "${existing_directory}/${upload_name}" \
+              "${api_url}/releases/assets/${asset_id}"
             cmp "${source_file}" "${existing_directory}/${upload_name}" || {
               echo "Concurrent immutable asset differs: ${upload_name}" >&2
               exit 1
