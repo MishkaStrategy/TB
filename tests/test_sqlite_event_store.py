@@ -93,7 +93,12 @@ class SqliteEventStoreTests(unittest.TestCase):
             )
             self.assertEqual(inserted, 2)
             self.assertEqual(store.health()["outbox"], 2)
-            self.assertEqual(len(store.due_deliveries()), 2)
+
+            claimed = store.due_deliveries()
+            self.assertEqual(
+                [item["chat_id"] for item in claimed],
+                ["42", "43"],
+            )
 
             store.mark_delivery_failed(
                 42,
@@ -101,9 +106,6 @@ class SqliteEventStoreTests(unittest.TestCase):
                 "temporary",
                 retry_after_seconds=60,
             )
-            due_now = store.due_deliveries()
-            self.assertEqual([item["chat_id"] for item in due_now], ["43"])
-
             store.mark_delivered(43, event.event_id)
             self.assertFalse(store.delivery_needed(43, event.event_id))
             self.assertEqual(store.health()["outbox"], 1)
@@ -116,6 +118,30 @@ class SqliteEventStoreTests(unittest.TestCase):
 
             store.abandon_delivery(42, event.event_id)
             self.assertEqual(store.health()["outbox"], 0)
+
+    def test_outbox_claim_prevents_parallel_consumer_from_selecting_same_row(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            first_store = FvgEventStore(path)
+            second_store = FvgEventStore(path)
+            event = make_event(event_type=FvgEventType.PRE_FVG)
+            first_store.record_event(event)
+            first_store.enqueue_deliveries(event.event_id, [42], "only once")
+            claim_time = datetime.now(UTC)
+
+            first_claim = first_store.due_deliveries(now=claim_time)
+            second_claim = second_store.due_deliveries(now=claim_time)
+
+            self.assertEqual(len(first_claim), 1)
+            self.assertEqual(first_claim[0]["chat_id"], "42")
+            self.assertEqual(second_claim, [])
+
+            recovered = second_store.due_deliveries(
+                now=claim_time
+                + timedelta(seconds=FvgEventStore.LEGACY_OUTBOX_CLAIM_SECONDS + 1)
+            )
+            self.assertEqual(len(recovered), 1)
+            self.assertEqual(recovered[0]["chat_id"], "42")
 
     def test_imports_legacy_json_once(self):
         with TemporaryDirectory() as directory:
