@@ -1,6 +1,9 @@
+import asyncio
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from operations.fvg_soak import run_soak
 
@@ -54,6 +57,32 @@ class FvgSoakTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertFalse(report.passed)
             self.assertTrue(any("duration" in item for item in report.failures))
+
+    async def test_wall_clock_limit_cancels_slow_delivery(self):
+        async def slow_deliver(*args, **kwargs):
+            await asyncio.sleep(10)
+
+        with TemporaryDirectory() as directory:
+            started = time.perf_counter()
+            with patch(
+                "operations.fvg_soak.FvgAlertService.deliver",
+                new=slow_deliver,
+            ):
+                report = await run_soak(
+                    Path(directory) / "soak.sqlite3",
+                    events=2,
+                    recipients=1,
+                    batch_size=1,
+                    max_seconds=0.05,
+                )
+            elapsed = time.perf_counter() - started
+
+            self.assertLess(elapsed, 1.0)
+            self.assertFalse(report.passed)
+            self.assertTrue(
+                any("reached limit" in item for item in report.failures),
+                report.failures,
+            )
 
 
 if __name__ == "__main__":
