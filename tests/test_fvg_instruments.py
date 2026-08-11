@@ -48,6 +48,24 @@ def candle(index, high, low, *, timeframe="15m", symbol="BTCUSDT", closed=True):
 
 
 class InstrumentSettingsTests(unittest.TestCase):
+    def test_new_user_has_no_default_instrument(self):
+        with TemporaryDirectory() as directory:
+            settings = FvgAlertSettings(f"{directory}/settings.json")
+
+            self.assertEqual(settings.user(1)["symbols"], {})
+            self.assertFalse(settings.is_enabled(1))
+            self.assertEqual(settings.active_markets(), ())
+
+    def test_enabling_module_does_not_auto_add_bitcoin(self):
+        with TemporaryDirectory() as directory:
+            settings = FvgAlertSettings(f"{directory}/settings.json")
+
+            settings.set_enabled(1, True)
+
+            self.assertTrue(settings.is_enabled(1))
+            self.assertEqual(settings.user(1)["symbols"], {})
+            self.assertEqual(settings.active_markets(), ())
+
     def test_instrument_preserves_selected_timeframes(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
@@ -65,7 +83,7 @@ class InstrumentSettingsTests(unittest.TestCase):
             symbols = settings.user(1)["symbols"]
             self.assertIn(instrument_key("binance", "ETHUSDT"), symbols)
             self.assertIn(instrument_key("bybit", "ETHUSDT"), symbols)
-            self.assertEqual(len(symbols), 3)
+            self.assertEqual(len(symbols), 2)
 
     def test_duplicate_exchange_and_symbol_is_rejected(self):
         with TemporaryDirectory() as directory:
@@ -77,7 +95,6 @@ class InstrumentSettingsTests(unittest.TestCase):
     def test_limit_is_ten_and_delete_frees_a_slot(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
-            settings.remove_symbol(1, "BTCUSDT")
             for index in range(10):
                 settings.add_instrument(
                     1,
@@ -99,6 +116,7 @@ class InstrumentSettingsTests(unittest.TestCase):
     def test_disabled_instrument_keeps_slot_and_stops_delivery(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
+            settings.add_symbol(1, "BTCUSDT")
             settings.set_enabled(1, True)
             key = instrument_key("bitunix", "BTCUSDT")
             event = FvgDetector().detect_confirmed([
@@ -110,11 +128,20 @@ class InstrumentSettingsTests(unittest.TestCase):
 
             settings.set_instrument_enabled(1, key, False)
             self.assertEqual(len(settings.user(1)["symbols"]), 1)
+            self.assertFalse(settings.user(1)["symbols"][key]["enabled"])
+            self.assertEqual(settings.recipients(event), [])
+
+            # Persisting another user-level toggle must not resurrect the
+            # explicitly disabled instrument.
+            settings.set_enabled(1, False)
+            settings.set_enabled(1, True)
+            self.assertFalse(settings.user(1)["symbols"][key]["enabled"])
             self.assertEqual(settings.recipients(event), [])
 
     def test_recipient_selection_respects_selected_timeframe(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
+            settings.add_symbol(1, "BTCUSDT")
             settings.update_instrument_timeframes(1, "BTCUSDT", ("1h",))
             settings.set_enabled(1, True)
             hourly = FvgDetector().detect_confirmed([
@@ -171,6 +198,17 @@ class InstrumentSettingsTests(unittest.TestCase):
             self.assertTrue(config["price_filter"]["enabled"])
             self.assertFalse(config["price_filter"]["apply_to_pre_fvg"])
             self.assertTrue(config["price_filter"]["apply_to_confirmed_fvg"])
+
+    def test_pre_schema_user_keeps_legacy_bitcoin_during_migration(self):
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/settings.json"
+            with open(path, "w", encoding="utf-8") as target:
+                json.dump({"enabled_chat_ids": [7]}, target)
+
+            user = FvgAlertSettings(path).user(7)
+
+            self.assertTrue(user["enabled"])
+            self.assertIn(instrument_key("bitunix", "BTCUSDT"), user["symbols"])
 
 
 class DetectorTests(unittest.TestCase):
@@ -258,6 +296,7 @@ class InterfaceAndFaqTests(unittest.TestCase):
     def test_instrument_screen_shows_exchange_limit_and_timeframes(self):
         with TemporaryDirectory() as directory:
             settings = FvgAlertSettings(f"{directory}/settings.json")
+            settings.add_symbol(1, "BTCUSDT")
             settings.update_instrument_timeframes(1, "BTCUSDT", ("15m", "1h", "4h", "1d"))
             text = format_instruments_text(1, settings)
             self.assertIn("1 из 10", text)

@@ -5,10 +5,16 @@ from __future__ import annotations
 import json
 import os
 import threading
+from contextlib import contextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - production and CI are Unix-like.
+    fcntl = None
 
 from alerts.fvg_detector import price_allowed, size_allowed
 from alerts.fvg_models import FvgDirection, FvgEvent, FvgEventType
@@ -35,6 +41,22 @@ class AtomicJsonStore:
         resolved = str(self.path.resolve())
         with _STORE_LOCKS_GUARD:
             self._lock = _STORE_LOCKS.setdefault(resolved, threading.RLock())
+
+    @contextmanager
+    def transaction_lock(self):
+        """Serialize read-modify-write transactions across threads and processes."""
+        with self._lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            if fcntl is None:
+                yield
+                return
+            lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
+            with lock_path.open("a+b") as lock_file:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
     def read(self) -> dict:
         with self._lock:
@@ -128,9 +150,7 @@ def _user_defaults() -> dict:
         "notify_pre_fvg": False,
         "bullish_enabled": True,
         "bearish_enabled": True,
-        "symbols": {
-            instrument_key("bitunix", "BTCUSDT"): _symbol_defaults()
-        },
+        "symbols": {},
     }
 
 
@@ -238,6 +258,11 @@ class FvgAlertSettings:
         )
         for chat_id in known_ids:
             user = _user_defaults()
+            # Preserve the legacy implicit-BTC contract only while migrating
+            # users that were already present in the pre-schema settings file.
+            user["symbols"] = {
+                instrument_key("bitunix", "BTCUSDT"): _symbol_defaults()
+            }
             user["enabled"] = True
             user["notify_confirmed_fvg"] = chat_id in raw.get(
                 "enabled_chat_ids", []
@@ -258,7 +283,7 @@ class FvgAlertSettings:
         self.store.write(data)
 
     def _transaction(self, mutate):
-        with self.store._lock:
+        with self.store.transaction_lock():
             data = self._read()
             result = mutate(data)
             self._write(data)

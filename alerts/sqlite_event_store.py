@@ -52,6 +52,7 @@ class FvgEventStore:
     LEGACY_DEFAULT_PATH = Path("data/fvg_event_store.json")
     RETENTION_DAYS = 90
     PRUNE_INTERVAL = timedelta(days=1)
+    LEGACY_OUTBOX_CLAIM_SECONDS = 900
 
     def __init__(
         self,
@@ -66,11 +67,9 @@ class FvgEventStore:
             else (self.LEGACY_DEFAULT_PATH if path is None else None)
         )
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # SQLite connections are relatively expensive on the production hot path
-        # because every new connection repeats the WAL/session PRAGMAs. Keep one
-        # connection per thread while preserving the existing method-level
-        # context-manager commits/rollbacks. Threads and processes never share a
-        # sqlite3.Connection object.
+        # Keep one SQLite connection per thread. Existing with-blocks still
+        # commit or roll back every method call, but the delivery hot path no
+        # longer pays connection + PRAGMA setup thousands of times.
         self._thread_connections = threading.local()
         resolved = str(self.path.resolve())
         with _MIGRATION_LOCKS_GUARD:
@@ -320,8 +319,16 @@ class FvgEventStore:
         limit: int = 100,
         now: datetime | None = None,
     ) -> list[dict]:
-        now_text = (now or _now()).astimezone(UTC).isoformat()
+        current = (now or _now()).astimezone(UTC)
+        now_text = current.isoformat()
+        lease_until = (
+            current + timedelta(seconds=self.LEGACY_OUTBOX_CLAIM_SECONDS)
+        ).isoformat()
         with self._connect() as connection:
+            # Legacy delivery is still the default when Outbox V2 is disabled.
+            # Claim rows under a SQLite write lock before Telegram I/O so a
+            # second bot process cannot select and send the same row in parallel.
+            connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
                 """
                 SELECT event_id, chat_id, message_text, attempts,
@@ -333,6 +340,26 @@ class FvgEventStore:
                 """,
                 (now_text, max(1, int(limit))),
             ).fetchall()
+            if rows:
+                connection.executemany(
+                    """
+                    UPDATE outbox
+                    SET next_attempt_at = ?, updated_at = ?
+                    WHERE event_id = ? AND chat_id = ?
+                      AND next_attempt_at <= ?
+                    """,
+                    [
+                        (
+                            lease_until,
+                            now_text,
+                            row["event_id"],
+                            row["chat_id"],
+                            now_text,
+                        )
+                        for row in rows
+                    ],
+                )
+            connection.commit()
         return [dict(row) for row in rows]
 
     def delivery_needed(self, chat_id: int, event_id: str) -> bool:
