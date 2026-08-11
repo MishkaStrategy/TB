@@ -50,6 +50,9 @@ runs:
         ((${#sources[@]} > 0)) || { echo "No evidence sources were supplied" >&2; exit 1; }
 
         repository_name="${GITHUB_REPOSITORY#*/}"
+        if [[ ! "${repository_name}" =~ ^[A-Za-z0-9] ]]; then
+          repository_name="repo${repository_name}"
+        fi
         asset_name="${repository_name}-${EVIDENCE_COMMIT_SHA}-${PURPOSE_NAME}"
         tag="ci-evidence-${EVIDENCE_COMMIT_SHA}"
         temporary_directory="$(mktemp -d)"
