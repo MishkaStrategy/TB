@@ -13,8 +13,8 @@ export function OverviewScreen({ settings, market, maxSymbols, language, onNavig
   return <div className="screen-stack overview-screen">
     <PageHeader
       eyebrow="TB"
-      title={tx(language, "Trading signals control center", "Trading signals control center")}
-      description={tx(language, "Рыночные модули, правила и состояние ваших сигналов в одном компактном dashboard.", "Market modules, rules and signal state in one compact dashboard.")}
+      title={tx(language, "Центр управления сигналами", "Trading signals control center")}
+      description={tx(language, "Рыночные модули, правила и состояние сигналов в одном компактном интерфейсе.", "Market modules, rules and signal state in one compact dashboard.")}
     />
 
     <div className="summary-grid">
@@ -30,15 +30,15 @@ export function OverviewScreen({ settings, market, maxSymbols, language, onNavig
       </button>
     </div>
 
-    <Section title={tx(language, "Мои инструменты", "My instruments")} subtitle={tx(language, "24h изменение цены привязано к конкретной бирже", "24h price change is tied to the selected exchange") } action={<button className="icon-action" type="button" onClick={() => onNavigate("fvg")} aria-label={tx(language, "Настроить FVG", "Configure FVG")}><Icon name="settings" size={18} /></button>}>
+    <Section title={tx(language, "Мои инструменты", "My instruments")} subtitle={tx(language, "Изменение цены за 24 часа привязано к выбранной бирже", "24h price change is tied to the selected exchange") } action={<button className="icon-action" type="button" onClick={() => onNavigate("fvg")} aria-label={tx(language, "Настроить FVG", "Configure FVG")}><Icon name="settings" size={18} /></button>}>
       {settings.fvg.symbols.length ? <div className="market-list">{settings.fvg.symbols.map((item) => {
         const snapshot = market.get(item.key);
         const filters = activeFilterCount(item);
         return <button type="button" className="market-row" key={item.key} onClick={() => onOpenInstrument(item.key)}>
-          <div className="market-row-main"><div className="market-symbol-line"><strong>{item.symbol}</strong><span className={`mini-dot ${item.enabled ? "active" : ""}`} /></div><span>{exchangeLabels[item.exchange]} · {item.timeframes.join(" · ")}</span><small>{item.enabled ? tx(language, "Active", "Active") : tx(language, "Paused", "Paused")}{filters ? ` · ${filters} ${tx(language, "фильтра", "filters")}` : ""}</small></div>
+          <div className="market-row-main"><div className="market-symbol-line"><strong>{item.symbol}</strong><span className={`mini-dot ${item.enabled ? "active" : ""}`} /></div><span>{exchangeLabels[item.exchange]} · {item.timeframes.join(" · ")}</span><small>{item.enabled ? tx(language, "Активен", "Active") : tx(language, "На паузе", "Paused")}{filters ? ` · ${filters} ${tx(language, "фильтров", "filters")}` : ""}</small></div>
           <div className="market-row-side"><PriceChange value={snapshot?.priceChange24hPct} /><span>24h</span><Icon name="chevron" size={16} /></div>
         </button>;
-      })}</div> : <EmptyState title={tx(language, "У вас пока нет инструментов", "No instruments yet")} description={tx(language, "Добавьте первую exchange + symbol пару для FVG.", "Add your first exchange + symbol pair for FVG.")} action={<button type="button" className="primary-button compact" onClick={() => onNavigate("fvg")}><Icon name="plus" size={18} />{tx(language, "Добавить первый инструмент", "Add first instrument")}</button>} />}
+      })}</div> : <EmptyState title={tx(language, "У вас пока нет инструментов", "No instruments yet")} description={tx(language, "Добавьте первую пару «биржа + символ» для FVG.", "Add your first exchange + symbol pair for FVG.")} action={<button type="button" className="primary-button compact" onClick={() => onNavigate("fvg")}><Icon name="plus" size={18} />{tx(language, "Добавить первый инструмент", "Add first instrument")}</button>} />}
     </Section>
   </div>;
 }

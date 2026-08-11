@@ -1,0 +1,243 @@
+/*
+ * UI/UX audit overrides.
+ *
+ * The original dashboard intentionally uses a compact dark trading surface.
+ * These rules keep that visual direction while fixing readability on Telegram's
+ * smallest supported viewports and making interaction states easier to scan.
+ */
+
+:root {
+  --muted: #9eacc0;
+  --border: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --surface: #101824;
+  --surface-2: #131d2a;
+  --surface-3: #182536;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+}
+
+input::placeholder {
+  color: #78879d;
+}
+
+/* Keep secondary content readable instead of collapsing to 8–10 px. */
+.brand-copy small,
+.profile-copy small {
+  font-size: 11px;
+}
+
+.page-heading > div > span {
+  font-size: 11px;
+}
+
+.page-heading p {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.panel-header p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-badge {
+  min-height: 26px;
+  padding-inline: 9px;
+  font-size: 11px;
+}
+
+.summary-metrics span,
+.market-row-main > span,
+.market-row-main > small,
+.market-row-side > span,
+.instrument-card-copy > div:first-child > span,
+.instrument-card-copy > small,
+.instrument-card-side > span,
+.timeframe-line span,
+.add-instrument-form label > span,
+.field > span,
+.filter-fields label > span,
+.inline-field > span {
+  font-size: 11px;
+}
+
+.empty-state p {
+  font-size: 12px;
+}
+
+/* Mobile interaction floor: every direct form/control target is at least 44px tall. */
+.add-instrument-form input,
+.add-instrument-form select,
+.field input,
+.field select,
+.filter-fields input,
+.filter-fields select,
+.suffix-input,
+.primary-button.compact,
+.chip {
+  min-height: 44px;
+}
+
+.primary-button,
+.secondary-button,
+.danger-button {
+  min-height: 46px;
+  font-size: 12.5px;
+  font-weight: 750;
+  transition: transform 120ms ease, border-color 120ms ease, filter 120ms ease;
+}
+
+/* Keep the compact 28px switch track while expanding its actual button hit area. */
+.tb-toggle {
+  height: 44px;
+  background: transparent;
+}
+
+.tb-toggle::before {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 46px;
+  height: 28px;
+  border-radius: 999px;
+  background: #263140;
+  content: "";
+  transition: background 150ms ease;
+}
+
+.tb-toggle.on {
+  background: transparent;
+}
+
+.tb-toggle.on::before {
+  background: var(--primary);
+}
+
+.tb-toggle > span {
+  top: 11px;
+  z-index: 1;
+}
+
+.primary-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled),
+.danger-button:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.icon-action {
+  border-color: var(--border-strong);
+}
+
+.summary-card,
+.instrument-card,
+.panel {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.018);
+}
+
+.summary-card:focus-visible,
+.instrument-card:focus-visible,
+.market-row:focus-visible,
+.settings-link:focus-visible,
+.direction-card:focus-visible,
+.exchange-select:focus-visible,
+.bottom-nav button:focus-visible {
+  outline: 2px solid rgba(47, 155, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.bottom-nav {
+  min-height: 66px;
+  padding: 6px;
+  border-color: rgba(255, 255, 255, 0.14);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.36);
+}
+
+.bottom-nav button {
+  position: relative;
+  min-height: 54px;
+  padding: 5px 3px;
+  gap: 4px;
+}
+
+.bottom-nav button.active {
+  background: rgba(47, 155, 255, 0.13);
+  color: #b5ddff;
+}
+
+.bottom-nav button.active::before {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 18px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--primary);
+  content: "";
+  transform: translateX(-50%);
+}
+
+.bottom-nav button small {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.save-bar strong {
+  font-size: 12px;
+}
+
+.save-bar small,
+.helper-row,
+.editor-label > span,
+.filter-card-head small,
+.rule-title small,
+.metric > small,
+.profile-card-copy small,
+.settings-row-copy small {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.chip,
+.text-action,
+.settings-link,
+.direction-card,
+.exchange-select {
+  font-size: 12px;
+}
+
+@media (max-width: 380px) {
+  .app-shell {
+    padding-inline: 10px;
+  }
+
+  .page-heading p {
+    font-size: 12px;
+  }
+
+  .bottom-nav {
+    width: calc(100% - 8px);
+  }
+
+  .bottom-nav button small {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-stack,
+  .summary-card,
+  .instrument-card,
+  .primary-button,
+  .secondary-button,
+  .danger-button,
+  .tb-toggle,
+  .tb-toggle::before,
+  .tb-toggle > span {
+    animation: none !important;
+    transition: none !important;
+  }
+}

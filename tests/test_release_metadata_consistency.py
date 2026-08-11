@@ -74,6 +74,7 @@ class ReleaseMetadataConsistencyTests(unittest.TestCase):
             f'EXPECTED_VERSION="${{EXPECTED_VERSION:-{self.version}}}"',
             workflow,
         )
+        self.assertIn("tests.test_release_1_3_8_contract", workflow)
         self.assertIn("tests.test_release_1_3_7_contract", workflow)
         self.assertIn("VITE_MOCK_MODE", workflow)
         self.assertIn('"/api/mini-app/market-overview"', workflow)

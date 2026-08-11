@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.3.8 — 2026-08-11
+
+### Telegram UI/UX
+
+- persistent reply keyboard синхронизирован с выбранным RU/EN языком и обновляется сразу после смены языка;
+- главные inline-кнопки сокращены, состояния FVG показываются компактными `✅ / ⏸` маркерами;
+- `/start` переведён на компактный onboarding вместо длинного списка advanced commands;
+- donation-панель локализована для RU/EN, сохранены USDT/ETH/BNB и утверждённый EVM-адрес без лишней warning-строки;
+- затронутые preference/onboarding операции вынесены из async Telegram event loop через `asyncio.to_thread`;
+- runtime по-прежнему не меняет внешне настроенную Telegram Mini App Menu Button.
+
+### Telegram Mini App / графический дизайн
+
+- критический secondary text увеличен из диапазона 8–10px до читаемых 11–13px;
+- прямые mobile controls получили touch target не меньше 44px;
+- усилены active/focus states нижней навигации и интерактивных элементов;
+- selectable chips, Funding directions и exchanges получили `aria-pressed`, активный tab сохраняет `aria-current="page"`;
+- улучшен контраст placeholder-текста;
+- добавлен `prefers-reduced-motion`;
+- Overview, FVG, Funding, Alerts и Settings очищены от avoidable RU/EN mixed copy;
+- сохранены dark trading dashboard, Mini App API contracts и production-safe defaults.
+
+### Проверено
+
+- dependency audit и Python compilation;
+- полный unit suite и отдельный UI/UX regression contract;
+- Mini App TypeScript typecheck и production build с `VITE_MOCK_MODE=false`;
+- Mini App redesign verification;
+- bounded pipeline/research smoke, backup contracts, `500 × 10` notification soak и Linux systemd verification;
+- второй CI + Release audit на точном финальном SHA перед merge;
+- `v1.3.7` остаётся immutable и не перемещается.
+
 ## 1.3.7 — 2026-08-11
 
 ### Telegram Mini App
