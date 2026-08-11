@@ -12,13 +12,18 @@ runs:
         import sys
 
         errors = []
-        for path in sorted(Path('.github/workflows').glob('*.y*ml')):
+        workflow_paths = sorted([
+            *Path('.github/workflows').glob('*.y*ml'),
+            *Path('workflow-templates').glob('*.y*ml'),
+        ])
+        for path in workflow_paths:
             lines = path.read_text(encoding='utf-8').splitlines()
             for index, line in enumerate(lines):
-                match = re.match(r'^(\s*)uses:\s*actions/upload-artifact@', line)
+                match = re.match(r'^(\s*)(-\s*)?uses:\s*actions/upload-artifact@', line)
                 if not match:
                     continue
                 indent = len(match.group(1))
+                inline_step = match.group(2) is not None
                 start = index
                 while start > 0:
                     candidate = lines[start - 1]
@@ -30,7 +35,8 @@ runs:
                 while end < len(lines):
                     candidate = lines[end]
                     candidate_indent = len(candidate) - len(candidate.lstrip())
-                    if candidate.strip() and candidate_indent < indent and candidate.lstrip().startswith('- '):
+                    next_step = candidate.strip() and candidate.lstrip().startswith('- ')
+                    if next_step and (candidate_indent < indent or (inline_step and candidate_indent == indent)):
                         break
                     end += 1
                 block = '\n'.join(lines[start:end])
@@ -42,7 +48,7 @@ runs:
                     errors.append(f'{path}:{index + 1}: upload-artifact must be limited to failure() or cancelled()')
 
         policy_files = {'org-storage-policy.yml', 'storage-policy-check.yml'}
-        for path in [*Path('.github/workflows').glob('*.y*ml'), *Path('.github/actions').glob('**/*.y*ml')]:
+        for path in [*workflow_paths, *Path('.github/actions').glob('**/*.y*ml')]:
             if path.name in policy_files or path.parent.name == 'validate-storage-policy':
                 continue
             for line_number, line in enumerate(path.read_text(encoding='utf-8').splitlines(), 1):
