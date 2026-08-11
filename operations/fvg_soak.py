@@ -150,15 +150,38 @@ async def run_soak(
 
     tracemalloc.start()
     started = time.perf_counter()
-    for offset in range(0, events, batch_size):
-        batch = [
-            make_event(index, base_time=base_time)
-            for index in range(offset, min(offset + batch_size, events))
-        ]
-        await service.deliver(bot, batch)
-    duration = time.perf_counter() - started
-    _, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    deadline = (
+        None
+        if max_seconds is None
+        else started + max(0.0, float(max_seconds))
+    )
+    timed_out = False
+    try:
+        for offset in range(0, events, batch_size):
+            batch = [
+                make_event(index, base_time=base_time)
+                for index in range(offset, min(offset + batch_size, events))
+            ]
+            if deadline is None:
+                await service.deliver(bot, batch)
+                continue
+
+            remaining = deadline - time.perf_counter()
+            if remaining <= 0:
+                timed_out = True
+                break
+            try:
+                await asyncio.wait_for(
+                    service.deliver(bot, batch),
+                    timeout=remaining,
+                )
+            except TimeoutError:
+                timed_out = True
+                break
+    finally:
+        duration = time.perf_counter() - started
+        _, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
 
     health = store.health()
     expected_deliveries = events * recipients
@@ -179,7 +202,11 @@ async def run_soak(
             f"bot messages {bot.messages} != expected {expected_deliveries}"
         )
     peak_mb = peak / 1024 / 1024
-    if max_seconds is not None and duration > max_seconds:
+    if timed_out:
+        failures.append(
+            f"duration {duration:.3f}s reached limit {float(max_seconds):.3f}s"
+        )
+    elif max_seconds is not None and duration > max_seconds:
         failures.append(
             f"duration {duration:.3f}s exceeds limit {max_seconds:.3f}s"
         )
