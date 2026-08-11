@@ -80,10 +80,6 @@ def translate_button_label(text: str, language: str) -> str:
     if str(language or "ru").lower() != "en":
         return value
 
-    translated = translate_label(value, "en")
-    if translated != value:
-        return translated
-
     direct = BUTTON_TRANSLATIONS.get(value)
     if direct is not None:
         return direct
@@ -94,5 +90,9 @@ def translate_button_label(text: str, language: str) -> str:
         translated_core = translate_button_label(core, "en")
         if translated_core != core:
             return f"{match.group('prefix')}{translated_core}"
+
+    translated = translate_label(value, "en")
+    if translated != value:
+        return translated
 
     return _translate_dynamic(value)
