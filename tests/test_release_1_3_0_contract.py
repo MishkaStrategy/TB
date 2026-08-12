@@ -43,8 +43,10 @@ class Release138ContractTests(unittest.TestCase):
         workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("refusing to republish it from", workflow)
         self.assertNotIn("--clobber", workflow)
-        self.assertIn("archive_missing", workflow)
-        self.assertIn("checksum_missing", workflow)
+        self.assertIn("uploadReleaseAsset", workflow)
+        self.assertIn("assetNames.has(name)", workflow)
+        self.assertNotIn("command -v gh", workflow)
+        self.assertNotIn("gh release upload", workflow)
 
     def test_admin_operations_readers_are_available(self):
         self.assertTrue(callable(read_restart_guard_status))

@@ -99,8 +99,10 @@ class Release137HistoricalMiniAppContractTests(unittest.TestCase):
         self.assertIn("mini_app_backend/service.py", workflow)
         self.assertIn("telegram-mini-app/package.json", workflow)
         self.assertIn("refusing to republish it from", workflow)
-        self.assertIn("archive_missing", workflow)
-        self.assertIn("checksum_missing", workflow)
+        self.assertIn("uploadReleaseAsset", workflow)
+        self.assertIn("assetNames.has(name)", workflow)
+        self.assertNotIn("command -v gh", workflow)
+        self.assertNotIn("gh release upload", workflow)
         self.assertNotIn("--clobber", workflow)
 
 

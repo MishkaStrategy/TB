@@ -32,7 +32,6 @@ jobs:
           set -euo pipefail
           command -v sha256sum
           command -v tar
-          command -v gh
 
       - name: Validate merge commit and VERSION
         id: version
@@ -174,27 +173,22 @@ jobs:
             }
 
             const assetNames = new Set((release.assets || []).map((asset) => asset.name));
-            core.setOutput('archive_missing', assetNames.has(archive) ? 'false' : 'true');
-            core.setOutput('checksum_missing', assetNames.has(checksum) ? 'false' : 'true');
-
-      - name: Upload release archive when missing
-        if: steps.publish.outputs.archive_missing == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          ARCHIVE: ${{ steps.version.outputs.archive }}
-        run: |
-          set -euo pipefail
-          gh release upload "${TAG}" "${ARCHIVE}"
-
-      - name: Upload release checksum when missing
-        if: steps.publish.outputs.checksum_missing == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          ARCHIVE: ${{ steps.version.outputs.archive }}
-        run: |
-          set -euo pipefail
-          gh release upload "${TAG}" "${ARCHIVE}.sha256"
+            for (const name of [archive, checksum]) {
+              if (assetNames.has(name)) {
+                core.info(`Release asset ${name} already exists; leaving it unchanged.`);
+                continue;
+              }
+              const data = fs.readFileSync(name);
+              await github.rest.repos.uploadReleaseAsset({
+                owner,
+                repo,
+                release_id: release.id,
+                name,
+                data,
+                headers: {
+                  'content-type': 'application/octet-stream',
+                  'content-length': data.length,
+                },
+              });
+              core.info(`Uploaded immutable release asset ${name}.`);
+            }
