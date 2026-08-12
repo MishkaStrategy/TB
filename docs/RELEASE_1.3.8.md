@@ -53,3 +53,5 @@ The reviewed release commit must pass:
 ## Release archive
 
 The release workflow creates `fvg-alert-bot-1.3.8.tar.gz` and `fvg-alert-bot-1.3.8.tar.gz.sha256` only from the reviewed two-parent merge commit on `main`.
+
+Release assets are uploaded through the authenticated GitHub API action instead of relying on a runner-local `gh` executable. Existing tag and asset names are detected and left unchanged, preserving immutable and idempotent publication.

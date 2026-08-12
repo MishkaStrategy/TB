@@ -65,6 +65,15 @@ class Release138UiUxContractTests(unittest.TestCase):
         self.assertIn('"127.0.0.1"', lifecycle)
         self.assertIn("18080", lifecycle)
 
+    def test_release_assets_do_not_require_github_cli(self):
+        workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("uploadReleaseAsset", workflow)
+        self.assertIn("assetNames.has(name)", workflow)
+        self.assertNotIn("command -v gh", workflow)
+        self.assertNotIn("gh release upload", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,7 +70,12 @@ jobs:
           grep -F 'git archive' .github/workflows/release.yml
           grep -F 'two-parent merge commit on main' .github/workflows/release.yml
           grep -F 'refusing to republish it from' .github/workflows/release.yml
-          grep -F 'archive_missing' .github/workflows/release.yml
+          grep -F 'uploadReleaseAsset' .github/workflows/release.yml
+          if grep -F 'command -v gh' .github/workflows/release.yml || \
+             grep -F 'gh release upload' .github/workflows/release.yml; then
+            echo 'release publication must not depend on GitHub CLI on the self-hosted runner' >&2
+            exit 1
+          fi
           if grep -F -- '--clobber' .github/workflows/release.yml; then
             echo 'release workflow must never clobber immutable assets' >&2
             exit 1
