@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -201,8 +201,8 @@ async function main() {
 
     const screens = [
       ["FVG", "Fair Value Gap"],
-      ["Funding", "Funding Alerts"],
-      ["Alerts", "Alert operations"],
+      ["Funding", "Funding"],
+      ["Alerts", "Alerts"],
       ["Settings", "Settings"],
     ];
     for (const [navLabel, heading] of screens) {
@@ -261,11 +261,6 @@ async function main() {
         new Promise((resolve) => chrome.once("exit", resolve)),
         sleep(1_000),
       ]);
-    }
-    try {
-      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
-    } catch (error) {
-      console.warn(`[browser-smoke] cleanup warning: ${String(error)}`);
     }
     if (chrome.exitCode && chrome.exitCode !== 0 && !client) {
       console.error(chromeErrors.slice(-4_000));
