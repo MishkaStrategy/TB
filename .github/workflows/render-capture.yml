@@ -76,3 +76,5 @@ jobs:
           path: telegram-mini-app/render-capture/*.jpg
           if-no-files-found: error
           retention-days: 1
+
+# export revision 2
