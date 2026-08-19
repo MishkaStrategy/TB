@@ -9,8 +9,8 @@ function AssetMark({ symbol }: { symbol: string }) {
 }
 
 function Sparkline({ value }: { value: number | null | undefined }) {
-  const finite = typeof value === "number" && Number.isFinite(value);
-  const tone = !finite ? "flat" : value > 0 ? "up" : value < 0 ? "down" : "flat";
+  const numeric = typeof value === "number" && Number.isFinite(value) ? value : null;
+  const tone = numeric === null ? "flat" : numeric > 0 ? "up" : numeric < 0 ? "down" : "flat";
   const points = tone === "up"
     ? "2,25 8,21 14,23 20,17 26,19 32,14 38,16 44,11 50,14 56,9 62,12 68,6 74,9 82,4"
     : tone === "down"
@@ -67,7 +67,7 @@ export function OverviewScreen({ settings, market, maxSymbols, language, onNavig
             <div className="final-market-meta"><div className="timeframe-line">{item.timeframes.map((timeframe) => <span key={timeframe}>{timeframe}</span>)}</div><small className={item.enabled ? "active" : ""}><i />{item.enabled ? tx(language, "Активен", "Active") : tx(language, "На паузе", "Paused")}</small></div>
           </div>
           <Sparkline value={snapshot?.priceChange24hPct} />
-          <div className="final-change"><span>{tx(language, "Изменение 24ч", "24h change")}</span><PriceChange value={snapshot?.priceChange24hPct} /></div>
+          <div className="final-change"><span>{tx(language, "24ч", "24h change")}</span><PriceChange value={snapshot?.priceChange24hPct} /></div>
         </button>;
       })}</div> : <EmptyState title={tx(language, "У вас пока нет инструментов", "No instruments yet")} description={tx(language, "Добавьте первую пару «биржа + символ» для FVG.", "Add your first exchange + symbol pair for FVG.")} action={<button type="button" className="primary-button compact" onClick={() => onNavigate("fvg")}><Icon name="plus" size={18} />{tx(language, "Добавить первый инструмент", "Add first instrument")}</button>} />}
     </section>
