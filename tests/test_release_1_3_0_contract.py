@@ -11,11 +11,12 @@ from exchanges.fvg_candles import CONFIRMED_TIMEFRAMES
 
 
 class Release138ContractTests(unittest.TestCase):
-    def test_release_version_and_vds_default(self):
-        self.assertEqual(Path("VERSION").read_text(encoding="utf-8").strip(), "1.3.8")
+    def test_release_version_and_vds_default_are_consistent(self):
+        version = Path("VERSION").read_text(encoding="utf-8").strip()
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
         updater = Path("scripts/update_vds.sh").read_text(encoding="utf-8")
-        self.assertIn('EXPECTED_VERSION="${EXPECTED_VERSION:-1.3.8}"', updater)
-        self.assertIn("TARGET_REF=v1.3.8 EXPECTED_VERSION=1.3.8", updater)
+        self.assertIn(f'EXPECTED_VERSION="${{EXPECTED_VERSION:-{version}}}"', updater)
+        self.assertIn(f"TARGET_REF=v{version} EXPECTED_VERSION={version}", updater)
 
     def test_candidate_tests_are_isolated_from_production_env(self):
         installer = Path("scripts/install_vds.sh").read_text(encoding="utf-8")

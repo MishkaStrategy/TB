@@ -45,7 +45,7 @@ jobs:
   mini-app-frontend:
     name: Telegram Mini App frontend
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     defaults:
       run:
         working-directory: telegram-mini-app
@@ -84,6 +84,35 @@ jobs:
           test -f dist/index.html
           test -f dist/manifest.json
           test ! -e dist/node_modules
+
+      - name: Build isolated mock frontend for browser audit
+        env:
+          VITE_MOCK_MODE: "true"
+        run: npm run build
+
+      - name: Run mobile Chromium browser smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "${chrome}" ]]; then
+            echo 'No Chromium-compatible browser found on the GitHub-hosted Linux image' >&2
+            exit 1
+          fi
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory dist >"${RUNNER_TEMP}/tb-mini-app-http.log" 2>&1 &
+          server_pid=$!
+          cleanup() {
+            kill "${server_pid}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          for _ in {1..50}; do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then
+              break
+            fi
+            sleep 0.1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          CHROME_BIN="${chrome}" node scripts/browser-smoke.mjs
 
   tests:
     name: Python tests

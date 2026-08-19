@@ -11,7 +11,7 @@ export function SettingsScreen({ general, user, admin, language, onChangeGeneral
 }) {
   const initials = (user.firstName || "TB").trim().slice(0, 2).toUpperCase();
   return <div className="screen-stack settings-screen">
-    <PageHeader eyebrow={tx(language, "Настройки", "Settings")} title={tx(language, "Интерфейс и профиль", "Interface & profile")} description={tx(language, "Только общие параметры. Торговые правила остаются в своих модулях.", "Only global preferences. Trading rules stay inside their modules.")} />
+    <PageHeader eyebrow={tx(language, "Настройки", "Settings")} title={tx(language, "Настройки", "Settings")} description={tx(language, "Интерфейс и профиль", "Interface and profile")} />
 
     <Section title={tx(language, "Интерфейс", "Interface")}>
       <div className="settings-row"><div className="settings-row-copy"><span className="row-icon"><Icon name="language" size={18} /></span><div><strong>{tx(language, "Язык", "Language")}</strong><small>{tx(language, "Язык Mini App и сообщений", "Mini App and message language")}</small></div></div><div className="chip-row compact"><Chip active={general.language === "ru"} onClick={() => onChangeGeneral({ language: "ru" })}>RU</Chip><Chip active={general.language === "en"} onClick={() => onChangeGeneral({ language: "en" })}>EN</Chip></div></div>

@@ -6,8 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class Release138UiUxContractTests(unittest.TestCase):
-    def test_release_version_and_documents(self):
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "1.3.8")
+    def test_release_documents_remain_immutable_history(self):
         self.assertTrue((ROOT / "docs" / "RELEASE_1.3.8.md").is_file())
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn("## 1.3.8", changelog)

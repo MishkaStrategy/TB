@@ -13,7 +13,7 @@ export function NotificationsScreen({ settings, language, onNavigate }: {
     settings.funding.notifyNegative ? tx(language, "Отрицательные", "Negative") : "",
   ].filter(Boolean).join(" · ");
   return <div className="screen-stack notifications-screen">
-    <PageHeader eyebrow={tx(language, "Уведомления", "Alerts")} title={tx(language, "Операционная сводка", "Alert operations")} description={tx(language, "Что именно сейчас может прислать бот и какими правилами это управляется.", "What the bot can send now and which rules control it.")} />
+    <PageHeader eyebrow={tx(language, "Уведомления", "Alerts")} title={tx(language, "Уведомления", "Alerts")} description={tx(language, "Операционная сводка текущих правил", "Operational summary of current rules")} />
     <Section className="alert-rule-card">
       <div className="rule-head"><div className="rule-title"><span className="summary-icon cyan"><Icon name="fvg" size={19} /></span><div><strong>{tx(language, "FVG-уведомления", "FVG alerts")}</strong><small>Fair Value Gap</small></div></div><StatusBadge active={settings.fvg.enabled}>{settings.fvg.enabled ? tx(language, "ВКЛ", "ON") : tx(language, "ВЫКЛ", "OFF")}</StatusBadge></div>
       <div className="rule-metrics"><Metric label={tx(language, "Инструменты", "Instruments")} value={settings.fvg.symbols.length} /><Metric label={tx(language, "Таймфреймы", "Timeframes")} value={uniqueTimeframes} /><Metric label={tx(language, "Фильтры", "Filters")} value={activeFilters} /></div>

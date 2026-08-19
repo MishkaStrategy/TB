@@ -22,14 +22,14 @@ function mockEnvelope(settings: AppSettings = mockSettings): SettingsEnvelope {
 }
 
 function mockMarketOverview(): MarketOverviewEnvelope {
-  const demoChanges = [1.42, -2.71, 0.38, -0.64];
+  const demoChanges = [1.42, -2.71, 3.08, -0.84, 0.66];
   return {
     instruments: mockSettings.fvg.symbols.map((instrument, index) => ({
       key: instrument.key,
       exchange: instrument.exchange,
       symbol: instrument.symbol,
       price: null,
-      priceChange24hPct: demoChanges[index % demoChanges.length] ?? null,
+      priceChange24hPct: demoChanges[index] ?? null,
       source: "ticker",
     })),
     updatedAt: new Date().toISOString(),

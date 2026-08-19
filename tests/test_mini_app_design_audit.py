@@ -5,6 +5,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "telegram-mini-app" / "src"
 STYLES = SRC / "trading-dashboard.css"
+FINAL_STYLES = SRC / "final-minimal.css"
+MAIN = SRC / "main.tsx"
 UI = SRC / "ui.tsx"
 OVERVIEW = SRC / "screens" / "OverviewScreen.tsx"
 FVG = SRC / "screens" / "FvgScreen.tsx"
@@ -15,6 +17,8 @@ SETTINGS = SRC / "screens" / "SettingsScreen.tsx"
 class MiniAppDesignAuditTests(unittest.TestCase):
     def setUp(self):
         self.styles = STYLES.read_text(encoding="utf-8")
+        self.final_styles = FINAL_STYLES.read_text(encoding="utf-8")
+        self.main = MAIN.read_text(encoding="utf-8")
         self.ui = UI.read_text(encoding="utf-8")
         self.overview = OVERVIEW.read_text(encoding="utf-8")
         self.fvg = FVG.read_text(encoding="utf-8")
@@ -35,6 +39,48 @@ class MiniAppDesignAuditTests(unittest.TestCase):
         ):
             self.assertIn(token, self.styles)
         self.assertIn("border-radius: 16px", self.styles)
+
+    def test_approved_final_minimal_layer_is_loaded_last(self):
+        self.assertIn('import "./trading-dashboard.css";', self.main)
+        self.assertIn('import "./ui-audit.css";', self.main)
+        self.assertIn('import "./final-minimal.css";', self.main)
+        self.assertGreater(
+            self.main.index('import "./final-minimal.css";'),
+            self.main.index('import "./ui-audit.css";'),
+        )
+        for token in (
+            "--bg: #080a0c",
+            "--surface: #111315",
+            "--text: #f4f4f2",
+            "--muted: #96989d",
+            "--success: #43d17a",
+            "--danger: #ff575f",
+        ):
+            self.assertIn(token, self.final_styles)
+        self.assertIn("background-image: none", self.final_styles)
+        self.assertNotIn("#2f9bff", self.final_styles)
+
+    def test_approved_overview_composition_matches_selected_reference(self):
+        for marker in (
+            'className="summary-card final-summary-card"',
+            'className="final-summary-lines"',
+            'className="overview-instruments"',
+            'className="market-row final-market-row"',
+            "function AssetMark",
+            "function Sparkline",
+            "24h change",
+        ):
+            self.assertIn(marker, self.overview)
+        self.assertIn("grid-template-columns: 46px minmax(0, 1fr) 78px 86px", self.final_styles)
+        self.assertIn(".asset-btc", self.final_styles)
+        self.assertIn(".market-sparkline", self.final_styles)
+
+    def test_final_navigation_is_neutral_and_keeps_accessible_target_size(self):
+        self.assertIn("grid-template-columns: repeat(5, minmax(0, 1fr))", self.final_styles)
+        self.assertIn("min-height: 56px", self.final_styles)
+        self.assertIn(".bottom-nav button.active::before", self.final_styles)
+        self.assertIn("background: #f5f5f3", self.final_styles)
+        self.assertIn("env(safe-area-inset-bottom, 0px)", self.styles)
 
     def test_ui_uses_one_svg_icon_system_not_emoji_navigation(self):
         self.assertIn("export function Icon", self.ui)

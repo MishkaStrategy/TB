@@ -17,7 +17,7 @@ export function FundingScreen({ settings, language, onChange, onToggleDirection,
   };
 
   return <div className="screen-stack funding-screen">
-    <PageHeader eyebrow="Funding" title={tx(language, "Funding-уведомления", "Funding Alerts")} description={tx(language, "Мультибиржевой контроль порога, направлений и расписания.", "Multi-exchange control for threshold, directions and schedule.")} trailing={<Toggle checked={settings.enabled} onChange={(enabled) => onChange({ enabled })} label={tx(language, "Включить Funding", "Enable Funding")} />} />
+    <PageHeader eyebrow="Funding" title="Funding" description={tx(language, "Управление периодическими funding-уведомлениями", "Manage periodic funding rate alerts")} trailing={<Toggle checked={settings.enabled} onChange={(enabled) => onChange({ enabled })} label={tx(language, "Включить Funding", "Enable Funding")} />} />
 
     <Section className="funding-summary">
       <div className="funding-summary-top"><StatusBadge active={settings.enabled}>{settings.enabled ? tx(language, "Уведомления включены", "Funding alerts on") : tx(language, "Уведомления выключены", "Funding alerts off")}</StatusBadge><span>{settings.exchanges.length} {tx(language, "бирж", "exchanges")}</span></div>
