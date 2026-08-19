@@ -1,0 +1,78 @@
+name: Render capture v1.3.9
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "telegram-mini-app/**"
+      - ".github/workflows/render-capture.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  capture:
+    name: Capture exact Mini App renders
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: telegram-mini-app
+
+    steps:
+      - name: Check out exact PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: telegram-mini-app/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build exact mock frontend
+        env:
+          VITE_MOCK_MODE: "true"
+        run: npm run build
+
+      - name: Capture 390x844 Chromium renders
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [[ -z "${chrome}" ]]; then
+            echo "Chromium-compatible browser not found" >&2
+            exit 1
+          fi
+          python3 -m http.server 4173 --bind 127.0.0.1 --directory dist >"${RUNNER_TEMP}/tb-render-http.log" 2>&1 &
+          server_pid=$!
+          cleanup() { kill "${server_pid}" >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          for _ in {1..50}; do
+            if curl --fail --silent http://127.0.0.1:4173/ >/dev/null; then break; fi
+            sleep 0.1
+          done
+          curl --fail --silent http://127.0.0.1:4173/ >/dev/null
+          CHROME_BIN="${chrome}" node scripts/capture-renders.mjs
+
+      - name: Commit base64 render captures to temporary branch
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add telegram-mini-app/render-capture/*.jpg.b64
+          if git diff --cached --quiet; then
+            echo "No render files to commit"
+            exit 0
+          fi
+          git commit -m "chore: capture v1.3.9 renders [skip ci]"
+          git push origin "HEAD:${{ github.head_ref }}"
