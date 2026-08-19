@@ -71,17 +71,17 @@ jobs:
             mv "${file}.wrapped" "${file}"
           done
 
-      - name: Commit base64 render captures to temporary branch
+      - name: Commit render captures to temporary branch
         shell: bash
         working-directory: .
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add telegram-mini-app/render-capture/*.jpg.b64
+          git add telegram-mini-app/render-capture/*.jpg telegram-mini-app/render-capture/*.jpg.b64
           if git diff --cached --quiet; then
             echo "No render files to commit"
             exit 0
           fi
-          git commit -m "chore: capture wrapped v1.3.9 renders [skip ci]"
+          git commit -m "chore: retain v1.3.9 render screenshots [skip ci]"
           git push origin "HEAD:${{ github.head_ref }}"
