@@ -49,6 +49,7 @@ PASS by static contract; browser smoke is required before merge.
 - bottom navigation uses >=56px buttons;
 - `safe-area-inset-bottom` remains in the base navigation contract;
 - the market grid collapses at <=380px by removing only the decorative sparkline, not data;
+- timeframes and active/paused state are stacked inside the instrument copy block so they do not compete for horizontal space;
 - no horizontal scrolling is intentionally introduced.
 
 ### Accessibility
@@ -58,6 +59,7 @@ PASS by code audit; automated/browser checks are required before merge.
 - SVG navigation icon system is retained;
 - `aria-current` / `aria-pressed` semantics remain unchanged;
 - focus-visible remains explicit and is recolored to neutral white for the final theme;
+- enabled switches remain semantic green after the neutral primary-color override;
 - green/red are never the only signal for instrument state: text labels and percentage signs remain visible;
 - reduced-motion rules remain active.
 
@@ -65,7 +67,7 @@ PASS by code audit; automated/browser checks are required before merge.
 
 PASS by design.
 
-The final style adds one static CSS file and one inline SVG polyline per visible overview instrument. There are no external fonts, image requests, chart libraries, animation libraries or runtime design dependencies. Sparklines are decorative and derived from the already loaded 24h direction; they do not trigger additional market requests.
+The final style adds two small static CSS layers and one inline SVG polyline per visible overview instrument. There are no external fonts, image requests, chart libraries, animation libraries or runtime design dependencies. Sparklines are decorative and derived from the already loaded 24h direction; they do not trigger additional market requests.
 
 ## Security and contract audit
 
@@ -91,13 +93,16 @@ Before merge to `main`:
 - mobile browser smoke at ~390px width;
 - verify Overview, FVG, Funding, Alerts and Settings navigation;
 - verify no horizontal overflow;
+- verify responsive Overview at 360px and 430px;
 - verify market `null` still renders as `—`;
 - verify settings dirty/save flow;
 - final PR diff review with no blocking findings.
 
 ## Files implementing the visual contract
 
-- `src/final-minimal.css` — final presentation layer, imported last;
+- `src/final-minimal.css` — approved final presentation layer;
+- `src/final-minimal-audit.css` — last-loaded audit corrections for semantic switches and compact instrument metadata;
 - `src/screens/OverviewScreen.tsx` — approved overview composition;
-- `src/main.tsx` — final layer import;
+- `src/main.tsx` — ordered final layer imports;
+- `scripts/browser-smoke.mjs` — dependency-free mobile Chromium audit;
 - `tests/test_mini_app_design_audit.py` — regression lock for the approved direction.
