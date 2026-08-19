@@ -201,7 +201,7 @@ async function main() {
 
     const screens = [
       ["FVG", "Fair Value Gap"],
-      ["Funding", "Funding"],
+      ["Funding", "Funding Alerts"],
       ["Alerts", "Alert operations"],
       ["Settings", "Settings"],
     ];
@@ -250,13 +250,23 @@ async function main() {
     console.log("[browser-smoke] PASS: 5 tabs, 360/390/430 responsive overflow, Telegram user, dirty/save flow");
   } finally {
     client?.close();
-    chrome.kill("SIGTERM");
+    if (chrome.exitCode === null) chrome.kill("SIGTERM");
     await Promise.race([
       new Promise((resolve) => chrome.once("exit", resolve)),
       sleep(2_000),
     ]);
-    if (!chrome.killed) chrome.kill("SIGKILL");
-    rmSync(userDataDir, { recursive: true, force: true });
+    if (chrome.exitCode === null) {
+      chrome.kill("SIGKILL");
+      await Promise.race([
+        new Promise((resolve) => chrome.once("exit", resolve)),
+        sleep(1_000),
+      ]);
+    }
+    try {
+      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    } catch (error) {
+      console.warn(`[browser-smoke] cleanup warning: ${String(error)}`);
+    }
     if (chrome.exitCode && chrome.exitCode !== 0 && !client) {
       console.error(chromeErrors.slice(-4_000));
     }
