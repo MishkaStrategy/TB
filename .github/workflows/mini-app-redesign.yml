@@ -69,6 +69,14 @@ jobs:
             exit 1
           fi
 
+      - name: Upload one-day frontend audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tb-mini-app-frontend-${{ github.event.pull_request.head.sha || github.sha }}
+          path: telegram-mini-app/dist
+          if-no-files-found: error
+          retention-days: 1
+
   backend:
     name: Mini App backend / fast
     runs-on: [self-hosted, fast]
