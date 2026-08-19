@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.9 — 2026-08-19
+
+### Telegram Mini App / final visual design
+
+- реализован утверждённый первый тёмно-белый минималистичный TB dashboard без дальнейшего изменения продуктового направления;
+- final presentation layer использует near-black фон, neutral charcoal surfaces, белую иерархию и тонкие нейтральные borders без декоративного blue/cyan glow;
+- Overview перестроен под утверждённую композицию: две module-card FVG/Funding и отдельные instrument-card с symbol, exchange, timeframes, active state, neutral sparkline и exchange-aware 24h change;
+- зелёный/красный оставлены только для рыночной и status-семантики, а navigation selection переведён на белый neutral marker;
+- сохранены пять primary tabs, Telegram safe-area, 44px+ direct control targets, focus-visible, aria states и reduced-motion;
+- недоступный `priceChange24hPct` по-прежнему отображается как `—`, без подмены нулём;
+- visual sparklines не создают новый market-data pipeline и не выполняют дополнительные сетевые запросы.
+
+### Совместимость и безопасность
+
+- Telegram `initData` auth, `/api/mini-app/settings`, `/api/mini-app/market-overview`, FVG/Funding settings, admin challenge и server-side access checks не изменены;
+- production env, SQLite/runtime state, BotFather, Xray, Nginx и порты автоматически не меняются;
+- release публикуется новым immutable tag `v1.3.9`; `v1.3.8` и более ранние tags/assets не перемещаются и не перезаписываются.
+
+### Проверка перед merge
+
+- TypeScript typecheck и production Mini App build с `VITE_MOCK_MODE=false`;
+- Mini App design/navigation/UI regression contracts;
+- полный Python unit suite, dependency audit, candidate isolation, backup contracts и bounded notification soak;
+- self-hosted Mini App verification и Linux release audit;
+- mobile browser smoke для Overview, FVG, Funding, Alerts, Settings и horizontal-overflow check;
+- финальный diff/security/contract review без blocking findings.
+
 ## 1.3.8 — 2026-08-11
 
 ### Telegram UI/UX
