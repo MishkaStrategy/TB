@@ -112,6 +112,7 @@ jobs:
           tests/test_mini_app_admin_web.py
           tests/test_mini_app_navigation.py
           tests/test_mini_app_design_audit.py
+          tests/test_mini_app_final_visual_audit.py
 
       - name: Run Mini App regressions
         shell: bash
@@ -128,4 +129,5 @@ jobs:
             tests.test_mini_app_market_overview \
             tests.test_mini_app_market_web \
             tests.test_mini_app_navigation \
-            tests.test_mini_app_design_audit
+            tests.test_mini_app_design_audit \
+            tests.test_mini_app_final_visual_audit
