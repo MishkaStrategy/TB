@@ -27,6 +27,17 @@ class MiniAppFinalVisualAuditTests(unittest.TestCase):
         self.assertIn("flex-direction: column", audit_css)
         self.assertIn("align-items: flex-start", audit_css)
 
+    def test_primary_screen_headings_match_approved_first_design(self):
+        funding = (SRC / "screens" / "FundingScreen.tsx").read_text(encoding="utf-8")
+        alerts = (SRC / "screens" / "NotificationsScreen.tsx").read_text(encoding="utf-8")
+        settings = (SRC / "screens" / "SettingsScreen.tsx").read_text(encoding="utf-8")
+        self.assertIn('title="Funding"', funding)
+        self.assertIn('"Manage periodic funding rate alerts"', funding)
+        self.assertIn('title={tx(language, "Уведомления", "Alerts")}', alerts)
+        self.assertIn('"Operational summary of current rules"', alerts)
+        self.assertIn('title={tx(language, "Настройки", "Settings")}', settings)
+        self.assertIn('"Interface and profile"', settings)
+
     def test_browser_smoke_covers_selected_mobile_breakpoints_and_primary_tabs(self):
         smoke = (ROOT / "telegram-mini-app" / "scripts" / "browser-smoke.mjs").read_text(encoding="utf-8")
         for width in ("360", "390", "430"):
