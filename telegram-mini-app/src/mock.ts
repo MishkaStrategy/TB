@@ -1,4 +1,4 @@
-import type { AppSettings } from "./types";
+import type { AppSettings, Exchange, FvgSymbolSettings } from "./types";
 
 const defaultScope = {
   confirmedFvg: true,
@@ -6,45 +6,53 @@ const defaultScope = {
   bearish: true,
 };
 
+function instrument(exchange: Exchange, symbol: string, key: string = `${exchange}|${symbol}`): FvgSymbolSettings {
+  return {
+    key,
+    exchange,
+    symbol,
+    timeframes: ["15m", "1h", "4h", "1d"],
+    enabled: true,
+    priceFilter: {
+      enabled: false,
+      min: null,
+      max: null,
+      scope: { ...defaultScope },
+    },
+    sizeFilter: {
+      enabled: false,
+      unit: "USD",
+      min: null,
+      scope: { ...defaultScope },
+    },
+  };
+}
+
 export const mockSettings: AppSettings = {
   general: {
-    language: "ru",
-    messageMode: "detailed",
+    language: "en",
+    messageMode: "compact",
   },
   fvg: {
-    enabled: false,
+    enabled: true,
     notifyConfirmedFvg: true,
     bullishEnabled: true,
     bearishEnabled: true,
     symbols: [
-      {
-        key: "BTCUSDT",
-        exchange: "bitunix",
-        symbol: "BTCUSDT",
-        timeframes: ["15m", "1h", "4h", "1d"],
-        enabled: true,
-        priceFilter: {
-          enabled: false,
-          min: null,
-          max: null,
-          scope: { ...defaultScope },
-        },
-        sizeFilter: {
-          enabled: false,
-          unit: "USD",
-          min: null,
-          scope: { ...defaultScope },
-        },
-      },
+      instrument("bitunix", "BTCUSDT", "BTCUSDT"),
+      instrument("bybit", "ETHUSDT"),
+      instrument("binance", "SOLUSDT"),
+      instrument("gate", "XRPUSDT"),
+      instrument("bingx", "DOGEUSDT"),
     ],
   },
   funding: {
-    enabled: false,
-    intervalMinutes: 60,
-    threshold: "0.1",
+    enabled: true,
+    intervalMinutes: 30,
+    threshold: "0.25",
     notifyPositive: true,
     notifyNegative: true,
-    exchanges: ["bitunix"],
+    exchanges: ["binance", "bybit", "bingx", "bitget"],
     nextCheckAt: null,
   },
   admin: {
@@ -72,8 +80,8 @@ export const mockSettings: AppSettings = {
       diskFreeBytes: 68_719_476_736,
       diskTotalBytes: 107_374_182_400,
       pid: 2481,
-      release: "1.3.4",
-      gitCommit: "demo134",
+      release: "1.3.9",
+      gitCommit: "visual-audit",
       pythonVersion: "3.12.8",
     },
   },
