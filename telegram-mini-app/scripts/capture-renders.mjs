@@ -87,7 +87,7 @@ async function main() {
     await client.send("Emulation.setDeviceMetricsOverride", {
       width: 390,
       height: 844,
-      deviceScaleFactor: 2,
+      deviceScaleFactor: 1,
       mobile: true,
       screenWidth: 390,
       screenHeight: 844,
@@ -140,7 +140,7 @@ async function main() {
     async function capture(slug) {
       const shot = await client.send("Page.captureScreenshot", {
         format: "jpeg",
-        quality: 90,
+        quality: 78,
         fromSurface: true,
         captureBeyondViewport: false,
       });
@@ -164,7 +164,7 @@ async function main() {
     await clickNav("Settings", "Settings");
     await capture("05-settings");
 
-    console.log("[render-capture] PASS: captured exact v1.3.9 UI at 390x844 CSS px / DPR 2");
+    console.log("[render-capture] PASS: captured exact v1.3.9 UI at 390x844 px / DPR 1");
   } finally {
     client?.close();
     if (chrome.exitCode === null) chrome.kill("SIGTERM");
