@@ -5,6 +5,7 @@ import { initTelegram } from "./telegram";
 import "./trading-dashboard.css";
 import "./ui-audit.css";
 import "./final-minimal.css";
+import "./final-minimal-audit.css";
 
 initTelegram();
 
