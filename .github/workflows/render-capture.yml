@@ -62,6 +62,15 @@ jobs:
           curl --fail --silent http://127.0.0.1:4173/ >/dev/null
           CHROME_BIN="${chrome}" node scripts/capture-renders.mjs
 
+      - name: Wrap render payloads for GitHub inspection
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in render-capture/*.jpg.b64; do
+            fold -w 4096 "${file}" > "${file}.wrapped"
+            mv "${file}.wrapped" "${file}"
+          done
+
       - name: Commit base64 render captures to temporary branch
         shell: bash
         working-directory: .
@@ -74,5 +83,5 @@ jobs:
             echo "No render files to commit"
             exit 0
           fi
-          git commit -m "chore: capture v1.3.9 renders [skip ci]"
+          git commit -m "chore: capture wrapped v1.3.9 renders [skip ci]"
           git push origin "HEAD:${{ github.head_ref }}"
