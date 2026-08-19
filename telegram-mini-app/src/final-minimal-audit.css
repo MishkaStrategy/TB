@@ -1,0 +1,19 @@
+/* Final visual-audit corrections for the approved minimal design. */
+
+.tb-toggle {
+  background: #2a2c2f;
+}
+
+.tb-toggle.on {
+  background: var(--success);
+}
+
+.final-market-meta {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.final-market-meta small {
+  min-height: 14px;
+}
