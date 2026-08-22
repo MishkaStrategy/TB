@@ -4,8 +4,8 @@ from database import fvg_history_config as config
 
 
 class FvgHistoryConfigTests(unittest.TestCase):
-    def test_archive_rollout_is_disabled_and_bounded_by_default(self):
-        self.assertFalse(config.FVG_HISTORY_ARCHIVE_ENABLED)
+    def test_archive_retention_is_enabled_and_bounded_by_default(self):
+        self.assertTrue(config.FVG_HISTORY_ARCHIVE_ENABLED)
         self.assertEqual(
             config.FVG_HISTORY_ARCHIVE_PATH,
             "data/archive/fvg_history.sqlite3",
