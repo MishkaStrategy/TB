@@ -48,6 +48,9 @@ class FvgQualityOutcome:
     zone_size_percent: float
     signal_price: str
     available_future_bars: int
+    future_gap_after_bars: int | None
+    future_gap_expected_open_time: str | None
+    future_gap_actual_open_time: str | None
     first_touch_bars: int | None
     full_fill_bars: int | None
     horizons: dict[int, HorizonObservation]
@@ -176,12 +179,44 @@ def _excursions(event: FvgEvent, candles: list[Candle]) -> tuple[float, float]:
     )
 
 
+def _contiguous_future(
+    items: list[Candle],
+    index: int,
+    max_bars: int,
+) -> tuple[list[Candle], datetime | None, datetime | None]:
+    """Return only consecutive 15m rows after candle C.
+
+    A missing or duplicated timestamp is a hard data boundary. Rows after that
+    boundary are not allowed to masquerade as the next bar in latency or
+    horizon metrics.
+    """
+
+    future: list[Candle] = []
+    expected = items[index].open_time + FIFTEEN_MINUTES
+    for candle in items[index + 1:]:
+        if len(future) >= max_bars:
+            break
+        if candle.open_time != expected:
+            return future, expected, candle.open_time
+        future.append(candle)
+        expected += FIFTEEN_MINUTES
+    return future, None, None
+
+
+def _continuity_gap_count(candles: Iterable[Candle]) -> int:
+    items = sorted(candles, key=lambda candle: candle.open_time)
+    return sum(
+        current.open_time != previous.open_time + FIFTEEN_MINUTES
+        for previous, current in zip(items, items[1:])
+    )
+
+
 def analyze_fvg_quality(
     candles: Iterable[Candle],
     *,
     horizons: Iterable[int] = DEFAULT_HORIZONS,
 ) -> list[FvgQualityOutcome]:
-    """Detect confirmed FVGs and evaluate only candles strictly after candle C."""
+    """Detect confirmed FVGs and evaluate only contiguous candles after candle C."""
     items = sorted(candles, key=lambda candle: candle.open_time)
     horizon_values = tuple(sorted({int(value) for value in horizons}))
     if not horizon_values or any(value <= 0 for value in horizon_values):
@@ -197,7 +232,11 @@ def analyze_fvg_quality(
         )
         if event is None:
             continue
-        future = items[index + 1:index + 1 + max_horizon]
+        future, gap_expected, gap_actual = _contiguous_future(
+            items,
+            index,
+            max_horizon,
+        )
         first_touch = next(
             (offset for offset, candle in enumerate(future, start=1) if _touches(event, candle)),
             None,
@@ -232,6 +271,13 @@ def analyze_fvg_quality(
                 zone_size_percent=round(float(zone_percent), 8),
                 signal_price=str(event.signal_price),
                 available_future_bars=len(future),
+                future_gap_after_bars=(len(future) if gap_expected is not None else None),
+                future_gap_expected_open_time=(
+                    gap_expected.isoformat() if gap_expected is not None else None
+                ),
+                future_gap_actual_open_time=(
+                    gap_actual.isoformat() if gap_actual is not None else None
+                ),
                 first_touch_bars=first_touch,
                 full_fill_bars=full_fill,
                 horizons=observations,
@@ -302,6 +348,17 @@ def build_quality_report(
 
     touch_latencies = [item.first_touch_bars for item in items if item.first_touch_bars is not None]
     fill_latencies = [item.full_fill_bars for item in items if item.full_fill_bars is not None]
+    max_horizon = max(horizon_values) if horizon_values else 0
+    gap_truncated = sum(item.future_gap_after_bars is not None for item in items)
+    end_truncated = sum(
+        item.future_gap_after_bars is None
+        and item.available_future_bars < max_horizon
+        for item in items
+    ) if max_horizon else 0
+    complete = sum(
+        item.available_future_bars >= max_horizon
+        for item in items
+    ) if max_horizon else 0
     return {
         "report_type": "fvg_event_quality",
         "pnl_backtest": False,
@@ -318,6 +375,12 @@ def build_quality_report(
         "first_touch_median_bars": _median(touch_latencies),
         "full_fill_median_bars": _median(fill_latencies),
         "horizons": horizon_report,
+        "data_quality": {
+            "max_horizon_bars": max_horizon,
+            "events_with_complete_max_horizon": complete,
+            "events_truncated_by_gap": gap_truncated,
+            "events_truncated_by_end_of_data": end_truncated,
+        },
         "zone_size_buckets": dict(sorted(zone_buckets.items())),
         "monthly_events": dict(sorted(monthly.items())),
     }
@@ -338,6 +401,7 @@ def run_quality_backtest(
         "symbol": symbol.upper(),
         "timeframe": "15m",
         "candles": len(candles),
+        "continuity_gaps": _continuity_gap_count(candles),
         "start": candles[0].open_time.isoformat(),
         "end": candles[-1].close_time.isoformat(),
     }
