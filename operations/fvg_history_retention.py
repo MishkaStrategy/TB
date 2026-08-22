@@ -1,4 +1,4 @@
-"""Opt-in archive-before-delete retention for the runtime FVG event store."""
+"""Verified archive-before-delete retention for the runtime FVG event store."""
 
 from __future__ import annotations
 
@@ -58,6 +58,19 @@ def _set_health(connection, **values):
         """,
         [(str(key), _dump(value)) for key, value in values.items()],
     )
+
+
+def _preserve_history_prune_if_due(self, connection, now: datetime):
+    """Fail closed when archive retention is explicitly disabled.
+
+    The legacy event store contains a delete-only prune implementation. Keeping
+    this no-op override installed is deliberate: an operator may disable archive
+    I/O, but doing so must preserve history rather than silently re-enable
+    destructive deletion.
+    """
+
+    del self, connection, now
+    return None
 
 
 def _archive_prune_if_due(self, connection, now: datetime):
@@ -139,11 +152,31 @@ def configure_fvg_history_retention(
     max_batches: int = FVG_HISTORY_ARCHIVE_MAX_BATCHES,
     archive: FvgHistoryArchive | None = None,
 ) -> bool:
-    """Install one idempotent per-instance prune override before stream startup."""
-    if not enabled:
-        return False
+    """Install an idempotent fail-closed retention policy before stream startup.
+
+    Enabled means archive, verify and only then delete terminal history. Disabled
+    means retain history in the runtime database and perform no pruning. There is
+    intentionally no supported path back to the event store's delete-only prune.
+    """
+
     if getattr(event_store, "_history_archive_configured", False):
         return True
+    if getattr(event_store, "_history_prune_disabled", False):
+        if not enabled:
+            return False
+        event_store._prune_if_due = event_store._history_archive_original_prune
+        event_store._history_prune_disabled = False
+
+    if not hasattr(event_store, "_history_archive_original_prune"):
+        event_store._history_archive_original_prune = event_store._prune_if_due
+
+    if not enabled:
+        event_store._prune_if_due = MethodType(
+            _preserve_history_prune_if_due,
+            event_store,
+        )
+        event_store._history_prune_disabled = True
+        return False
 
     source_path = Path(event_store.path).resolve()
     archive_path = Path(archive_path).resolve()
@@ -156,7 +189,6 @@ def configure_fvg_history_retention(
     )
     event_store._history_retention_days = max(1, int(retention_days))
     event_store._history_archive_max_batches = max(1, int(max_batches))
-    event_store._history_archive_original_prune = event_store._prune_if_due
     event_store._prune_if_due = MethodType(_archive_prune_if_due, event_store)
     event_store._history_archive_configured = True
     return True
