@@ -11,7 +11,6 @@ from alerts.telegram_errors import TelegramDeliveryStatus, TelegramErrorDecision
 
 
 UTC = timezone.utc
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 FINAL_UNAVAILABLE_STATUSES = frozenset(
     {
         TelegramDeliveryStatus.BLOCKED,
@@ -33,10 +32,6 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-def _environment_flag(name: str) -> bool:
-    return str(os.getenv(name, "")).strip().lower() in _TRUE_VALUES
-
-
 class TelegramDeliveryRegistry:
     """Store chat-level Telegram reachability separately from access settings."""
 
@@ -50,8 +45,11 @@ class TelegramDeliveryRegistry:
     ):
         self.path = Path(path) if path is not None else self.DEFAULT_PATH
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Final-unavailable Telegram states are a delivery safety invariant.
+        # Explicit False remains available only for injected compatibility tests;
+        # production callers that omit the argument always suppress old backlog.
         self.discard_outbox_by_default = (
-            _environment_flag("USER_BLOCK_STATUS_ENABLED")
+            True
             if discard_outbox_by_default is None
             else bool(discard_outbox_by_default)
         )
@@ -149,14 +147,43 @@ class TelegramDeliveryRegistry:
         ).fetchone() is not None
 
     @classmethod
-    def _discard_outbox(cls, connection: sqlite3.Connection, chat_id: int | str) -> int:
-        if not cls._table_exists(connection, "outbox"):
-            return 0
-        cursor = connection.execute(
-            "DELETE FROM outbox WHERE chat_id = ?",
-            (str(chat_id),),
-        )
-        return max(cursor.rowcount, 0)
+    def _discard_outbox(
+        cls,
+        connection: sqlite3.Connection,
+        chat_id: int | str,
+        timestamp: str,
+    ) -> int:
+        """Terminalize queued work for a final-unavailable chat.
+
+        Legacy FVG rows can be deleted because they have no explicit terminal
+        state. Outbox V2 rows are retained as cancelled audit evidence. Rows
+        already being processed are left to their worker so we never steal a
+        processing lease or overwrite an in-flight delivery outcome.
+        """
+        discarded = 0
+        if cls._table_exists(connection, "outbox"):
+            cursor = connection.execute(
+                "DELETE FROM outbox WHERE chat_id = ?",
+                (str(chat_id),),
+            )
+            discarded += max(cursor.rowcount, 0)
+
+        if cls._table_exists(connection, "telegram_outbox"):
+            cursor = connection.execute(
+                """
+                UPDATE telegram_outbox
+                SET status='cancelled',
+                    last_error_class='DeliverySuppressed',
+                    last_error_code='delivery_suppressed_inactive_user',
+                    last_error_message='Queued notification cancelled because chat is unavailable',
+                    finalized_at=?,
+                    updated_at=?
+                WHERE chat_id=? AND status IN ('pending', 'retry_scheduled')
+                """,
+                (timestamp, timestamp, str(chat_id)),
+            )
+            discarded += max(cursor.rowcount, 0)
+        return discarded
 
     def record_success(
         self,
@@ -294,7 +321,7 @@ class TelegramDeliveryRegistry:
                 should_discard
                 and decision.delivery_status in FINAL_UNAVAILABLE_STATUSES
             ):
-                discarded = self._discard_outbox(connection, chat_id)
+                discarded = self._discard_outbox(connection, chat_id, timestamp)
             connection.commit()
 
         result = self.profile(chat_id)
@@ -328,6 +355,11 @@ class TelegramDeliveryRegistry:
 
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            # Clean stale backlog before making the profile active. This also
+            # upgrades databases produced by older versions that only deleted
+            # the legacy `outbox` table on a block event.
+            if discard_backlog:
+                discarded = self._discard_outbox(connection, chat_id, timestamp)
             connection.execute(
                 """
                 INSERT INTO telegram_delivery_profiles(
@@ -366,8 +398,6 @@ class TelegramDeliveryRegistry:
                     timestamp,
                 ),
             )
-            if discard_backlog:
-                discarded = self._discard_outbox(connection, chat_id)
             connection.commit()
 
         result = self.profile(chat_id)
