@@ -78,15 +78,15 @@ ADMIN_TELEGRAM_IDS = parse_telegram_ids(
 # enabled explicitly in the environment.
 PUBLIC_ACCESS_ENABLED = parse_bool(os.getenv("PUBLIC_ACCESS_ENABLED"), default=False)
 
-# Delivery changes are additive and remain disabled until explicitly enabled.
+# Delivery diagnostics remain optional, but final-unavailable chat suppression
+# is a product safety invariant. The legacy USER_BLOCK_STATUS_ENABLED env flag
+# is intentionally ignored so existing deployments with `false` cannot keep
+# retrying or replaying notifications to users who blocked/deleted the bot.
 DELIVERY_STATUS_TRACKING_ENABLED = parse_bool(
     os.getenv("DELIVERY_STATUS_TRACKING_ENABLED"),
     default=False,
 )
-USER_BLOCK_STATUS_ENABLED = parse_bool(
-    os.getenv("USER_BLOCK_STATUS_ENABLED"),
-    default=False,
-)
+USER_BLOCK_STATUS_ENABLED = True
 OUTBOX_RETRY_POLICY_ENABLED = parse_bool(
     os.getenv("OUTBOX_RETRY_POLICY_ENABLED"),
     default=False,

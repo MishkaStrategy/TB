@@ -25,17 +25,15 @@ def _flag_enabled(name: str) -> bool:
 
 
 def _delivery_tracking_enabled() -> bool:
-    """Read additive delivery flags without importing optional dotenv.
+    """Keep the funding module stdlib-importable while enforcing safety.
 
-    The funding storage stdlib verification intentionally imports this module
-    before third-party dependencies are installed. Production ``bot.py`` loads
-    ``config`` before creating the service, so values from a local .env are
-    already present in ``os.environ`` when this helper is evaluated.
+    The funding storage verification imports this module before third-party
+    dependencies are installed, so importing ``config`` here is intentionally
+    avoided. Final-unavailable Telegram tracking/suppression is now mandatory;
+    the legacy environment flags only control extra diagnostics elsewhere.
     """
 
-    return _flag_enabled("DELIVERY_STATUS_TRACKING_ENABLED") or _flag_enabled(
-        "USER_BLOCK_STATUS_ENABLED"
-    )
+    return True
 
 
 def _rate(item: dict) -> Decimal | None:
@@ -128,7 +126,7 @@ class MultiFundingAlertService:
         self.loader = loader
         self.delivery_registry = delivery_registry
         self.suppress_unavailable_users = (
-            _flag_enabled("USER_BLOCK_STATUS_ENABLED")
+            True
             if suppress_unavailable_users is None
             else bool(suppress_unavailable_users)
         )

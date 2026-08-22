@@ -12,6 +12,7 @@ from alerts.telegram_errors import (
     classify_telegram_error,
 )
 from database.telegram_delivery import TelegramDeliveryRegistry
+from database.telegram_outbox import OutboxStatus, TelegramOutboxStore
 
 
 class Forbidden(Exception):
@@ -112,6 +113,109 @@ class TelegramDeliveryRegistryTests(unittest.TestCase):
             self.assertTrue(recovered["recovered"])
             self.assertEqual(recovered["status"], TelegramDeliveryStatus.ACTIVE.value)
             self.assertEqual(recovered["consecutive_failures"], 0)
+            self.assertTrue(registry.can_deliver(42))
+
+    def test_blocked_status_cancels_v2_pending_and_retry_backlog(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            store = TelegramOutboxStore(path)
+            pending = store.enqueue(
+                notification_type="fvg",
+                chat_id=42,
+                payload={"text": "old pending"},
+                idempotency_key="blocked-pending",
+            )
+            retrying = store.enqueue(
+                notification_type="fvg",
+                chat_id=42,
+                payload={"text": "old retry"},
+                idempotency_key="blocked-retry",
+            )
+            other = store.enqueue(
+                notification_type="fvg",
+                chat_id=7,
+                payload={"text": "keep"},
+                idempotency_key="other-user",
+            )
+            with closing(sqlite3.connect(path)) as connection:
+                connection.execute(
+                    """
+                    UPDATE telegram_outbox
+                    SET status=?, next_attempt_at='2099-01-01T00:00:00+00:00'
+                    WHERE id=?
+                    """,
+                    (OutboxStatus.RETRY_SCHEDULED.value, retrying["id"]),
+                )
+                connection.commit()
+
+            registry = TelegramDeliveryRegistry(path)
+            decision = classify_telegram_error(
+                Forbidden("Forbidden: bot was blocked by the user")
+            )
+            result = registry.record_failure(42, decision, Forbidden("blocked"))
+
+            self.assertEqual(result["discarded_outbox"], 2)
+            self.assertEqual(
+                store.get(pending["id"])["status"],
+                OutboxStatus.CANCELLED.value,
+            )
+            self.assertEqual(
+                store.get(retrying["id"])["status"],
+                OutboxStatus.CANCELLED.value,
+            )
+            self.assertEqual(
+                store.get(other["id"])["status"],
+                OutboxStatus.PENDING.value,
+            )
+
+            recovered = registry.record_interaction(42, 42)
+            self.assertTrue(recovered["recovered"])
+            self.assertEqual(
+                store.get(pending["id"])["status"],
+                OutboxStatus.CANCELLED.value,
+            )
+            self.assertEqual(
+                store.get(retrying["id"])["status"],
+                OutboxStatus.CANCELLED.value,
+            )
+
+    def test_recovery_cancels_stale_v2_backlog_from_older_version(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "events.sqlite3"
+            store = TelegramOutboxStore(path)
+            legacy_registry = TelegramDeliveryRegistry(
+                path,
+                discard_outbox_by_default=False,
+            )
+            decision = classify_telegram_error(
+                Forbidden("Forbidden: bot was blocked by the user")
+            )
+            legacy_registry.record_failure(
+                42,
+                decision,
+                Forbidden("blocked"),
+                discard_outbox=False,
+            )
+            stale = store.enqueue(
+                notification_type="fvg",
+                chat_id=42,
+                payload={"text": "must never replay"},
+                idempotency_key="legacy-stale-v2",
+            )
+            self.assertEqual(
+                store.get(stale["id"])["status"],
+                OutboxStatus.PENDING.value,
+            )
+
+            registry = TelegramDeliveryRegistry(path)
+            recovered = registry.record_interaction(42, 42)
+
+            self.assertTrue(recovered["recovered"])
+            self.assertEqual(recovered["discarded_outbox"], 1)
+            self.assertEqual(
+                store.get(stale["id"])["status"],
+                OutboxStatus.CANCELLED.value,
+            )
             self.assertTrue(registry.can_deliver(42))
 
     def test_tracking_only_records_status_without_discarding_backlog(self):
