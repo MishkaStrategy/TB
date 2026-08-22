@@ -1,13 +1,28 @@
 # FVG history archive
 
-This stage adds opt-in archive-before-delete retention for old terminal FVG
-events. The default runtime retention remains 90 days and the feature is
-disabled until explicitly rolled out.
+Old terminal FVG history uses verified archive-before-delete retention. Runtime
+retention remains 90 days by default, but destructive delete-only pruning is not
+a supported mode.
+
+## Safety invariant
+
+A historical FVG event may leave runtime SQLite only after it has been copied to
+the archive and verified there. If archive retention cannot run, source history
+is preserved.
+
+The configuration switch controls whether runtime pruning is allowed at all:
+
+- `FVG_HISTORY_ARCHIVE_ENABLED=true` — archive, verify, then delete eligible
+  terminal history from runtime SQLite;
+- `FVG_HISTORY_ARCHIVE_ENABLED=false` — preserve history in runtime SQLite and
+  perform no retention deletion.
+
+`false` never restores the legacy delete-only implementation.
 
 ## Configuration
 
 ```env
-FVG_HISTORY_ARCHIVE_ENABLED=false
+FVG_HISTORY_ARCHIVE_ENABLED=true
 FVG_HISTORY_ARCHIVE_PATH=data/archive/fvg_history.sqlite3
 FVG_HISTORY_RETENTION_DAYS=90
 FVG_HISTORY_ARCHIVE_BATCH_SIZE=500
@@ -21,14 +36,19 @@ portable SQLite parameter limits.
 ## Startup integration
 
 `bot.post_init` configures the existing FVG event-store instance before the
-scheduler and Bitunix stream start.
+scheduler and market streams start.
 
-When the flag is `false`, the original `FvgEventStore._prune_if_due` method is
-untouched and the existing delete-only retention behavior remains active.
-
-When the flag is `true`, only that event-store instance receives an
-archive-aware prune implementation. Detector, filters, recovery, delivery and
+Archive retention is enabled by default. Only that event-store instance receives
+an archive-aware prune implementation. Detector, filters, recovery, delivery and
 statistics APIs are unchanged.
+
+If an existing deployment still carries
+`FVG_HISTORY_ARCHIVE_ENABLED=false`, startup installs a no-prune guard over the
+legacy `FvgEventStore._prune_if_due`. This is deliberately fail-closed: the
+runtime database can grow, but old history cannot be silently destroyed.
+
+Changing the value to `true` on a later restart installs verified
+archive-before-delete retention normally.
 
 ## Archive schema
 
@@ -76,6 +96,9 @@ fails:
 Archive rows committed before a runtime rollback are harmless. The next pass
 uses primary keys to verify/copy them idempotently before retrying deletion.
 
+If archive initialization itself fails during startup, startup must fail rather
+than continue with delete-only retention.
+
 ## Health metrics
 
 Successful passes update:
@@ -89,6 +112,9 @@ Successful passes update:
 
 `fvg_archive_backlog_possible=true` means the final configured batch was full;
 another daily retention pass may still have eligible history to process.
+
+When pruning is explicitly disabled, `last_pruned_at` is not advanced because no
+retention deletion occurred.
 
 ## Backup contract
 
@@ -107,22 +133,29 @@ The archive SQLite is not copied by raw `rsync`.
 A configured archive outside `DATA_DIR` is included at
 `archive/fvg_history.sqlite3` in the backup.
 
-## Rollout
+## Deployment checks
 
-1. Deploy with `FVG_HISTORY_ARCHIVE_ENABLED=false`.
-2. Confirm the archive path has sufficient disk space and is covered by backup.
-3. Enable the flag with the 90-day default.
-4. Restart the bot and confirm the archive file is created with mode `0600`.
-5. Inspect health metrics after the first retention pass.
-6. Verify a runtime backup contains the archive SQLite and passes manifest
-   verification.
-7. Keep batch/max-batch defaults until production archive duration is measured.
+Before enabling pruning on an existing deployment:
+
+1. confirm the archive path has sufficient disk space;
+2. confirm the path is covered by the verified backup contract;
+3. use `FVG_HISTORY_ARCHIVE_ENABLED=true`;
+4. restart the bot and confirm the archive file is created with mode `0600`;
+5. inspect archive health metrics after the first retention pass;
+6. verify a runtime backup contains the archive SQLite and passes manifest
+   verification;
+7. keep batch/max-batch defaults until production archive duration is measured.
+
+A deployment may temporarily use `FVG_HISTORY_ARCHIVE_ENABLED=false` if archive
+I/O must be disabled. In that state old FVG rows remain in runtime SQLite and
+operators must monitor disk growth.
 
 ## Rollback
 
-Set `FVG_HISTORY_ARCHIVE_ENABLED=false` and restart. The existing archive remains
-readable and backed up, while runtime retention returns to the previous
-implementation. No destructive migration is required.
+Set `FVG_HISTORY_ARCHIVE_ENABLED=false` and restart only when preserving all
+runtime history is preferable to archive I/O. The existing archive remains
+readable and backed up. Runtime retention deletion stops completely; it does not
+return to the old destructive implementation.
 
 ## Not included
 
