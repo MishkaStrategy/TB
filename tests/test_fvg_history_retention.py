@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 
 from alerts.sqlite_event_store import FvgEventStore
 from database.fvg_history_archive import FvgHistoryArchive
+from database.fvg_history_config import FVG_HISTORY_ARCHIVE_ENABLED
 from operations.fvg_history_retention import configure_fvg_history_retention
 
 
@@ -31,16 +32,52 @@ def insert_event(connection, event_id: str, detected_at: datetime):
 
 
 class FvgHistoryRetentionTests(unittest.TestCase):
-    def test_disabled_rollout_preserves_original_prune_method(self):
+    def test_archive_retention_is_enabled_by_default(self):
+        self.assertTrue(FVG_HISTORY_ARCHIVE_ENABLED)
+
+    def test_explicit_disable_preserves_old_history_instead_of_direct_delete(self):
         with TemporaryDirectory() as directory:
             store = FvgEventStore(Path(directory) / "runtime.sqlite3")
-            original = store._prune_if_due
+            now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+            with store._connect() as connection:
+                insert_event(connection, "old", now - timedelta(days=100))
 
+            original = store._prune_if_due
             configured = configure_fvg_history_retention(store, enabled=False)
 
             self.assertFalse(configured)
-            self.assertEqual(store._prune_if_due, original)
-            self.assertFalse(hasattr(store, "_history_archive_configured"))
+            self.assertNotEqual(store._prune_if_due, original)
+            self.assertTrue(store._history_prune_disabled)
+            with store._connect() as connection:
+                store._prune_if_due(connection, now)
+                remaining = connection.execute(
+                    "SELECT COUNT(*) FROM events WHERE event_id='old'"
+                ).fetchone()[0]
+            self.assertEqual(remaining, 1)
+            self.assertNotIn("last_pruned_at", store.health())
+
+    def test_disabled_guard_can_be_upgraded_to_verified_archive(self):
+        with TemporaryDirectory() as directory:
+            runtime = Path(directory) / "runtime.sqlite3"
+            archive_path = Path(directory) / "archive.sqlite3"
+            store = FvgEventStore(runtime)
+            now = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
+            with store._connect() as connection:
+                insert_event(connection, "old", now - timedelta(days=100))
+
+            self.assertFalse(configure_fvg_history_retention(store, enabled=False))
+            self.assertTrue(
+                configure_fvg_history_retention(
+                    store,
+                    enabled=True,
+                    archive_path=archive_path,
+                )
+            )
+            with store._connect() as connection:
+                store._prune_if_due(connection, now)
+
+            self.assertEqual(store.health()["events"], 0)
+            self.assertEqual(FvgHistoryArchive(archive_path).summary()["events"], 1)
 
     def test_enabled_retention_archives_and_updates_health(self):
         with TemporaryDirectory() as directory:
