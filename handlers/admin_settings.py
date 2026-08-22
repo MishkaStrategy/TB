@@ -22,6 +22,7 @@ from database.access_control import AccessRegistry
 from database.operations_status import OperationsStatusReader
 from database.runtime_settings import RuntimeSettings
 from database.user_activity import UserActivityRegistry
+from operations.process_restart import request_sigterm_restart
 
 _RUNTIME_SETTINGS = RuntimeSettings()
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -491,12 +492,18 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await query.edit_message_text(text, reply_markup=admin_keyboard())
     elif action == "restart":
         await query.edit_message_text(
-            "♻️ Перезапустить бота?\n\nПроцесс завершится с ошибкой, после чего systemd запустит его снова.",
+            "♻️ Перезапустить бота?\n\nПосле подтверждения бот штатно остановится, а systemd запустит его снова.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✅ Да, перезапустить", callback_data="admin:restart_confirm")],
                 [InlineKeyboardButton("❌ Отмена", callback_data="admin:home")],
             ]),
         )
     elif action == "restart_confirm":
-        await query.edit_message_text("♻️ Бот перезапускается…")
-        asyncio.get_running_loop().call_later(1.0, lambda: os._exit(1))
+        await query.edit_message_text("♻️ Бот завершает работу для перезапуска…")
+        try:
+            request_sigterm_restart()
+        except OSError as error:
+            await query.edit_message_text(
+                f"⚠️ Не удалось запросить перезапуск.\n\n{error}",
+                reply_markup=admin_keyboard(),
+            )
