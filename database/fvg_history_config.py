@@ -1,13 +1,16 @@
-"""Environment-backed FVG history archive rollout settings."""
+"""Environment-backed FVG history retention settings."""
 
 import os
 
 from config import parse_bool, parse_positive_int
 
 
+# Historical FVG data must never fall back to delete-only retention. Archive
+# retention is therefore the safe default. An explicit false value means
+# "preserve runtime history without pruning", not "delete without archive".
 FVG_HISTORY_ARCHIVE_ENABLED = parse_bool(
     os.getenv("FVG_HISTORY_ARCHIVE_ENABLED"),
-    default=False,
+    default=True,
 )
 FVG_HISTORY_ARCHIVE_PATH = os.getenv(
     "FVG_HISTORY_ARCHIVE_PATH",
